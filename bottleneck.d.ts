@@ -92,7 +92,11 @@ declare module "bottleneck" {
         /**
           * The Redis TTL in milliseconds for the keys created by the limiter. When `timeout` is set, the limiter's state will be automatically removed from Redis after timeout milliseconds of inactivity. Note: timeout is 300000 (5 minutes) by default when using a Group.
           */
-          readonly timeout?: number | null;
+        readonly timeout?: number | null;
+        /**
+          * Every `heartbeatInterval` milliseconds, the `reservoir` is assessed.
+          */
+        readonly heartbeatInterval?: number | null;
     };
     type JobOptions = {
         /**
