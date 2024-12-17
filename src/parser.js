@@ -6,8 +6,10 @@
  * DS207: Consider shorter variations of null checks
  * Full docs: https://github.com/decaffeinate/decaffeinate/blob/main/docs/suggestions.md
  */
-exports.load = function(received, defaults, onto) {
-  if (onto == null) { onto = {}; }
+exports.load = function (received, defaults, onto) {
+  if (onto == null) {
+    onto = {};
+  }
   for (var k in defaults) {
     var v = defaults[k];
     onto[k] = received[k] != null ? received[k] : v;
@@ -15,8 +17,10 @@ exports.load = function(received, defaults, onto) {
   return onto;
 };
 
-exports.overwrite = function(received, defaults, onto) {
-  if (onto == null) { onto = {}; }
+exports.overwrite = function (received, defaults, onto) {
+  if (onto == null) {
+    onto = {};
+  }
   for (var k in received) {
     var v = received[k];
     if (defaults[k] !== undefined) {

@@ -18,12 +18,14 @@ class Batcher {
     this.prototype.defaults = {
       maxTime: null,
       maxSize: null,
-      Promise
+      Promise,
     };
   }
 
   constructor(options) {
-    if (options == null) { options = {}; }
+    if (options == null) {
+      options = {};
+    }
     this.options = options;
     parser.load(this.options, this.defaults, this);
     this.Events = new Events(this);
@@ -33,7 +35,9 @@ class Batcher {
   }
 
   _resetPromise() {
-    return this._promise = new this.Promise((res, rej) => { return this._resolve = res; });
+    return (this._promise = new this.Promise((res, rej) => {
+      return (this._resolve = res);
+    }));
   }
 
   _flush() {
@@ -50,11 +54,10 @@ class Batcher {
     const ret = this._promise;
     if (this._arr.length === this.maxSize) {
       this._flush();
-    } else if ((this.maxTime != null) && (this._arr.length === 1)) {
+    } else if (this.maxTime != null && this._arr.length === 1) {
       this._timeout = setTimeout(() => {
         return this._flush();
-      }
-      , this.maxTime);
+      }, this.maxTime);
     }
     return ret;
   }

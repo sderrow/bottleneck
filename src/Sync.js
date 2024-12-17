@@ -19,17 +19,21 @@ class Sync {
     this._running = 0;
     this._queue = new DLList();
   }
-  isEmpty() { return this._queue.length === 0; }
+  isEmpty() {
+    return this._queue.length === 0;
+  }
   _tryToRun() {
-    if ((this._running < 1) && (this._queue.length > 0)) {
+    if (this._running < 1 && this._queue.length > 0) {
       this._running++;
       const { task, args, resolve, reject } = this._queue.shift();
-      const cb = (() => { try {
-        const returned = await(task(...Array.from(args || [])));
-        return () => resolve(returned);
-      } catch (error) {
-        return () => reject(error);
-      } })();
+      const cb = (() => {
+        try {
+          const returned = await(task(...Array.from(args || [])));
+          return () => resolve(returned);
+        } catch (error) {
+          return () => reject(error);
+        }
+      })();
       this._running--;
       this._tryToRun();
       return cb();
@@ -38,9 +42,9 @@ class Sync {
   schedule(task, ...args) {
     let reject;
     let resolve = (reject = null);
-    const promise = new this.Promise(function(_resolve, _reject) {
+    const promise = new this.Promise(function (_resolve, _reject) {
       resolve = _resolve;
-      return reject = _reject;
+      return (reject = _reject);
     });
     this._queue.push({ task, args, resolve, reject });
     this._tryToRun();

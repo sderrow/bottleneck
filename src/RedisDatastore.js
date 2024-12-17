@@ -27,28 +27,51 @@ class RedisDatastore {
     parser.load(storeInstanceOptions, storeInstanceOptions, this);
     this.clients = {};
     this.capacityPriorityCounters = {};
-    this.sharedConnection = (this.connection != null);
+    this.sharedConnection = this.connection != null;
 
-    if (this.connection == null) { this.connection = (() => {
-      if (this.instance.datastore === "redis") { return new RedisConnection({ Redis: this.Redis, clientOptions: this.clientOptions, Promise: this.Promise, Events: this.instance.Events });
-    } else if (this.instance.datastore === "ioredis") { return new IORedisConnection({ Redis: this.Redis, clientOptions: this.clientOptions, clusterNodes: this.clusterNodes, Promise: this.Promise, Events: this.instance.Events }); }
-    })(); }
+    if (this.connection == null) {
+      this.connection = (() => {
+        if (this.instance.datastore === "redis") {
+          return new RedisConnection({
+            Redis: this.Redis,
+            clientOptions: this.clientOptions,
+            Promise: this.Promise,
+            Events: this.instance.Events,
+          });
+        } else if (this.instance.datastore === "ioredis") {
+          return new IORedisConnection({
+            Redis: this.Redis,
+            clientOptions: this.clientOptions,
+            clusterNodes: this.clusterNodes,
+            Promise: this.Promise,
+            Events: this.instance.Events,
+          });
+        }
+      })();
+    }
 
     this.instance.connection = this.connection;
     this.instance.datastore = this.connection.datastore;
 
     this.ready = this.connection.ready
-    .then(clients => { this.clients = clients; return this.runScript("init", this.prepareInitSettings(this.clearDatastore)); })
-    .then(() => this.connection.__addLimiter__(this.instance))
-    .then(() => this.runScript("register_client", [this.instance.queued()]))
-    .then(() => {
-      __guardMethod__((this.heartbeat = setInterval(() => {
-        return this.runScript("heartbeat", [])
-        .catch(e => this.instance.Events.trigger("error", e));
-      }
-      , this.heartbeatInterval)), 'unref', o => o.unref());
-      return this.clients;
-    });
+      .then((clients) => {
+        this.clients = clients;
+        return this.runScript("init", this.prepareInitSettings(this.clearDatastore));
+      })
+      .then(() => this.connection.__addLimiter__(this.instance))
+      .then(() => this.runScript("register_client", [this.instance.queued()]))
+      .then(() => {
+        __guardMethod__(
+          (this.heartbeat = setInterval(() => {
+            return this.runScript("heartbeat", []).catch((e) =>
+              this.instance.Events.trigger("error", e),
+            );
+          }, this.heartbeatInterval)),
+          "unref",
+          (o) => o.unref(),
+        );
+        return this.clients;
+      });
   }
 
   __publish__(message) {
@@ -59,7 +82,7 @@ class RedisDatastore {
   onMessage(channel, message) {
     try {
       const pos = message.indexOf(":");
-      const [type, data] = Array.from([message.slice(0, pos), message.slice(pos+1)]);
+      const [type, data] = Array.from([message.slice(0, pos), message.slice(pos + 1)]);
       if (type === "capacity") {
         return await(this.instance._drainAll(data.length > 0 ? ~~data : undefined));
       } else if (type === "capacity-priority") {
@@ -67,28 +90,37 @@ class RedisDatastore {
         const capacity = rawCapacity.length > 0 ? ~~rawCapacity : undefined;
         if (priorityClient === this.clientId) {
           const drained = await(this.instance._drainAll(capacity));
-          const newCapacity = (capacity != null) ? capacity - (drained || 0) : "";
-          return await(this.clients.client.publish(this.instance.channel(), `capacity-priority:${newCapacity}::${counter}`));
+          const newCapacity = capacity != null ? capacity - (drained || 0) : "";
+          return await(
+            this.clients.client.publish(
+              this.instance.channel(),
+              `capacity-priority:${newCapacity}::${counter}`,
+            ),
+          );
         } else if (priorityClient === "") {
           clearTimeout(this.capacityPriorityCounters[counter]);
           delete this.capacityPriorityCounters[counter];
           return this.instance._drainAll(capacity);
         } else {
-          return this.capacityPriorityCounters[counter] = setTimeout(() => {
+          return (this.capacityPriorityCounters[counter] = setTimeout(() => {
             try {
               delete this.capacityPriorityCounters[counter];
               await(this.runScript("blacklist_client", [priorityClient]));
               return await(this.instance._drainAll(capacity));
-            } catch (e) { return this.instance.Events.trigger("error", e); }
-          }
-          , 1000);
+            } catch (e) {
+              return this.instance.Events.trigger("error", e);
+            }
+          }, 1000));
         }
       } else if (type === "message") {
         return this.instance.Events.trigger("message", data);
       } else if (type === "blocked") {
         return await(this.instance._dropAllQueued());
       }
-    } catch (error) { const e = error; return this.instance.Events.trigger("error", e); }
+    } catch (error) {
+      const e = error;
+      return this.instance.Events.trigger("error", e);
+    }
   }
 
   __disconnect__(flush) {
@@ -101,92 +133,140 @@ class RedisDatastore {
   }
 
   runScript(name, args) {
-    if ((name !== "init") && (name !== "register_client")) { await(this.ready); }
+    if (name !== "init" && name !== "register_client") {
+      await(this.ready);
+    }
     return new this.Promise((resolve, reject) => {
       const all_args = [Date.now(), this.clientId].concat(args);
       this.instance.Events.trigger("debug", `Calling Redis script: ${name}.lua`, all_args);
-      const arr = this.connection.__scriptArgs__(name, this.originalId, all_args, function(err, replies) {
-        if (err != null) { return reject(err); }
-        return resolve(replies);
-      });
+      const arr = this.connection.__scriptArgs__(
+        name,
+        this.originalId,
+        all_args,
+        function (err, replies) {
+          if (err != null) {
+            return reject(err);
+          }
+          return resolve(replies);
+        },
+      );
       return this.connection.__scriptFn__(name)(...Array.from(arr || []));
-  }).catch(e => {
-      if ((typeof e.message === "string") && (e.message.match(/^(.*\s)?SETTINGS_KEY_NOT_FOUND$/) !== null)) {
-        if (name === "heartbeat") { return this.Promise.resolve();
+    }).catch((e) => {
+      if (
+        typeof e.message === "string" &&
+        e.message.match(/^(.*\s)?SETTINGS_KEY_NOT_FOUND$/) !== null
+      ) {
+        if (name === "heartbeat") {
+          return this.Promise.resolve();
         } else {
-          return this.runScript("init", this.prepareInitSettings(false))
-          .then(() => this.runScript(name, args));
+          return this.runScript("init", this.prepareInitSettings(false)).then(() =>
+            this.runScript(name, args),
+          );
         }
-      } else if ((typeof e.message === "string") && (e.message.match(/^(.*\s)?UNKNOWN_CLIENT$/) !== null)) {
-        return this.runScript("register_client", [this.instance.queued()])
-        .then(() => this.runScript(name, args));
-      } else { return this.Promise.reject(e); }
+      } else if (
+        typeof e.message === "string" &&
+        e.message.match(/^(.*\s)?UNKNOWN_CLIENT$/) !== null
+      ) {
+        return this.runScript("register_client", [this.instance.queued()]).then(() =>
+          this.runScript(name, args),
+        );
+      } else {
+        return this.Promise.reject(e);
+      }
     });
   }
 
-  prepareArray(arr) { return Array.from(arr).map((x) => ((x != null) ? x.toString() : "")); }
+  prepareArray(arr) {
+    return Array.from(arr).map((x) => (x != null ? x.toString() : ""));
+  }
 
   prepareObject(obj) {
     const arr = [];
-    for (var k in obj) { var v = obj[k]; arr.push(k, ((v != null) ? v.toString() : "")); }
+    for (var k in obj) {
+      var v = obj[k];
+      arr.push(k, v != null ? v.toString() : "");
+    }
     return arr;
   }
 
   prepareInitSettings(clear) {
-    const args = this.prepareObject(Object.assign({}, this.storeOptions, {
-      id: this.originalId,
-      version: this.instance.version,
-      groupTimeout: this.timeout,
-      clientTimeout: this.clientTimeout
-    })
+    const args = this.prepareObject(
+      Object.assign({}, this.storeOptions, {
+        id: this.originalId,
+        version: this.instance.version,
+        groupTimeout: this.timeout,
+        clientTimeout: this.clientTimeout,
+      }),
     );
-    args.unshift((clear ? 1 : 0), this.instance.version);
+    args.unshift(clear ? 1 : 0, this.instance.version);
     return args;
   }
 
-  convertBool(b) { return !!b; }
+  convertBool(b) {
+    return !!b;
+  }
 
   __updateSettings__(options) {
     await(this.runScript("update_settings", this.prepareObject(options)));
     return parser.overwrite(options, options, this.storeOptions);
   }
 
-  __running__() { return this.runScript("running", []); }
+  __running__() {
+    return this.runScript("running", []);
+  }
 
-  __queued__() { return this.runScript("queued", []); }
+  __queued__() {
+    return this.runScript("queued", []);
+  }
 
-  __done__() { return this.runScript("done", []); }
+  __done__() {
+    return this.runScript("done", []);
+  }
 
-  __groupCheck__() { return this.convertBool(await(this.runScript("group_check", []))); }
+  __groupCheck__() {
+    return this.convertBool(await(this.runScript("group_check", [])));
+  }
 
-  __incrementReservoir__(incr) { return this.runScript("increment_reservoir", [incr]); }
+  __incrementReservoir__(incr) {
+    return this.runScript("increment_reservoir", [incr]);
+  }
 
-  __currentReservoir__() { return this.runScript("current_reservoir", []); }
+  __currentReservoir__() {
+    return this.runScript("current_reservoir", []);
+  }
 
-  __check__(weight) { return this.convertBool(await(this.runScript("check", this.prepareArray([weight])))); }
+  __check__(weight) {
+    return this.convertBool(await(this.runScript("check", this.prepareArray([weight]))));
+  }
 
   __register__(index, weight, expiration) {
-    const [success, wait, reservoir] = Array.from(await(this.runScript("register", this.prepareArray([index, weight, expiration]))));
+    const [success, wait, reservoir] = Array.from(
+      await(this.runScript("register", this.prepareArray([index, weight, expiration]))),
+    );
     return {
       success: this.convertBool(success),
       wait,
-      reservoir
+      reservoir,
     };
   }
 
   __submit__(queueLength, weight) {
     try {
-      const [reachedHWM, blocked, strategy] = Array.from(await(this.runScript("submit", this.prepareArray([queueLength, weight]))));
+      const [reachedHWM, blocked, strategy] = Array.from(
+        await(this.runScript("submit", this.prepareArray([queueLength, weight]))),
+      );
       return {
         reachedHWM: this.convertBool(reachedHWM),
         blocked: this.convertBool(blocked),
-        strategy
+        strategy,
       };
     } catch (e) {
       if (e.message.indexOf("OVERWEIGHT") === 0) {
         let maxConcurrent, overweight;
         [overweight, weight, maxConcurrent] = Array.from(e.message.split(":"));
-        throw new BottleneckError(`Impossible to add a job having a weight of ${weight} to a limiter having a maxConcurrent setting of ${maxConcurrent}`);
+        throw new BottleneckError(
+          `Impossible to add a job having a weight of ${weight} to a limiter having a maxConcurrent setting of ${maxConcurrent}`,
+        );
       } else {
         throw e;
       }
@@ -202,7 +282,7 @@ class RedisDatastore {
 module.exports = RedisDatastore;
 
 function __guardMethod__(obj, methodName, transform) {
-  if (typeof obj !== 'undefined' && obj !== null && typeof obj[methodName] === 'function') {
+  if (typeof obj !== "undefined" && obj !== null && typeof obj[methodName] === "function") {
     return transform(obj, methodName);
   } else {
     return undefined;

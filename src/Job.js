@@ -27,33 +27,47 @@ class Job {
     this.Promise = Promise;
     this.options = parser.load(options, jobDefaults);
     this.options.priority = this._sanitizePriority(this.options.priority);
-    if (this.options.id === jobDefaults.id) { this.options.id = `${this.options.id}-${this._randomIndex()}`; }
+    if (this.options.id === jobDefaults.id) {
+      this.options.id = `${this.options.id}-${this._randomIndex()}`;
+    }
     this.promise = new this.Promise((_resolve, _reject) => {
       this._resolve = _resolve;
       this._reject = _reject;
-      
-  });
+    });
     this.retryCount = 0;
   }
 
   _sanitizePriority(priority) {
     const sProperty = ~~priority !== priority ? DEFAULT_PRIORITY : priority;
-    if (sProperty < 0) { return 0; } else if (sProperty > (NUM_PRIORITIES-1)) { return NUM_PRIORITIES-1; } else { return sProperty; }
+    if (sProperty < 0) {
+      return 0;
+    } else if (sProperty > NUM_PRIORITIES - 1) {
+      return NUM_PRIORITIES - 1;
+    } else {
+      return sProperty;
+    }
   }
 
-  _randomIndex() { return Math.random().toString(36).slice(2); }
+  _randomIndex() {
+    return Math.random().toString(36).slice(2);
+  }
 
   doDrop(...args) {
     const val = args[0],
-          obj = val != null ? val : {},
-          {
-            error
-          } = obj,
-          val1 = obj.message,
-          message = val1 != null ? val1 : "This job has been dropped by Bottleneck";
+      obj = val != null ? val : {},
+      { error } = obj,
+      val1 = obj.message,
+      message = val1 != null ? val1 : "This job has been dropped by Bottleneck";
     if (this._states.remove(this.options.id)) {
-      if (this.rejectOnDrop) { this._reject((error != null ? error : new BottleneckError(message))); }
-      this.Events.trigger("dropped", { args: this.args, options: this.options, task: this.task, promise: this.promise });
+      if (this.rejectOnDrop) {
+        this._reject(error != null ? error : new BottleneckError(message));
+      }
+      this.Events.trigger("dropped", {
+        args: this.args,
+        options: this.options,
+        task: this.task,
+        promise: this.promise,
+      });
       return true;
     } else {
       return false;
@@ -62,8 +76,10 @@ class Job {
 
   _assertStatus(expected) {
     const status = this._states.jobStatus(this.options.id);
-    if (!((status === expected) || ((expected === "DONE") && (status === null)))) {
-      throw new BottleneckError(`Invalid job status ${status}, expected ${expected}. Please open an issue at https://github.com/SGrondin/bottleneck/issues`);
+    if (!(status === expected || (expected === "DONE" && status === null))) {
+      throw new BottleneckError(
+        `Invalid job status ${status}, expected ${expected}. Please open an issue at https://github.com/SGrondin/bottleneck/issues`,
+      );
     }
   }
 
@@ -75,14 +91,21 @@ class Job {
   doQueue(reachedHWM, blocked) {
     this._assertStatus("RECEIVED");
     this._states.next(this.options.id);
-    return this.Events.trigger("queued", { args: this.args, options: this.options, reachedHWM, blocked });
+    return this.Events.trigger("queued", {
+      args: this.args,
+      options: this.options,
+      reachedHWM,
+      blocked,
+    });
   }
 
   doRun() {
     if (this.retryCount === 0) {
       this._assertStatus("QUEUED");
       this._states.next(this.options.id);
-    } else { this._assertStatus("EXECUTING"); }
+    } else {
+      this._assertStatus("EXECUTING");
+    }
     return this.Events.trigger("scheduled", { args: this.args, options: this.options });
   }
 
@@ -90,14 +113,17 @@ class Job {
     if (this.retryCount === 0) {
       this._assertStatus("RUNNING");
       this._states.next(this.options.id);
-    } else { this._assertStatus("EXECUTING"); }
+    } else {
+      this._assertStatus("EXECUTING");
+    }
     const eventInfo = { args: this.args, options: this.options, retryCount: this.retryCount };
     this.Events.trigger("executing", eventInfo);
 
     try {
-      const passed = await((chained != null) ?
-        chained.schedule(this.options, this.task, ...Array.from(this.args))
-      : this.task(...Array.from(this.args || []))
+      const passed = await(
+        chained != null
+          ? chained.schedule(this.options, this.task, ...Array.from(this.args))
+          : this.task(...Array.from(this.args || [])),
       );
 
       if (clearGlobalState()) {
@@ -126,7 +152,11 @@ class Job {
       const retry = await(this.Events.trigger("failed", error, eventInfo));
       if (retry != null) {
         const retryAfter = ~~retry;
-        this.Events.trigger("retry", `Retrying ${this.options.id} after ${retryAfter} ms`, eventInfo);
+        this.Events.trigger(
+          "retry",
+          `Retrying ${this.options.id} after ${retryAfter} ms`,
+          eventInfo,
+        );
         this.retryCount++;
         return run(retryAfter);
       } else {

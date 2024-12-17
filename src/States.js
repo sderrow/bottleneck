@@ -18,7 +18,7 @@ class States {
   next(id) {
     const current = this._jobs[id];
     const next = current + 1;
-    if ((current != null) && (next < this.status.length)) {
+    if (current != null && next < this.status.length) {
       this.counts[current]--;
       this.counts[next]++;
       return this._jobs[id]++;
@@ -40,16 +40,18 @@ class States {
       this.counts[current]--;
       delete this._jobs[id];
     }
-    return (current != null);
+    return current != null;
   }
 
-  jobStatus(id) { return this.status[this._jobs[id]] != null ? this.status[this._jobs[id]] : null; }
+  jobStatus(id) {
+    return this.status[this._jobs[id]] != null ? this.status[this._jobs[id]] : null;
+  }
 
   statusJobs(status) {
     if (status != null) {
       const pos = this.status.indexOf(status);
       if (pos < 0) {
-        throw new BottleneckError(`status must be one of ${this.status.join(', ')}`);
+        throw new BottleneckError(`status must be one of ${this.status.join(", ")}`);
       }
       return (() => {
         const result = [];
@@ -66,7 +68,12 @@ class States {
     }
   }
 
-  statusCounts() { return this.counts.reduce(((acc, v, i) => { acc[this.status[i]] = v; return acc; }), {}); }
+  statusCounts() {
+    return this.counts.reduce((acc, v, i) => {
+      acc[this.status[i]] = v;
+      return acc;
+    }, {});
+  }
 }
 
 module.exports = States;

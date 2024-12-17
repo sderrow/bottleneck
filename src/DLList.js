@@ -17,27 +17,28 @@ class DLList {
   }
   push(value) {
     this.length++;
-    if (typeof this.incr === 'function') {
+    if (typeof this.incr === "function") {
       this.incr();
     }
     const node = { value, prev: this._last, next: null };
     if (this._last != null) {
       this._last.next = node;
       this._last = node;
-    } else { this._first = (this._last = node); }
+    } else {
+      this._first = this._last = node;
+    }
     return undefined;
   }
   shift() {
-    if ((this._first == null)) { return;
+    if (this._first == null) {
+      return;
     } else {
       this.length--;
-      if (typeof this.decr === 'function') {
+      if (typeof this.decr === "function") {
         this.decr();
       }
     }
-    const {
-      value
-    } = this._first;
+    const { value } = this._first;
     if ((this._first = this._first.next) != null) {
       this._first.prev = null;
     } else {
@@ -45,7 +46,11 @@ class DLList {
     }
     return value;
   }
-  first() { if (this._first != null) { return this._first.value; } }
+  first() {
+    if (this._first != null) {
+      return this._first.value;
+    }
+  }
   getArray() {
     let node = this._first;
     return (() => {
@@ -59,7 +64,10 @@ class DLList {
   }
   forEachShift(cb) {
     let node = this.shift();
-    while (node != null) { cb(node); node = this.shift(); }
+    while (node != null) {
+      cb(node);
+      node = this.shift();
+    }
     return undefined;
   }
   debug() {
@@ -68,7 +76,15 @@ class DLList {
       const result = [];
       while (node != null) {
         var ref;
-        result.push(((ref = node), (node = node.next), { value: ref.value, prev: (ref.prev != null ? ref.prev.value : undefined), next: (ref.next != null ? ref.next.value : undefined) }));
+        result.push(
+          ((ref = node),
+          (node = node.next),
+          {
+            value: ref.value,
+            prev: ref.prev != null ? ref.prev.value : undefined,
+            next: ref.next != null ? ref.next.value : undefined,
+          }),
+        );
       }
       return result;
     })();

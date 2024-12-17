@@ -1,3 +1,3 @@
-const packagejson = require('../package.json')
+const packagejson = require("../package.json");
 
-console.log(JSON.stringify({version: packagejson.version}))
+console.log(JSON.stringify({ version: packagejson.version }));

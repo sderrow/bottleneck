@@ -1,142 +1,149 @@
-global.TEST = true
-var Bottleneck = require('./bottleneck')
-var assert = require('assert')
+global.TEST = true;
+var Bottleneck = require("./bottleneck");
+var assert = require("assert");
 
-module.exports = function (options={}) {
+module.exports = function (options = {}) {
   var mustEqual = function (a, b) {
-    var strA = JSON.stringify(a)
-    var strB = JSON.stringify(b)
+    var strA = JSON.stringify(a);
+    var strB = JSON.stringify(b);
     if (strA !== strB) {
-      console.log(strA + ' !== ' + strB, (new Error('').stack))
-      assert(strA === strB)
+      console.log(strA + " !== " + strB, new Error("").stack);
+      assert(strA === strB);
     }
-  }
+  };
 
-  var start
-  var calls = []
+  var start;
+  var calls = [];
 
   // set options.datastore
   var setRedisClientOptions = function (options) {
-    options.clearDatastore = true
+    options.clearDatastore = true;
     if (options.clientOptions == null) {
       options.clientOptions = {
         host: process.env.REDIS_HOST,
         port: process.env.REDIS_PORT,
-      }
+      };
     }
-  }
+  };
 
-  if (options.datastore == null && process.env.DATASTORE === 'redis') {
-    options.datastore = 'redis'
-    setRedisClientOptions(options)
-  } else if (options.datastore == null && process.env.DATASTORE === 'ioredis') {
-    options.datastore = 'ioredis'
-    setRedisClientOptions(options)
+  if (options.datastore == null && process.env.DATASTORE === "redis") {
+    options.datastore = "redis";
+    setRedisClientOptions(options);
+  } else if (options.datastore == null && process.env.DATASTORE === "ioredis") {
+    options.datastore = "ioredis";
+    setRedisClientOptions(options);
   } else {
-    options.datastore = 'local'
+    options.datastore = "local";
   }
 
-  var limiter = new Bottleneck(options)
+  var limiter = new Bottleneck(options);
   // limiter.on("debug", function (str, args) { console.log(`${Date.now()-start} ${str} ${JSON.stringify(args)}`) })
   if (!options.errorEventsExpected) {
     limiter.on("error", function (err) {
-      console.log('(CONTEXT) ERROR EVENT', err)
-    })
+      console.log("(CONTEXT) ERROR EVENT", err);
+    });
   }
   limiter.ready().then(function (client) {
-    start = Date.now()
-  })
+    start = Date.now();
+  });
   var getResults = function () {
     return {
       elapsed: Date.now() - start,
       callsDuration: calls.length > 0 ? calls[calls.length - 1].time : null,
-      calls: calls
-    }
-  }
+      calls: calls,
+    };
+  };
 
   var context = {
     job: function (err, ...result) {
-      var cb = result.pop()
-      calls.push({err: err, result: result, time: Date.now()-start})
-      if (process.env.DEBUG) console.log(result, calls)
-      cb.apply({}, [err].concat(result))
+      var cb = result.pop();
+      calls.push({ err: err, result: result, time: Date.now() - start });
+      if (process.env.DEBUG) console.log(result, calls);
+      cb.apply({}, [err].concat(result));
     },
     slowJob: function (duration, err, ...result) {
       setTimeout(function () {
-        var cb = result.pop()
-        calls.push({err: err, result: result, time: Date.now()-start})
-        if (process.env.DEBUG) console.log(result, calls)
-        cb.apply({}, [err].concat(result))
-      }, duration)
+        var cb = result.pop();
+        calls.push({ err: err, result: result, time: Date.now() - start });
+        if (process.env.DEBUG) console.log(result, calls);
+        cb.apply({}, [err].concat(result));
+      }, duration);
     },
     promise: function (err, ...result) {
       return new Promise(function (resolve, reject) {
-        if (process.env.DEBUG) console.log('In c.promise. Result: ', result)
-        calls.push({err: err, result: result, time: Date.now()-start})
-        if (process.env.DEBUG) console.log(result, calls)
+        if (process.env.DEBUG) console.log("In c.promise. Result: ", result);
+        calls.push({ err: err, result: result, time: Date.now() - start });
+        if (process.env.DEBUG) console.log(result, calls);
         if (err === null) {
-          return resolve(result)
+          return resolve(result);
         } else {
-          return reject(err)
+          return reject(err);
         }
-      })
+      });
     },
     slowPromise: function (duration, err, ...result) {
       return new Promise(function (resolve, reject) {
         setTimeout(function () {
-          if (process.env.DEBUG) console.log('In c.slowPromise. Result: ', result)
-          calls.push({err: err, result: result, time: Date.now()-start})
-          if (process.env.DEBUG) console.log(result, calls)
+          if (process.env.DEBUG) console.log("In c.slowPromise. Result: ", result);
+          calls.push({ err: err, result: result, time: Date.now() - start });
+          if (process.env.DEBUG) console.log(result, calls);
           if (err === null) {
-            return resolve(result)
+            return resolve(result);
           } else {
-            return reject(err)
+            return reject(err);
           }
-        }, duration)
-      })
+        }, duration);
+      });
     },
     pNoErrVal: function (promise, ...expected) {
-      if (process.env.DEBUG) console.log('In c.pNoErrVal. Expected:', expected)
+      if (process.env.DEBUG) console.log("In c.pNoErrVal. Expected:", expected);
       return promise.then(function (actual) {
-        mustEqual(actual, expected)
-      })
+        mustEqual(actual, expected);
+      });
     },
     noErrVal: function (...expected) {
       return function (err, ...actual) {
-        mustEqual(err, null)
-        mustEqual(actual, expected)
-      }
+        mustEqual(err, null);
+        mustEqual(actual, expected);
+      };
     },
     last: function (options) {
-      var opt = options != null ? options : {}
-      return limiter.schedule(opt, function () { return Promise.resolve(getResults()) })
-      .catch(function (err) { console.error("Error in context.last:", err)})
+      var opt = options != null ? options : {};
+      return limiter
+        .schedule(opt, function () {
+          return Promise.resolve(getResults());
+        })
+        .catch(function (err) {
+          console.error("Error in context.last:", err);
+        });
     },
     wait: function (wait) {
       return new Promise(function (resolve, reject) {
-        setTimeout(resolve, wait)
-      })
+        setTimeout(resolve, wait);
+      });
     },
     limiter: limiter,
     mustEqual: mustEqual,
-    mustExist: function (a) { assert(a != null) },
+    mustExist: function (a) {
+      assert(a != null);
+    },
     results: getResults,
     checkResultsOrder: function (order) {
-      mustEqual(order.length, calls.length)
+      mustEqual(order.length, calls.length);
       for (var i = 0; i < Math.max(calls.length, order.length); i++) {
-        mustEqual(order[i], calls[i].result)
+        mustEqual(order[i], calls[i].result);
       }
     },
     checkDuration: function (shouldBe, minBound = 10) {
-      var results = getResults()
-      var min = shouldBe - minBound
-      var max = shouldBe + 50
+      var results = getResults();
+      var min = shouldBe - minBound;
+      var max = shouldBe + 50;
       if (!(results.callsDuration > min && results.callsDuration < max)) {
-        console.error('Duration not around ' + shouldBe + '. Was ' + results.callsDuration)
+        console.error("Duration not around " + shouldBe + ". Was " + results.callsDuration);
       }
-      assert(results.callsDuration > min && results.callsDuration < max)
-    }
-  }
+      assert(results.callsDuration > min && results.callsDuration < max);
+    },
+  };
 
-  return context
-}
+  return context;
+};

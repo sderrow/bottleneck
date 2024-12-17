@@ -26,74 +26,97 @@ class IORedisConnection {
       clusterNodes: null,
       client: null,
       Promise,
-      Events: null
+      Events: null,
     };
   }
 
   constructor(options) {
-    if (options == null) { options = {}; }
+    if (options == null) {
+      options = {};
+    }
     parser.load(options, this.defaults, this);
-    if (this.Redis == null) { this.Redis = eval("require")("ioredis"); } // Obfuscated or else Webpack/Angular will try to inline the optional ioredis module. To override this behavior: pass the ioredis module to Bottleneck as the 'Redis' option.
-    if (this.Events == null) { this.Events = new Events(this); }
+    if (this.Redis == null) {
+      this.Redis = eval("require")("ioredis");
+    } // Obfuscated or else Webpack/Angular will try to inline the optional ioredis module. To override this behavior: pass the ioredis module to Bottleneck as the 'Redis' option.
+    if (this.Events == null) {
+      this.Events = new Events(this);
+    }
     this.terminated = false;
 
     if (this.clusterNodes != null) {
       this.client = new this.Redis.Cluster(this.clusterNodes, this.clientOptions);
       this.subscriber = new this.Redis.Cluster(this.clusterNodes, this.clientOptions);
-    } else if ((this.client != null) && (this.client.duplicate == null)) {
+    } else if (this.client != null && this.client.duplicate == null) {
       this.subscriber = new this.Redis.Cluster(this.client.startupNodes, this.client.options);
     } else {
-      if (this.client == null) { this.client = new this.Redis(this.clientOptions); }
+      if (this.client == null) {
+        this.client = new this.Redis(this.clientOptions);
+      }
       this.subscriber = this.client.duplicate();
     }
     this.limiters = {};
 
-    this.ready = this.Promise.all([this._setup(this.client, false), this._setup(this.subscriber, true)])
-    .then(() => {
+    this.ready = this.Promise.all([
+      this._setup(this.client, false),
+      this._setup(this.subscriber, true),
+    ]).then(() => {
       this._loadScripts();
       return { client: this.client, subscriber: this.subscriber };
-  });
+    });
   }
 
   _setup(client, sub) {
     client.setMaxListeners(0);
     return new this.Promise((resolve, reject) => {
-      client.on("error", e => this.Events.trigger("error", e));
+      client.on("error", (e) => this.Events.trigger("error", e));
       if (sub) {
         client.on("message", (channel, message) => {
-          return (this.limiters[channel] != null ? this.limiters[channel]._store.onMessage(channel, message) : undefined);
+          return this.limiters[channel] != null
+            ? this.limiters[channel]._store.onMessage(channel, message)
+            : undefined;
         });
       }
-      if (client.status === "ready") { return resolve();
-      } else { return client.once("ready", resolve); }
+      if (client.status === "ready") {
+        return resolve();
+      } else {
+        return client.once("ready", resolve);
+      }
     });
   }
 
-  _loadScripts() { return Scripts.names.forEach(name => this.client.defineCommand(name, { lua: Scripts.payload(name) })); }
+  _loadScripts() {
+    return Scripts.names.forEach((name) =>
+      this.client.defineCommand(name, { lua: Scripts.payload(name) }),
+    );
+  }
 
   __runCommand__(cmd) {
     await(this.ready);
-    const array = await(this.client.pipeline([cmd]).exec()), [_, deleted] = Array.from(array[0]);
+    const array = await(this.client.pipeline([cmd]).exec()),
+      [_, deleted] = Array.from(array[0]);
     return deleted;
   }
 
   __addLimiter__(instance) {
-    return this.Promise.all([instance.channel(), instance.channel_client()].map(channel => {
-      return new this.Promise((resolve, reject) => {
-        return this.subscriber.subscribe(channel, () => {
-          this.limiters[channel] = instance;
-          return resolve();
+    return this.Promise.all(
+      [instance.channel(), instance.channel_client()].map((channel) => {
+        return new this.Promise((resolve, reject) => {
+          return this.subscriber.subscribe(channel, () => {
+            this.limiters[channel] = instance;
+            return resolve();
+          });
         });
-      });
-    })
+      }),
     );
   }
 
   __removeLimiter__(instance) {
-    return [instance.channel(), instance.channel_client()].forEach(channel => {
-      if (!this.terminated) { await(this.subscriber.unsubscribe(channel)); }
+    return [instance.channel(), instance.channel_client()].forEach((channel) => {
+      if (!this.terminated) {
+        await(this.subscriber.unsubscribe(channel));
+      }
       return delete this.limiters[channel];
-  });
+    });
   }
 
   __scriptArgs__(name, id, args, cb) {
@@ -106,8 +129,12 @@ class IORedisConnection {
   }
 
   disconnect(flush) {
-    if (flush == null) { flush = true; }
-    for (var k of Array.from(Object.keys(this.limiters))) { clearInterval(this.limiters[k]._store.heartbeat); }
+    if (flush == null) {
+      flush = true;
+    }
+    for (var k of Array.from(Object.keys(this.limiters))) {
+      clearInterval(this.limiters[k]._store.heartbeat);
+    }
     this.limiters = {};
     this.terminated = true;
 

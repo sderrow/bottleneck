@@ -20,7 +20,7 @@ class LocalDatastore {
     this.storeOptions = storeOptions;
     this.clientId = this.instance._randomIndex();
     parser.load(storeInstanceOptions, storeInstanceOptions, this);
-    this._nextRequest = (this._lastReservoirRefresh = (this._lastReservoirIncrease = Date.now()));
+    this._nextRequest = this._lastReservoirRefresh = this._lastReservoirIncrease = Date.now();
     this._running = 0;
     this._done = 0;
     this._unblockTime = 0;
@@ -30,33 +30,53 @@ class LocalDatastore {
   }
 
   _startHeartbeat() {
-    if ((this.heartbeat == null) && ((
-      (this.storeOptions.reservoirRefreshInterval != null) && (this.storeOptions.reservoirRefreshAmount != null)
-    ) || (
-      (this.storeOptions.reservoirIncreaseInterval != null) && (this.storeOptions.reservoirIncreaseAmount != null)
-    ))) {
-      return __guardMethod__((this.heartbeat = setInterval(() => {
-          const now = Date.now();
+    if (
+      this.heartbeat == null &&
+      ((this.storeOptions.reservoirRefreshInterval != null &&
+        this.storeOptions.reservoirRefreshAmount != null) ||
+        (this.storeOptions.reservoirIncreaseInterval != null &&
+          this.storeOptions.reservoirIncreaseAmount != null))
+    ) {
+      return __guardMethod__(
+        (this.heartbeat = setInterval(
+          () => {
+            const now = Date.now();
 
-          if ((this.storeOptions.reservoirRefreshInterval != null) && (now >= (this._lastReservoirRefresh + this.storeOptions.reservoirRefreshInterval))) {
-            this._lastReservoirRefresh = now;
-            this.storeOptions.reservoir = this.storeOptions.reservoirRefreshAmount;
-            this.instance._drainAll(this.computeCapacity());
-          }
-
-          if ((this.storeOptions.reservoirIncreaseInterval != null) && (now >= (this._lastReservoirIncrease + this.storeOptions.reservoirIncreaseInterval))) {
-            const { reservoirIncreaseAmount: amount, reservoirIncreaseMaximum: maximum, reservoir } = this.storeOptions;
-            this._lastReservoirIncrease = now;
-            const incr = (maximum != null) ? Math.min(amount, maximum - reservoir) : amount;
-            if (incr > 0) {
-              this.storeOptions.reservoir += incr;
-              return this.instance._drainAll(this.computeCapacity());
+            if (
+              this.storeOptions.reservoirRefreshInterval != null &&
+              now >= this._lastReservoirRefresh + this.storeOptions.reservoirRefreshInterval
+            ) {
+              this._lastReservoirRefresh = now;
+              this.storeOptions.reservoir = this.storeOptions.reservoirRefreshAmount;
+              this.instance._drainAll(this.computeCapacity());
             }
-          }
-        }
 
-        , this.heartbeatInterval)), 'unref', o => o.unref());
-    } else { return clearInterval(this.heartbeat); }
+            if (
+              this.storeOptions.reservoirIncreaseInterval != null &&
+              now >= this._lastReservoirIncrease + this.storeOptions.reservoirIncreaseInterval
+            ) {
+              const {
+                reservoirIncreaseAmount: amount,
+                reservoirIncreaseMaximum: maximum,
+                reservoir,
+              } = this.storeOptions;
+              this._lastReservoirIncrease = now;
+              const incr = maximum != null ? Math.min(amount, maximum - reservoir) : amount;
+              if (incr > 0) {
+                this.storeOptions.reservoir += incr;
+                return this.instance._drainAll(this.computeCapacity());
+              }
+            }
+          },
+
+          this.heartbeatInterval,
+        )),
+        "unref",
+        (o) => o.unref(),
+      );
+    } else {
+      return clearInterval(this.heartbeat);
+    }
   }
 
   __publish__(message) {
@@ -70,9 +90,18 @@ class LocalDatastore {
     return this.Promise.resolve();
   }
 
-  yieldLoop(t) { if (t == null) { t = 0; } return new this.Promise((resolve, reject) => setTimeout(resolve, t)); }
+  yieldLoop(t) {
+    if (t == null) {
+      t = 0;
+    }
+    return new this.Promise((resolve, reject) => setTimeout(resolve, t));
+  }
 
-  computePenalty() { return this.storeOptions.penalty != null ? this.storeOptions.penalty : ((15 * this.storeOptions.minTime) || 5000); }
+  computePenalty() {
+    return this.storeOptions.penalty != null
+      ? this.storeOptions.penalty
+      : 15 * this.storeOptions.minTime || 5000;
+  }
 
   __updateSettings__(options) {
     await(this.yieldLoop());
@@ -99,20 +128,25 @@ class LocalDatastore {
 
   __groupCheck__(time) {
     await(this.yieldLoop());
-    return (this._nextRequest + this.timeout) < time;
+    return this._nextRequest + this.timeout < time;
   }
 
   computeCapacity() {
     const { maxConcurrent, reservoir } = this.storeOptions;
-    if ((maxConcurrent != null) && (reservoir != null)) { return Math.min((maxConcurrent - this._running), reservoir);
-    } else if (maxConcurrent != null) { return maxConcurrent - this._running;
-    } else if (reservoir != null) { return reservoir;
-    } else { return null; }
+    if (maxConcurrent != null && reservoir != null) {
+      return Math.min(maxConcurrent - this._running, reservoir);
+    } else if (maxConcurrent != null) {
+      return maxConcurrent - this._running;
+    } else if (reservoir != null) {
+      return reservoir;
+    } else {
+      return null;
+    }
   }
 
   conditionsCheck(weight) {
     const capacity = this.computeCapacity();
-    return (capacity == null) || (weight <= capacity);
+    return capacity == null || weight <= capacity;
   }
 
   __incrementReservoir__(incr) {
@@ -127,9 +161,13 @@ class LocalDatastore {
     return this.storeOptions.reservoir;
   }
 
-  isBlocked(now) { return this._unblockTime >= now; }
+  isBlocked(now) {
+    return this._unblockTime >= now;
+  }
 
-  check(weight, now) { return this.conditionsCheck(weight) && ((this._nextRequest - now) <= 0); }
+  check(weight, now) {
+    return this.conditionsCheck(weight) && this._nextRequest - now <= 0;
+  }
 
   __check__(weight) {
     await(this.yieldLoop());
@@ -142,22 +180,33 @@ class LocalDatastore {
     const now = Date.now();
     if (this.conditionsCheck(weight)) {
       this._running += weight;
-      if (this.storeOptions.reservoir != null) { this.storeOptions.reservoir -= weight; }
+      if (this.storeOptions.reservoir != null) {
+        this.storeOptions.reservoir -= weight;
+      }
       const wait = Math.max(this._nextRequest - now, 0);
       this._nextRequest = now + wait + this.storeOptions.minTime;
       return { success: true, wait, reservoir: this.storeOptions.reservoir };
-    } else { return { success: false }; }
+    } else {
+      return { success: false };
+    }
   }
 
-  strategyIsBlock() { return this.storeOptions.strategy === 3; }
+  strategyIsBlock() {
+    return this.storeOptions.strategy === 3;
+  }
 
   __submit__(queueLength, weight) {
     await(this.yieldLoop());
-    if ((this.storeOptions.maxConcurrent != null) && (weight > this.storeOptions.maxConcurrent)) {
-      throw new BottleneckError(`Impossible to add a job having a weight of ${weight} to a limiter having a maxConcurrent setting of ${this.storeOptions.maxConcurrent}`);
+    if (this.storeOptions.maxConcurrent != null && weight > this.storeOptions.maxConcurrent) {
+      throw new BottleneckError(
+        `Impossible to add a job having a weight of ${weight} to a limiter having a maxConcurrent setting of ${this.storeOptions.maxConcurrent}`,
+      );
     }
     const now = Date.now();
-    const reachedHWM = (this.storeOptions.highWater != null) && (queueLength === this.storeOptions.highWater) && !this.check(weight, now);
+    const reachedHWM =
+      this.storeOptions.highWater != null &&
+      queueLength === this.storeOptions.highWater &&
+      !this.check(weight, now);
     const blocked = this.strategyIsBlock() && (reachedHWM || this.isBlocked(now));
     if (blocked) {
       this._unblockTime = now + this.computePenalty();
@@ -179,7 +228,7 @@ class LocalDatastore {
 module.exports = LocalDatastore;
 
 function __guardMethod__(obj, methodName, transform) {
-  if (typeof obj !== 'undefined' && obj !== null && typeof obj[methodName] === 'function') {
+  if (typeof obj !== "undefined" && obj !== null && typeof obj[methodName] === "function") {
     return transform(obj, methodName);
   } else {
     return undefined;
