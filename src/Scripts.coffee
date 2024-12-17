@@ -10,51 +10,35 @@ headers =
   get_time: lua["get_time.lua"]
 
 exports.allKeys = (id) -> [
-  ###
-  HASH
-  ###
+  # HASH
   "b_#{id}_settings"
 
-  ###
-  HASH
-  job index -> weight
-  ###
+  # HASH
+  # job index -> weight
   "b_#{id}_job_weights"
 
-  ###
-  ZSET
-  job index -> expiration
-  ###
+  # ZSET
+  # job index -> expiration
   "b_#{id}_job_expirations"
 
-  ###
-  HASH
-  job index -> client
-  ###
+  # HASH
+  # job index -> client
   "b_#{id}_job_clients"
 
-  ###
-  ZSET
-  client -> sum running
-  ###
+  # ZSET
+  # client -> sum running
   "b_#{id}_client_running"
 
-  ###
-  HASH
-  client -> num queued
-  ###
+  # HASH
+  # client -> num queued
   "b_#{id}_client_num_queued"
 
-  ###
-  ZSET
-  client -> last job registered
-  ###
+  # ZSET
+  # client -> last job registered
   "b_#{id}_client_last_registered"
 
-  ###
-  ZSET
-  client -> last seen
-  ###
+  # ZSET
+  # client -> last seen
   "b_#{id}_client_last_seen"
 ]
 
