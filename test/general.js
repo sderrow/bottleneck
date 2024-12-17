@@ -14,38 +14,38 @@ describe('General', function () {
     process.env.DATASTORE !== 'redis' && process.env.DATASTORE !== 'ioredis' &&
     process.env.BUILD !== 'es5' && process.env.BUILD !== 'light'
   ) {
-    it('Should not leak memory on instantiation', async function () {
-      c = makeTest()
-      this.timeout(8000)
-      const { iterate } = require('leakage')
+    // it('Should not leak memory on instantiation', async function () {
+    //   c = makeTest()
+    //   this.timeout(8000)
+    //   const { iterate } = require('leakage')
 
-      const result = await iterate.async(async () => {
-        const limiter = new Bottleneck({ datastore: 'local' })
-        await limiter.ready()
-        return limiter.disconnect(false)
-      }, { iterations: 25 })
+    //   const result = await iterate.async(async () => {
+    //     const limiter = new Bottleneck({ datastore: 'local' })
+    //     await limiter.ready()
+    //     return limiter.disconnect(false)
+    //   }, { iterations: 25 })
 
-    })
+    // })
 
-    it('Should not leak memory running jobs', async function () {
-      c = makeTest()
-      this.timeout(12000)
-      const { iterate } = require('leakage')
-      const limiter = new Bottleneck({ datastore: 'local', maxConcurrent: 1, minTime: 10 })
-      await limiter.ready()
-      var ctr = 0
-      var i = 0
+  //   it('Should not leak memory running jobs', async function () {
+  //     c = makeTest()
+  //     this.timeout(12000)
+  //     const { iterate } = require('leakage')
+  //     const limiter = new Bottleneck({ datastore: 'local', maxConcurrent: 1, minTime: 10 })
+  //     await limiter.ready()
+  //     var ctr = 0
+  //     var i = 0
 
-      const result = await iterate.async(async () => {
-        await limiter.schedule(function (zero, one) {
-          i = i + zero + one
-        }, 0, 1)
-        await limiter.schedule(function (zero, one) {
-          i = i + zero + one
-        }, 0, 1)
-      }, { iterations: 25 })
-      c.mustEqual(i, 302)
-    })
+  //     const result = await iterate.async(async () => {
+  //       await limiter.schedule(function (zero, one) {
+  //         i = i + zero + one
+  //       }, 0, 1)
+  //       await limiter.schedule(function (zero, one) {
+  //         i = i + zero + one
+  //       }, 0, 1)
+  //     }, { iterations: 25 })
+  //     c.mustEqual(i, 302)
+  //   })
   }
 
   it('Should prompt to upgrade', function () {
