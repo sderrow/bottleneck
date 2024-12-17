@@ -24,7 +24,7 @@ class LocalDatastore {
     this._running = 0;
     this._done = 0;
     this._unblockTime = 0;
-    this.ready = this.Promise.resolve();
+    this.ready = Promise.resolve();
     this.clients = {};
     this._startHeartbeat();
   }
@@ -87,14 +87,14 @@ class LocalDatastore {
   __disconnect__(flush) {
     await(this.yieldLoop());
     clearInterval(this.heartbeat);
-    return this.Promise.resolve();
+    return Promise.resolve();
   }
 
   yieldLoop(t) {
     if (t == null) {
       t = 0;
     }
-    return new this.Promise((resolve, reject) => setTimeout(resolve, t));
+    return new Promise((resolve, reject) => setTimeout(resolve, t));
   }
 
   computePenalty() {

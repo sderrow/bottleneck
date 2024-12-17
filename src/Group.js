@@ -24,7 +24,6 @@ class Group {
     this.prototype.defaults = {
       timeout: 1000 * 60 * 5,
       connection: null,
-      Promise,
       id: "group-key",
     };
   }
@@ -112,7 +111,7 @@ class Group {
 
   clusterKeys() {
     if (this.connection == null) {
-      return this.Promise.resolve(this.keys());
+      return Promise.resolve(this.keys());
     }
     const keys = [];
     let cursor = null;

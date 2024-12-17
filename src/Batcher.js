@@ -18,7 +18,6 @@ class Batcher {
     this.prototype.defaults = {
       maxTime: null,
       maxSize: null,
-      Promise,
     };
   }
 
@@ -35,7 +34,7 @@ class Batcher {
   }
 
   _resetPromise() {
-    return (this._promise = new this.Promise((res, rej) => {
+    return (this._promise = new Promise((res, rej) => {
       return (this._resolve = res);
     }));
   }

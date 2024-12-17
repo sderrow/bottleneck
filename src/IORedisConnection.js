@@ -25,7 +25,6 @@ class IORedisConnection {
       clientOptions: {},
       clusterNodes: null,
       client: null,
-      Promise,
       Events: null,
     };
   }
@@ -56,7 +55,7 @@ class IORedisConnection {
     }
     this.limiters = {};
 
-    this.ready = this.Promise.all([
+    this.ready = Promise.all([
       this._setup(this.client, false),
       this._setup(this.subscriber, true),
     ]).then(() => {
@@ -67,7 +66,7 @@ class IORedisConnection {
 
   _setup(client, sub) {
     client.setMaxListeners(0);
-    return new this.Promise((resolve, reject) => {
+    return new Promise((resolve, reject) => {
       client.on("error", (e) => this.Events.trigger("error", e));
       if (sub) {
         client.on("message", (channel, message) => {
@@ -98,9 +97,9 @@ class IORedisConnection {
   }
 
   __addLimiter__(instance) {
-    return this.Promise.all(
+    return Promise.all(
       [instance.channel(), instance.channel_client()].map((channel) => {
-        return new this.Promise((resolve, reject) => {
+        return new Promise((resolve, reject) => {
           return this.subscriber.subscribe(channel, () => {
             this.limiters[channel] = instance;
             return resolve();
@@ -139,11 +138,11 @@ class IORedisConnection {
     this.terminated = true;
 
     if (flush) {
-      return this.Promise.all([this.client.quit(), this.subscriber.quit()]);
+      return Promise.all([this.client.quit(), this.subscriber.quit()]);
     } else {
       this.client.disconnect();
       this.subscriber.disconnect();
-      return this.Promise.resolve();
+      return Promise.resolve();
     }
   }
 }

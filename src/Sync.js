@@ -12,10 +12,9 @@
  */
 const DLList = require("./DLList");
 class Sync {
-  constructor(name, Promise) {
+  constructor(name) {
     this.schedule = this.schedule.bind(this);
     this.name = name;
-    this.Promise = Promise;
     this._running = 0;
     this._queue = new DLList();
   }
@@ -42,7 +41,7 @@ class Sync {
   schedule(task, ...args) {
     let reject;
     let resolve = (reject = null);
-    const promise = new this.Promise(function (_resolve, _reject) {
+    const promise = new Promise(function (_resolve, _reject) {
       resolve = _resolve;
       return (reject = _reject);
     });

@@ -35,7 +35,7 @@ class RedisDatastore {
           return new RedisConnection({
             Redis: this.Redis,
             clientOptions: this.clientOptions,
-            Promise: this.Promise,
+            Promise: Promise,
             Events: this.instance.Events,
           });
         } else if (this.instance.datastore === "ioredis") {
@@ -43,7 +43,7 @@ class RedisDatastore {
             Redis: this.Redis,
             clientOptions: this.clientOptions,
             clusterNodes: this.clusterNodes,
-            Promise: this.Promise,
+            Promise: Promise,
             Events: this.instance.Events,
           });
         }
@@ -136,7 +136,7 @@ class RedisDatastore {
     if (name !== "init" && name !== "register_client") {
       await(this.ready);
     }
-    return new this.Promise((resolve, reject) => {
+    return new Promise((resolve, reject) => {
       const all_args = [Date.now(), this.clientId].concat(args);
       this.instance.Events.trigger("debug", `Calling Redis script: ${name}.lua`, all_args);
       const arr = this.connection.__scriptArgs__(
@@ -157,7 +157,7 @@ class RedisDatastore {
         e.message.match(/^(.*\s)?SETTINGS_KEY_NOT_FOUND$/) !== null
       ) {
         if (name === "heartbeat") {
-          return this.Promise.resolve();
+          return Promise.resolve();
         } else {
           return this.runScript("init", this.prepareInitSettings(false)).then(() =>
             this.runScript(name, args),
@@ -171,7 +171,7 @@ class RedisDatastore {
           this.runScript(name, args),
         );
       } else {
-        return this.Promise.reject(e);
+        return Promise.reject(e);
       }
     });
   }

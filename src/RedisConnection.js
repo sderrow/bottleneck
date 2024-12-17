@@ -23,7 +23,6 @@ class RedisConnection {
       Redis: null,
       clientOptions: {},
       client: null,
-      Promise,
       Events: null,
     };
   }
@@ -48,17 +47,14 @@ class RedisConnection {
     this.limiters = {};
     this.shas = {};
 
-    this.ready = this.Promise.all([
-      this._setup(this.client, false),
-      this._setup(this.subscriber, true),
-    ])
+    this.ready = Promise.all([this._setup(this.client, false), this._setup(this.subscriber, true)])
       .then(() => this._loadScripts())
       .then(() => ({ client: this.client, subscriber: this.subscriber }));
   }
 
   _setup(client, sub) {
     client.setMaxListeners(0);
-    return new this.Promise((resolve, reject) => {
+    return new Promise((resolve, reject) => {
       client.on("error", (e) => this.Events.trigger("error", e));
       if (sub) {
         client.on("message", (channel, message) => {
@@ -76,7 +72,7 @@ class RedisConnection {
   }
 
   _loadScript(name) {
-    return new this.Promise((resolve, reject) => {
+    return new Promise((resolve, reject) => {
       const payload = Scripts.payload(name);
       return this.client.multi([["script", "load", payload]]).exec((err, replies) => {
         if (err != null) {
@@ -89,12 +85,12 @@ class RedisConnection {
   }
 
   _loadScripts() {
-    return this.Promise.all(Scripts.names.map((k) => this._loadScript(k)));
+    return Promise.all(Scripts.names.map((k) => this._loadScript(k)));
   }
 
   __runCommand__(cmd) {
     await(this.ready);
-    return new this.Promise((resolve, reject) => {
+    return new Promise((resolve, reject) => {
       return this.client.multi([cmd]).exec_atomic(function (err, replies) {
         if (err != null) {
           return reject(err);
@@ -106,9 +102,9 @@ class RedisConnection {
   }
 
   __addLimiter__(instance) {
-    return this.Promise.all(
+    return Promise.all(
       [instance.channel(), instance.channel_client()].map((channel) => {
-        return new this.Promise((resolve, reject) => {
+        return new Promise((resolve, reject) => {
           var handler = (chan) => {
             if (chan === channel) {
               this.subscriber.removeListener("subscribe", handler);
@@ -124,11 +120,11 @@ class RedisConnection {
   }
 
   __removeLimiter__(instance) {
-    return this.Promise.all(
+    return Promise.all(
       [instance.channel(), instance.channel_client()].map((channel) => {
         if (!this.terminated) {
           await(
-            new this.Promise((resolve, reject) => {
+            new Promise((resolve, reject) => {
               return this.subscriber.unsubscribe(channel, function (err, chan) {
                 if (err != null) {
                   return reject(err);
@@ -166,7 +162,7 @@ class RedisConnection {
 
     this.client.end(flush);
     this.subscriber.end(flush);
-    return this.Promise.resolve();
+    return Promise.resolve();
   }
 }
 RedisConnection.initClass();

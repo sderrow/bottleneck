@@ -110,8 +110,8 @@ class Bottleneck {
     );
     this._limiter = null;
     this.Events = new Events(this);
-    this._submitLock = new Sync("submit", this.Promise);
-    this._registerLock = new Sync("register", this.Promise);
+    this._submitLock = new Sync("submit");
+    this._registerLock = new Sync("register");
     const storeOptions = parser.load(options, this.storeDefaults, {});
 
     this._store = (() => {
@@ -265,12 +265,12 @@ class Bottleneck {
     return this._registerLock.schedule(() => {
       let next;
       if (this.queued() === 0) {
-        return this.Promise.resolve(null);
+        return Promise.resolve(null);
       }
       const queue = this._queues.getFirst();
       const { options, args } = (next = queue.first());
       if (capacity != null && options.weight > capacity) {
-        return this.Promise.resolve(null);
+        return Promise.resolve(null);
       }
       this.Events.trigger("debug", `Draining ${options.id}`, { args, options });
       const index = this._randomIndex();
@@ -288,9 +288,9 @@ class Bottleneck {
               this.Events.trigger("depleted", empty);
             }
             this._run(index, next, wait);
-            return this.Promise.resolve(options.weight);
+            return Promise.resolve(options.weight);
           } else {
-            return this.Promise.resolve(null);
+            return Promise.resolve(null);
           }
         });
     });
@@ -306,7 +306,7 @@ class Bottleneck {
           const newCapacity = capacity != null ? capacity - drained : capacity;
           return this._drainAll(newCapacity, total + drained);
         } else {
-          return this.Promise.resolve(total);
+          return Promise.resolve(total);
         }
       })
       .catch((e) => this.Events.trigger("error", e));
@@ -326,7 +326,7 @@ class Bottleneck {
         const { counts } = this._states;
         return counts[0] + counts[1] + counts[2] + counts[3] === at;
       };
-      return new this.Promise((resolve, reject) => {
+      return new Promise((resolve, reject) => {
         if (finished()) {
           return resolve();
         } else {
@@ -342,7 +342,7 @@ class Bottleneck {
     const done = (() => {
       if (options.dropWaitingJobs) {
         this._run = (index, next) => next.doDrop({ message: options.dropErrorMessage });
-        this._drainOne = () => this.Promise.resolve(null);
+        this._drainOne = () => Promise.resolve(null);
         return this._registerLock.schedule(() =>
           this._submitLock.schedule(() => {
             for (var k in this._scheduled) {
@@ -366,9 +366,7 @@ class Bottleneck {
     this._receive = (job) =>
       job._reject(new Bottleneck.prototype.BottleneckError(options.enqueueErrorMessage));
     this.stop = () =>
-      this.Promise.reject(
-        new Bottleneck.prototype.BottleneckError("stop() has already been called"),
-      );
+      Promise.reject(new Bottleneck.prototype.BottleneckError("stop() has already been called"));
     return done;
   }
 
@@ -449,7 +447,7 @@ class Bottleneck {
     }
 
     const task = (...args) => {
-      return new this.Promise((resolve, reject) =>
+      return new Promise((resolve, reject) =>
         fn(...Array.from(args), (...args) => (args[0] != null ? reject : resolve)(args)),
       );
     };
@@ -462,7 +460,7 @@ class Bottleneck {
       this.rejectOnDrop,
       this.Events,
       this._states,
-      this.Promise,
+      Promise,
     );
     job.promise
       .then((args) => (typeof cb === "function" ? cb(...Array.from(args || [])) : undefined))
@@ -492,7 +490,7 @@ class Bottleneck {
       this.rejectOnDrop,
       this.Events,
       this._states,
-      this.Promise,
+      Promise,
     );
     this._receive(job);
     return job.promise;
