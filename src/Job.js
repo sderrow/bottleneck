@@ -1,98 +1,143 @@
-NUM_PRIORITIES = 10
-DEFAULT_PRIORITY = 5
+/*
+ * decaffeinate suggestions:
+ * DS101: Remove unnecessary use of Array.from
+ * DS102: Remove unnecessary code created because of implicit returns
+ * DS201: Simplify complex destructure assignments
+ * DS207: Consider shorter variations of null checks
+ * Full docs: https://github.com/decaffeinate/decaffeinate/blob/main/docs/suggestions.md
+ */
+const NUM_PRIORITIES = 10;
+const DEFAULT_PRIORITY = 5;
 
-parser = require "./parser"
-BottleneckError = require "./BottleneckError"
+const parser = require("./parser");
+const BottleneckError = require("./BottleneckError");
 
-class Job
-  constructor: (@task, @args, options, jobDefaults, @rejectOnDrop, @Events, @_states, @Promise) ->
-    @options = parser.load options, jobDefaults
-    @options.priority = @_sanitizePriority @options.priority
-    if @options.id == jobDefaults.id then @options.id = "#{@options.id}-#{@_randomIndex()}"
-    @promise = new @Promise (@_resolve, @_reject) =>
-    @retryCount = 0
+class Job {
+  constructor(task, args, options, jobDefaults, rejectOnDrop, Events, _states, Promise) {
+    this.task = task;
+    this.args = args;
+    this.rejectOnDrop = rejectOnDrop;
+    this.Events = Events;
+    this._states = _states;
+    this.Promise = Promise;
+    this.options = parser.load(options, jobDefaults);
+    this.options.priority = this._sanitizePriority(this.options.priority);
+    if (this.options.id === jobDefaults.id) { this.options.id = `${this.options.id}-${this._randomIndex()}`; }
+    this.promise = new this.Promise((_resolve, _reject) => {
+      this._resolve = _resolve;
+      this._reject = _reject;
+      
+  });
+    this.retryCount = 0;
+  }
 
-  _sanitizePriority: (priority) ->
-    sProperty = if ~~priority != priority then DEFAULT_PRIORITY else priority
-    if sProperty < 0 then 0 else if sProperty > NUM_PRIORITIES-1 then NUM_PRIORITIES-1 else sProperty
+  _sanitizePriority(priority) {
+    const sProperty = ~~priority !== priority ? DEFAULT_PRIORITY : priority;
+    if (sProperty < 0) { return 0; } else if (sProperty > (NUM_PRIORITIES-1)) { return NUM_PRIORITIES-1; } else { return sProperty; }
+  }
 
-  _randomIndex: -> Math.random().toString(36).slice(2)
+  _randomIndex() { return Math.random().toString(36).slice(2); }
 
-  doDrop: ({ error, message="This job has been dropped by Bottleneck" } = {}) ->
-    if @_states.remove @options.id
-      if @rejectOnDrop then @_reject (error ? new BottleneckError message)
-      @Events.trigger "dropped", { @args, @options, @task, @promise }
-      true
-    else
-      false
+  doDrop(...args) {
+    const val = args[0],
+          obj = val != null ? val : {},
+          {
+            error
+          } = obj,
+          val1 = obj.message,
+          message = val1 != null ? val1 : "This job has been dropped by Bottleneck";
+    if (this._states.remove(this.options.id)) {
+      if (this.rejectOnDrop) { this._reject((error != null ? error : new BottleneckError(message))); }
+      this.Events.trigger("dropped", { args: this.args, options: this.options, task: this.task, promise: this.promise });
+      return true;
+    } else {
+      return false;
+    }
+  }
 
-  _assertStatus: (expected) ->
-    status = @_states.jobStatus @options.id
-    if not (status == expected or (expected == "DONE" and status == null))
-      throw new BottleneckError "Invalid job status #{status}, expected #{expected}. Please open an issue at https://github.com/SGrondin/bottleneck/issues"
+  _assertStatus(expected) {
+    const status = this._states.jobStatus(this.options.id);
+    if (!((status === expected) || ((expected === "DONE") && (status === null)))) {
+      throw new BottleneckError(`Invalid job status ${status}, expected ${expected}. Please open an issue at https://github.com/SGrondin/bottleneck/issues`);
+    }
+  }
 
-  doReceive: () ->
-    @_states.start @options.id
-    @Events.trigger "received", { @args, @options }
+  doReceive() {
+    this._states.start(this.options.id);
+    return this.Events.trigger("received", { args: this.args, options: this.options });
+  }
 
-  doQueue: (reachedHWM, blocked) ->
-    @_assertStatus "RECEIVED"
-    @_states.next @options.id
-    @Events.trigger "queued", { @args, @options, reachedHWM, blocked }
+  doQueue(reachedHWM, blocked) {
+    this._assertStatus("RECEIVED");
+    this._states.next(this.options.id);
+    return this.Events.trigger("queued", { args: this.args, options: this.options, reachedHWM, blocked });
+  }
 
-  doRun: () ->
-    if @retryCount == 0
-      @_assertStatus "QUEUED"
-      @_states.next @options.id
-    else @_assertStatus "EXECUTING"
-    @Events.trigger "scheduled", { @args, @options }
+  doRun() {
+    if (this.retryCount === 0) {
+      this._assertStatus("QUEUED");
+      this._states.next(this.options.id);
+    } else { this._assertStatus("EXECUTING"); }
+    return this.Events.trigger("scheduled", { args: this.args, options: this.options });
+  }
 
-  doExecute: (chained, clearGlobalState, run, free) ->
-    if @retryCount == 0
-      @_assertStatus "RUNNING"
-      @_states.next @options.id
-    else @_assertStatus "EXECUTING"
-    eventInfo = { @args, @options, @retryCount }
-    @Events.trigger "executing", eventInfo
+  doExecute(chained, clearGlobalState, run, free) {
+    if (this.retryCount === 0) {
+      this._assertStatus("RUNNING");
+      this._states.next(this.options.id);
+    } else { this._assertStatus("EXECUTING"); }
+    const eventInfo = { args: this.args, options: this.options, retryCount: this.retryCount };
+    this.Events.trigger("executing", eventInfo);
 
-    try
-      passed = await if chained?
-        chained.schedule @options, @task, @args...
-      else @task @args...
+    try {
+      const passed = await((chained != null) ?
+        chained.schedule(this.options, this.task, ...Array.from(this.args))
+      : this.task(...Array.from(this.args || []))
+      );
 
-      if clearGlobalState()
-        @doDone eventInfo
-        await free @options, eventInfo
-        @_assertStatus "DONE"
-        @_resolve passed
-    catch error
-      @_onFailure error, eventInfo, clearGlobalState, run, free
+      if (clearGlobalState()) {
+        this.doDone(eventInfo);
+        await(free(this.options, eventInfo));
+        this._assertStatus("DONE");
+        return this._resolve(passed);
+      }
+    } catch (error) {
+      return this._onFailure(error, eventInfo, clearGlobalState, run, free);
+    }
+  }
 
-  doExpire: (clearGlobalState, run, free) ->
-    if @_states.jobStatus @options.id == "RUNNING"
-      @_states.next @options.id
-    @_assertStatus "EXECUTING"
-    eventInfo = { @args, @options, @retryCount }
-    error = new BottleneckError "This job timed out after #{@options.expiration} ms."
-    @_onFailure error, eventInfo, clearGlobalState, run, free
+  doExpire(clearGlobalState, run, free) {
+    if (this._states.jobStatus(this.options.id === "RUNNING")) {
+      this._states.next(this.options.id);
+    }
+    this._assertStatus("EXECUTING");
+    const eventInfo = { args: this.args, options: this.options, retryCount: this.retryCount };
+    const error = new BottleneckError(`This job timed out after ${this.options.expiration} ms.`);
+    return this._onFailure(error, eventInfo, clearGlobalState, run, free);
+  }
 
-  _onFailure: (error, eventInfo, clearGlobalState, run, free) ->
-    if clearGlobalState()
-      retry = await @Events.trigger "failed", error, eventInfo
-      if retry?
-        retryAfter = ~~retry
-        @Events.trigger "retry", "Retrying #{@options.id} after #{retryAfter} ms", eventInfo
-        @retryCount++
-        run retryAfter
-      else
-        @doDone eventInfo
-        await free @options, eventInfo
-        @_assertStatus "DONE"
-        @_reject error
+  _onFailure(error, eventInfo, clearGlobalState, run, free) {
+    if (clearGlobalState()) {
+      const retry = await(this.Events.trigger("failed", error, eventInfo));
+      if (retry != null) {
+        const retryAfter = ~~retry;
+        this.Events.trigger("retry", `Retrying ${this.options.id} after ${retryAfter} ms`, eventInfo);
+        this.retryCount++;
+        return run(retryAfter);
+      } else {
+        this.doDone(eventInfo);
+        await(free(this.options, eventInfo));
+        this._assertStatus("DONE");
+        return this._reject(error);
+      }
+    }
+  }
 
-  doDone: (eventInfo) ->
-    @_assertStatus "EXECUTING"
-    @_states.next @options.id
-    @Events.trigger "done", eventInfo
+  doDone(eventInfo) {
+    this._assertStatus("EXECUTING");
+    this._states.next(this.options.id);
+    return this.Events.trigger("done", eventInfo);
+  }
+}
 
-module.exports = Job
+module.exports = Job;

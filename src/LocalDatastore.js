@@ -1,140 +1,181 @@
-parser = require "./parser"
-BottleneckError = require "./BottleneckError"
+/*
+ * decaffeinate suggestions:
+ * DS102: Remove unnecessary code created because of implicit returns
+ * DS103: Rewrite code to no longer use __guard__, or convert again using --optional-chaining
+ * DS207: Consider shorter variations of null checks
+ * Full docs: https://github.com/decaffeinate/decaffeinate/blob/main/docs/suggestions.md
+ */
+const parser = require("./parser");
+const BottleneckError = require("./BottleneckError");
 
-class LocalDatastore
-  constructor: (@instance, @storeOptions, storeInstanceOptions) ->
-    @clientId = @instance._randomIndex()
-    parser.load storeInstanceOptions, storeInstanceOptions, @
-    @_nextRequest = @_lastReservoirRefresh = @_lastReservoirIncrease = Date.now()
-    @_running = 0
-    @_done = 0
-    @_unblockTime = 0
-    @ready = @Promise.resolve()
-    @clients = {}
-    @_startHeartbeat()
+class LocalDatastore {
+  constructor(instance, storeOptions, storeInstanceOptions) {
+    this.instance = instance;
+    this.storeOptions = storeOptions;
+    this.clientId = this.instance._randomIndex();
+    parser.load(storeInstanceOptions, storeInstanceOptions, this);
+    this._nextRequest = (this._lastReservoirRefresh = (this._lastReservoirIncrease = Date.now()));
+    this._running = 0;
+    this._done = 0;
+    this._unblockTime = 0;
+    this.ready = this.Promise.resolve();
+    this.clients = {};
+    this._startHeartbeat();
+  }
 
-  _startHeartbeat: ->
-    if !@heartbeat? and ((
-      @storeOptions.reservoirRefreshInterval? and @storeOptions.reservoirRefreshAmount?
-    ) or (
-      @storeOptions.reservoirIncreaseInterval? and @storeOptions.reservoirIncreaseAmount?
-    ))
-      (@heartbeat = setInterval =>
-          now = Date.now()
+  _startHeartbeat() {
+    if ((this.heartbeat == null) && ((
+      (this.storeOptions.reservoirRefreshInterval != null) && (this.storeOptions.reservoirRefreshAmount != null)
+    ) || (
+      (this.storeOptions.reservoirIncreaseInterval != null) && (this.storeOptions.reservoirIncreaseAmount != null)
+    ))) {
+      return __guardMethod__((this.heartbeat = setInterval(() => {
+          const now = Date.now();
 
-          if @storeOptions.reservoirRefreshInterval? and now >= @_lastReservoirRefresh + @storeOptions.reservoirRefreshInterval
-            @_lastReservoirRefresh = now
-            @storeOptions.reservoir = @storeOptions.reservoirRefreshAmount
-            @instance._drainAll @computeCapacity()
+          if ((this.storeOptions.reservoirRefreshInterval != null) && (now >= (this._lastReservoirRefresh + this.storeOptions.reservoirRefreshInterval))) {
+            this._lastReservoirRefresh = now;
+            this.storeOptions.reservoir = this.storeOptions.reservoirRefreshAmount;
+            this.instance._drainAll(this.computeCapacity());
+          }
 
-          if @storeOptions.reservoirIncreaseInterval? and now >= @_lastReservoirIncrease + @storeOptions.reservoirIncreaseInterval
-            { reservoirIncreaseAmount: amount, reservoirIncreaseMaximum: maximum, reservoir } = @storeOptions
-            @_lastReservoirIncrease = now
-            incr = if maximum? then Math.min amount, maximum - reservoir else amount
-            if incr > 0
-              @storeOptions.reservoir += incr
-              @instance._drainAll @computeCapacity()
+          if ((this.storeOptions.reservoirIncreaseInterval != null) && (now >= (this._lastReservoirIncrease + this.storeOptions.reservoirIncreaseInterval))) {
+            const { reservoirIncreaseAmount: amount, reservoirIncreaseMaximum: maximum, reservoir } = this.storeOptions;
+            this._lastReservoirIncrease = now;
+            const incr = (maximum != null) ? Math.min(amount, maximum - reservoir) : amount;
+            if (incr > 0) {
+              this.storeOptions.reservoir += incr;
+              return this.instance._drainAll(this.computeCapacity());
+            }
+          }
+        }
 
-        , @heartbeatInterval).unref?()
-    else clearInterval @heartbeat
+        , this.heartbeatInterval)), 'unref', o => o.unref());
+    } else { return clearInterval(this.heartbeat); }
+  }
 
-  __publish__: (message) ->
-    await @yieldLoop()
-    @instance.Events.trigger "message", message.toString()
+  __publish__(message) {
+    await(this.yieldLoop());
+    return this.instance.Events.trigger("message", message.toString());
+  }
 
-  __disconnect__: (flush) ->
-    await @yieldLoop()
-    clearInterval @heartbeat
-    @Promise.resolve()
+  __disconnect__(flush) {
+    await(this.yieldLoop());
+    clearInterval(this.heartbeat);
+    return this.Promise.resolve();
+  }
 
-  yieldLoop: (t=0) -> new @Promise (resolve, reject) -> setTimeout resolve, t
+  yieldLoop(t) { if (t == null) { t = 0; } return new this.Promise((resolve, reject) => setTimeout(resolve, t)); }
 
-  computePenalty: -> @storeOptions.penalty ? ((15 * @storeOptions.minTime) or 5000)
+  computePenalty() { return this.storeOptions.penalty != null ? this.storeOptions.penalty : ((15 * this.storeOptions.minTime) || 5000); }
 
-  __updateSettings__: (options) ->
-    await @yieldLoop()
-    parser.overwrite options, options, @storeOptions
-    @_startHeartbeat()
-    @instance._drainAll @computeCapacity()
-    true
+  __updateSettings__(options) {
+    await(this.yieldLoop());
+    parser.overwrite(options, options, this.storeOptions);
+    this._startHeartbeat();
+    this.instance._drainAll(this.computeCapacity());
+    return true;
+  }
 
-  __running__: ->
-    await @yieldLoop()
-    @_running
+  __running__() {
+    await(this.yieldLoop());
+    return this._running;
+  }
 
-  __queued__: ->
-    await @yieldLoop()
-    @instance.queued()
+  __queued__() {
+    await(this.yieldLoop());
+    return this.instance.queued();
+  }
 
-  __done__: ->
-    await @yieldLoop()
-    @_done
+  __done__() {
+    await(this.yieldLoop());
+    return this._done;
+  }
 
-  __groupCheck__: (time) ->
-    await @yieldLoop()
-    (@_nextRequest + @timeout) < time
+  __groupCheck__(time) {
+    await(this.yieldLoop());
+    return (this._nextRequest + this.timeout) < time;
+  }
 
-  computeCapacity: ->
-    { maxConcurrent, reservoir } = @storeOptions
-    if maxConcurrent? and reservoir? then Math.min((maxConcurrent - @_running), reservoir)
-    else if maxConcurrent? then maxConcurrent - @_running
-    else if reservoir? then reservoir
-    else null
+  computeCapacity() {
+    const { maxConcurrent, reservoir } = this.storeOptions;
+    if ((maxConcurrent != null) && (reservoir != null)) { return Math.min((maxConcurrent - this._running), reservoir);
+    } else if (maxConcurrent != null) { return maxConcurrent - this._running;
+    } else if (reservoir != null) { return reservoir;
+    } else { return null; }
+  }
 
-  conditionsCheck: (weight) ->
-    capacity = @computeCapacity()
-    not capacity? or weight <= capacity
+  conditionsCheck(weight) {
+    const capacity = this.computeCapacity();
+    return (capacity == null) || (weight <= capacity);
+  }
 
-  __incrementReservoir__: (incr) ->
-    await @yieldLoop()
-    reservoir = @storeOptions.reservoir += incr
-    @instance._drainAll @computeCapacity()
-    reservoir
+  __incrementReservoir__(incr) {
+    await(this.yieldLoop());
+    const reservoir = (this.storeOptions.reservoir += incr);
+    this.instance._drainAll(this.computeCapacity());
+    return reservoir;
+  }
 
-  __currentReservoir__: ->
-    await @yieldLoop()
-    @storeOptions.reservoir
+  __currentReservoir__() {
+    await(this.yieldLoop());
+    return this.storeOptions.reservoir;
+  }
 
-  isBlocked: (now) -> @_unblockTime >= now
+  isBlocked(now) { return this._unblockTime >= now; }
 
-  check: (weight, now) -> @conditionsCheck(weight) and (@_nextRequest - now) <= 0
+  check(weight, now) { return this.conditionsCheck(weight) && ((this._nextRequest - now) <= 0); }
 
-  __check__: (weight) ->
-    await @yieldLoop()
-    now = Date.now()
-    @check weight, now
+  __check__(weight) {
+    await(this.yieldLoop());
+    const now = Date.now();
+    return this.check(weight, now);
+  }
 
-  __register__: (index, weight, expiration) ->
-    await @yieldLoop()
-    now = Date.now()
-    if @conditionsCheck weight
-      @_running += weight
-      if @storeOptions.reservoir? then @storeOptions.reservoir -= weight
-      wait = Math.max @_nextRequest - now, 0
-      @_nextRequest = now + wait + @storeOptions.minTime
-      { success: true, wait, reservoir: @storeOptions.reservoir }
-    else { success: false }
+  __register__(index, weight, expiration) {
+    await(this.yieldLoop());
+    const now = Date.now();
+    if (this.conditionsCheck(weight)) {
+      this._running += weight;
+      if (this.storeOptions.reservoir != null) { this.storeOptions.reservoir -= weight; }
+      const wait = Math.max(this._nextRequest - now, 0);
+      this._nextRequest = now + wait + this.storeOptions.minTime;
+      return { success: true, wait, reservoir: this.storeOptions.reservoir };
+    } else { return { success: false }; }
+  }
 
-  strategyIsBlock: -> @storeOptions.strategy == 3
+  strategyIsBlock() { return this.storeOptions.strategy === 3; }
 
-  __submit__: (queueLength, weight) ->
-    await @yieldLoop()
-    if @storeOptions.maxConcurrent? and weight > @storeOptions.maxConcurrent
-      throw new BottleneckError("Impossible to add a job having a weight of #{weight} to a limiter having a maxConcurrent setting of #{@storeOptions.maxConcurrent}")
-    now = Date.now()
-    reachedHWM = @storeOptions.highWater? and queueLength == @storeOptions.highWater and not @check(weight, now)
-    blocked = @strategyIsBlock() and (reachedHWM or @isBlocked now)
-    if blocked
-      @_unblockTime = now + @computePenalty()
-      @_nextRequest = @_unblockTime + @storeOptions.minTime
-      @instance._dropAllQueued()
-    { reachedHWM, blocked, strategy: @storeOptions.strategy }
+  __submit__(queueLength, weight) {
+    await(this.yieldLoop());
+    if ((this.storeOptions.maxConcurrent != null) && (weight > this.storeOptions.maxConcurrent)) {
+      throw new BottleneckError(`Impossible to add a job having a weight of ${weight} to a limiter having a maxConcurrent setting of ${this.storeOptions.maxConcurrent}`);
+    }
+    const now = Date.now();
+    const reachedHWM = (this.storeOptions.highWater != null) && (queueLength === this.storeOptions.highWater) && !this.check(weight, now);
+    const blocked = this.strategyIsBlock() && (reachedHWM || this.isBlocked(now));
+    if (blocked) {
+      this._unblockTime = now + this.computePenalty();
+      this._nextRequest = this._unblockTime + this.storeOptions.minTime;
+      this.instance._dropAllQueued();
+    }
+    return { reachedHWM, blocked, strategy: this.storeOptions.strategy };
+  }
 
-  __free__: (index, weight) ->
-    await @yieldLoop()
-    @_running -= weight
-    @_done += weight
-    @instance._drainAll @computeCapacity()
-    { running: @_running }
+  __free__(index, weight) {
+    await(this.yieldLoop());
+    this._running -= weight;
+    this._done += weight;
+    this.instance._drainAll(this.computeCapacity());
+    return { running: this._running };
+  }
+}
 
-module.exports = LocalDatastore
+module.exports = LocalDatastore;
+
+function __guardMethod__(obj, methodName, transform) {
+  if (typeof obj !== 'undefined' && obj !== null && typeof obj[methodName] === 'function') {
+    return transform(obj, methodName);
+  } else {
+    return undefined;
+  }
+}

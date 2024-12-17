@@ -1,84 +1,119 @@
-parser = require "./parser"
-Events = require "./Events"
-Scripts = require "./Scripts"
+/*
+ * decaffeinate suggestions:
+ * DS101: Remove unnecessary use of Array.from
+ * DS102: Remove unnecessary code created because of implicit returns
+ * DS201: Simplify complex destructure assignments
+ * DS206: Consider reworking classes to avoid initClass
+ * DS207: Consider shorter variations of null checks
+ * Full docs: https://github.com/decaffeinate/decaffeinate/blob/main/docs/suggestions.md
+ */
+const parser = require("./parser");
+const Events = require("./Events");
+const Scripts = require("./Scripts");
 
-class IORedisConnection
-  datastore: "ioredis"
-  defaults:
-    Redis: null
-    clientOptions: {}
-    clusterNodes: null
-    client: null
-    Promise: Promise
-    Events: null
+class IORedisConnection {
+  static initClass() {
+    this.prototype.datastore = "ioredis";
+    this.prototype.defaults = {
+      Redis: null,
+      clientOptions: {},
+      clusterNodes: null,
+      client: null,
+      Promise,
+      Events: null
+    };
+  }
 
-  constructor: (options={}) ->
-    parser.load options, @defaults, @
-    @Redis ?= eval("require")("ioredis") # Obfuscated or else Webpack/Angular will try to inline the optional ioredis module. To override this behavior: pass the ioredis module to Bottleneck as the 'Redis' option.
-    @Events ?= new Events @
-    @terminated = false
+  constructor(options) {
+    if (options == null) { options = {}; }
+    parser.load(options, this.defaults, this);
+    if (this.Redis == null) { this.Redis = eval("require")("ioredis"); } // Obfuscated or else Webpack/Angular will try to inline the optional ioredis module. To override this behavior: pass the ioredis module to Bottleneck as the 'Redis' option.
+    if (this.Events == null) { this.Events = new Events(this); }
+    this.terminated = false;
 
-    if @clusterNodes?
-      @client = new @Redis.Cluster @clusterNodes, @clientOptions
-      @subscriber = new @Redis.Cluster @clusterNodes, @clientOptions
-    else if @client? and !@client.duplicate?
-      @subscriber = new @Redis.Cluster @client.startupNodes, @client.options
-    else
-      @client ?= new @Redis @clientOptions
-      @subscriber = @client.duplicate()
-    @limiters = {}
+    if (this.clusterNodes != null) {
+      this.client = new this.Redis.Cluster(this.clusterNodes, this.clientOptions);
+      this.subscriber = new this.Redis.Cluster(this.clusterNodes, this.clientOptions);
+    } else if ((this.client != null) && (this.client.duplicate == null)) {
+      this.subscriber = new this.Redis.Cluster(this.client.startupNodes, this.client.options);
+    } else {
+      if (this.client == null) { this.client = new this.Redis(this.clientOptions); }
+      this.subscriber = this.client.duplicate();
+    }
+    this.limiters = {};
 
-    @ready = @Promise.all [@_setup(@client, false), @_setup(@subscriber, true)]
-    .then =>
-      @_loadScripts()
-      { @client, @subscriber }
+    this.ready = this.Promise.all([this._setup(this.client, false), this._setup(this.subscriber, true)])
+    .then(() => {
+      this._loadScripts();
+      return { client: this.client, subscriber: this.subscriber };
+  });
+  }
 
-  _setup: (client, sub) ->
-    client.setMaxListeners 0
-    new @Promise (resolve, reject) =>
-      client.on "error", (e) => @Events.trigger "error", e
-      if sub
-        client.on "message", (channel, message) =>
-          @limiters[channel]?._store.onMessage channel, message
-      if client.status == "ready" then resolve()
-      else client.once "ready", resolve
+  _setup(client, sub) {
+    client.setMaxListeners(0);
+    return new this.Promise((resolve, reject) => {
+      client.on("error", e => this.Events.trigger("error", e));
+      if (sub) {
+        client.on("message", (channel, message) => {
+          return (this.limiters[channel] != null ? this.limiters[channel]._store.onMessage(channel, message) : undefined);
+        });
+      }
+      if (client.status === "ready") { return resolve();
+      } else { return client.once("ready", resolve); }
+    });
+  }
 
-  _loadScripts: -> Scripts.names.forEach (name) => @client.defineCommand name, { lua: Scripts.payload(name) }
+  _loadScripts() { return Scripts.names.forEach(name => this.client.defineCommand(name, { lua: Scripts.payload(name) })); }
 
-  __runCommand__: (cmd) ->
-    await @ready
-    [[_, deleted]] = await @client.pipeline([cmd]).exec()
-    deleted
+  __runCommand__(cmd) {
+    await(this.ready);
+    const array = await(this.client.pipeline([cmd]).exec()), [_, deleted] = Array.from(array[0]);
+    return deleted;
+  }
 
-  __addLimiter__: (instance) ->
-    @Promise.all [instance.channel(), instance.channel_client()].map (channel) =>
-      new @Promise (resolve, reject) =>
-        @subscriber.subscribe channel, =>
-          @limiters[channel] = instance
-          resolve()
+  __addLimiter__(instance) {
+    return this.Promise.all([instance.channel(), instance.channel_client()].map(channel => {
+      return new this.Promise((resolve, reject) => {
+        return this.subscriber.subscribe(channel, () => {
+          this.limiters[channel] = instance;
+          return resolve();
+        });
+      });
+    })
+    );
+  }
 
-  __removeLimiter__: (instance) ->
-    [instance.channel(), instance.channel_client()].forEach (channel) =>
-      await @subscriber.unsubscribe channel unless @terminated
-      delete @limiters[channel]
+  __removeLimiter__(instance) {
+    return [instance.channel(), instance.channel_client()].forEach(channel => {
+      if (!this.terminated) { await(this.subscriber.unsubscribe(channel)); }
+      return delete this.limiters[channel];
+  });
+  }
 
-  __scriptArgs__: (name, id, args, cb) ->
-    keys = Scripts.keys name, id
-    [keys.length].concat keys, args, cb
+  __scriptArgs__(name, id, args, cb) {
+    const keys = Scripts.keys(name, id);
+    return [keys.length].concat(keys, args, cb);
+  }
 
-  __scriptFn__: (name) ->
-    @client[name].bind(@client)
+  __scriptFn__(name) {
+    return this.client[name].bind(this.client);
+  }
 
-  disconnect: (flush=true) ->
-    clearInterval(@limiters[k]._store.heartbeat) for k in Object.keys @limiters
-    @limiters = {}
-    @terminated = true
+  disconnect(flush) {
+    if (flush == null) { flush = true; }
+    for (var k of Array.from(Object.keys(this.limiters))) { clearInterval(this.limiters[k]._store.heartbeat); }
+    this.limiters = {};
+    this.terminated = true;
 
-    if flush
-      @Promise.all [@client.quit(), @subscriber.quit()]
-    else
-      @client.disconnect()
-      @subscriber.disconnect()
-      @Promise.resolve()
+    if (flush) {
+      return this.Promise.all([this.client.quit(), this.subscriber.quit()]);
+    } else {
+      this.client.disconnect();
+      this.subscriber.disconnect();
+      return this.Promise.resolve();
+    }
+  }
+}
+IORedisConnection.initClass();
 
-module.exports = IORedisConnection
+module.exports = IORedisConnection;

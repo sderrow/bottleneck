@@ -1,80 +1,139 @@
-parser = require "./parser"
-Events = require "./Events"
-RedisConnection = require "./RedisConnection"
-IORedisConnection = require "./IORedisConnection"
-Scripts = require "./Scripts"
+/*
+ * decaffeinate suggestions:
+ * DS101: Remove unnecessary use of Array.from
+ * DS102: Remove unnecessary code created because of implicit returns
+ * DS103: Rewrite code to no longer use __guard__, or convert again using --optional-chaining
+ * DS205: Consider reworking code to avoid use of IIFEs
+ * DS206: Consider reworking classes to avoid initClass
+ * DS207: Consider shorter variations of null checks
+ * Full docs: https://github.com/decaffeinate/decaffeinate/blob/main/docs/suggestions.md
+ */
+const parser = require("./parser");
+const Events = require("./Events");
+const RedisConnection = require("./RedisConnection");
+const IORedisConnection = require("./IORedisConnection");
+const Scripts = require("./Scripts");
 
-class Group
-  defaults:
-    timeout: 1000 * 60 * 5
-    connection: null
-    Promise: Promise
-    id: "group-key"
+class Group {
+  static initClass() {
+    this.prototype.defaults = {
+      timeout: 1000 * 60 * 5,
+      connection: null,
+      Promise,
+      id: "group-key"
+    };
+  }
 
-  constructor: (@limiterOptions={}) ->
-    parser.load @limiterOptions, @defaults, @
-    @Events = new Events @
-    @instances = {}
-    @Bottleneck = require "./Bottleneck"
-    @_startAutoCleanup()
-    @sharedConnection = @connection?
+  constructor(limiterOptions) {
+    this.deleteKey = this.deleteKey.bind(this);
+    if (limiterOptions == null) { limiterOptions = {}; }
+    this.limiterOptions = limiterOptions;
+    parser.load(this.limiterOptions, this.defaults, this);
+    this.Events = new Events(this);
+    this.instances = {};
+    this.Bottleneck = require("./Bottleneck");
+    this._startAutoCleanup();
+    this.sharedConnection = (this.connection != null);
 
-    if !@connection?
-      if @limiterOptions.datastore == "redis"
-        @connection = new RedisConnection Object.assign {}, @limiterOptions, { @Events }
-      else if @limiterOptions.datastore == "ioredis"
-        @connection = new IORedisConnection Object.assign {}, @limiterOptions, { @Events }
-
-  key: (key="") -> @instances[key] ? do =>
-    limiter = @instances[key] = new @Bottleneck Object.assign @limiterOptions, {
-      id: "#{@id}-#{key}",
-      @timeout,
-      @connection
+    if ((this.connection == null)) {
+      if (this.limiterOptions.datastore === "redis") {
+        this.connection = new RedisConnection(Object.assign({}, this.limiterOptions, { Events: this.Events }));
+      } else if (this.limiterOptions.datastore === "ioredis") {
+        this.connection = new IORedisConnection(Object.assign({}, this.limiterOptions, { Events: this.Events }));
+      }
     }
-    @Events.trigger "created", limiter, key
-    limiter
+  }
 
-  deleteKey: (key="") =>
-    instance = @instances[key]
-    if @connection
-      deleted = await @connection.__runCommand__ ['del', Scripts.allKeys("#{@id}-#{key}")...]
-    if instance?
-      delete @instances[key]
-      await instance.disconnect()
-    instance? or deleted > 0
+  key(key) { if (key == null) { key = ""; } return this.instances[key] != null ? this.instances[key] : (() => {
+    const limiter = (this.instances[key] = new this.Bottleneck(Object.assign(this.limiterOptions, {
+      id: `${this.id}-${key}`,
+      timeout: this.timeout,
+      connection: this.connection
+    })));
+    this.Events.trigger("created", limiter, key);
+    return limiter;
+  })(); }
 
-  limiters: -> { key: k, limiter: v } for k, v of @instances
+  deleteKey(key) {
+    let deleted;
+    if (key == null) { key = ""; }
+    const instance = this.instances[key];
+    if (this.connection) {
+      deleted = await(this.connection.__runCommand__(['del', ...Array.from(Scripts.allKeys(`${this.id}-${key}`))]));
+    }
+    if (instance != null) {
+      delete this.instances[key];
+      await(instance.disconnect());
+    }
+    return (instance != null) || (deleted > 0);
+  }
 
-  keys: -> Object.keys @instances
+  limiters() { return (() => {
+    const result = [];
+    for (var k in this.instances) {
+      var v = this.instances[k];
+      result.push({ key: k, limiter: v });
+    }
+    return result;
+  })(); }
 
-  clusterKeys: ->
-    if !@connection? then return @Promise.resolve @keys()
-    keys = []
-    cursor = null
-    start = "b_#{@id}-".length
-    end = "_settings".length
-    until cursor == 0
-      [next, found] = await @connection.__runCommand__ ["scan", (cursor ? 0), "match", "b_#{@id}-*_settings", "count", 10000]
-      cursor = ~~next
-      keys.push(k.slice(start, -end)) for k in found
-    keys
+  keys() { return Object.keys(this.instances); }
 
-  _startAutoCleanup: ->
-    clearInterval @interval
-    (@interval = setInterval =>
-      time = Date.now()
-      for k, v of @instances
-        try if await v._store.__groupCheck__(time) then @deleteKey k
-        catch e then v.Events.trigger "error", e
-    , (@timeout / 2)).unref?()
+  clusterKeys() {
+    if ((this.connection == null)) { return this.Promise.resolve(this.keys()); }
+    const keys = [];
+    let cursor = null;
+    const start = `b_${this.id}-`.length;
+    const end = "_settings".length;
+    while (cursor !== 0) {
+      var [next, found] = Array.from(await(this.connection.__runCommand__(["scan", (cursor != null ? cursor : 0), "match", `b_${this.id}-*_settings`, "count", 10000])));
+      cursor = ~~next;
+      for (var k of Array.from(found)) { keys.push(k.slice(start, -end)); }
+    }
+    return keys;
+  }
 
-  updateSettings: (options={}) ->
-    parser.overwrite options, @defaults, @
-    parser.overwrite options, options, @limiterOptions
-    @_startAutoCleanup() if options.timeout?
+  _startAutoCleanup() {
+    clearInterval(this.interval);
+    return __guardMethod__((this.interval = setInterval(() => {
+      const time = Date.now();
+      return (() => {
+        const result = [];
+        for (var k in this.instances) {
+          var v = this.instances[k];
+          try { if (await(v._store.__groupCheck__(time))) { result.push(this.deleteKey(k)); } else {
+            result.push(undefined);
+          } }
+          catch (e) { result.push(v.Events.trigger("error", e)); }
+        }
+        return result;
+      })();
+    }
+    , (this.timeout / 2))), 'unref', o => o.unref());
+  }
 
-  disconnect: (flush=true) ->
-    if !@sharedConnection
-      @connection?.disconnect flush
+  updateSettings(options) {
+    if (options == null) { options = {}; }
+    parser.overwrite(options, this.defaults, this);
+    parser.overwrite(options, options, this.limiterOptions);
+    if (options.timeout != null) { return this._startAutoCleanup(); }
+  }
 
-module.exports = Group
+  disconnect(flush) {
+    if (flush == null) { flush = true; }
+    if (!this.sharedConnection) {
+      return (this.connection != null ? this.connection.disconnect(flush) : undefined);
+    }
+  }
+}
+Group.initClass();
+
+module.exports = Group;
+
+function __guardMethod__(obj, methodName, transform) {
+  if (typeof obj !== 'undefined' && obj !== null && typeof obj[methodName] === 'function') {
+    return transform(obj, methodName);
+  } else {
+    return undefined;
+  }
+}

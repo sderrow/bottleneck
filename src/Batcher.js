@@ -1,39 +1,59 @@
-parser = require "./parser"
-Events = require "./Events"
+/*
+ * decaffeinate suggestions:
+ * DS102: Remove unnecessary code created because of implicit returns
+ * DS206: Consider reworking classes to avoid initClass
+ * DS207: Consider shorter variations of null checks
+ * Full docs: https://github.com/decaffeinate/decaffeinate/blob/main/docs/suggestions.md
+ */
+const parser = require("./parser");
+const Events = require("./Events");
 
-class Batcher
-  defaults:
-    maxTime: null
-    maxSize: null
-    Promise: Promise
+class Batcher {
+  static initClass() {
+    this.prototype.defaults = {
+      maxTime: null,
+      maxSize: null,
+      Promise
+    };
+  }
 
-  constructor: (@options={}) ->
-    parser.load @options, @defaults, @
-    @Events = new Events @
-    @_arr = []
-    @_resetPromise()
-    @_lastFlush = Date.now()
+  constructor(options) {
+    if (options == null) { options = {}; }
+    this.options = options;
+    parser.load(this.options, this.defaults, this);
+    this.Events = new Events(this);
+    this._arr = [];
+    this._resetPromise();
+    this._lastFlush = Date.now();
+  }
 
-  _resetPromise: ->
-    @_promise = new @Promise (res, rej) => @_resolve = res
+  _resetPromise() {
+    return this._promise = new this.Promise((res, rej) => { return this._resolve = res; });
+  }
 
-  _flush: ->
-    clearTimeout @_timeout
-    @_lastFlush = Date.now()
-    @_resolve()
-    @Events.trigger "batch", @_arr
-    @_arr = []
-    @_resetPromise()
+  _flush() {
+    clearTimeout(this._timeout);
+    this._lastFlush = Date.now();
+    this._resolve();
+    this.Events.trigger("batch", this._arr);
+    this._arr = [];
+    return this._resetPromise();
+  }
 
-  add: (data) ->
-    @_arr.push data
-    ret = @_promise
-    if @_arr.length == @maxSize
-      @_flush()
-    else if @maxTime? and @_arr.length == 1
-      @_timeout = setTimeout =>
-        @_flush()
-      , @maxTime
-    ret
+  add(data) {
+    this._arr.push(data);
+    const ret = this._promise;
+    if (this._arr.length === this.maxSize) {
+      this._flush();
+    } else if ((this.maxTime != null) && (this._arr.length === 1)) {
+      this._timeout = setTimeout(() => {
+        return this._flush();
+      }
+      , this.maxTime);
+    }
+    return ret;
+  }
+}
+Batcher.initClass();
 
-module.exports = Batcher
+module.exports = Batcher;
