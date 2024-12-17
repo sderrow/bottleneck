@@ -1,15 +1,6 @@
 /* eslint-disable
     no-unused-vars,
 */
-// TODO: This file was created by bulk-decaffeinate.
-// Fix any style issues and re-enable lint.
-/*
- * decaffeinate suggestions:
- * DS102: Remove unnecessary code created because of implicit returns
- * DS206: Consider reworking classes to avoid initClass
- * DS207: Consider shorter variations of null checks
- * Full docs: https://github.com/decaffeinate/decaffeinate/blob/main/docs/suggestions.md
- */
 const parser = require("./parser");
 const Events = require("./Events");
 
@@ -34,9 +25,9 @@ class Batcher {
   }
 
   _resetPromise() {
-    return (this._promise = new Promise((res, rej) => {
-      return (this._resolve = res);
-    }));
+    this._promise = new Promise((res, rej) => {
+      this._resolve = res;
+    });
   }
 
   _flush() {
@@ -45,7 +36,7 @@ class Batcher {
     this._resolve();
     this.Events.trigger("batch", this._arr);
     this._arr = [];
-    return this._resetPromise();
+    this._resetPromise();
   }
 
   add(data) {
@@ -55,7 +46,7 @@ class Batcher {
       this._flush();
     } else if (this.maxTime != null && this._arr.length === 1) {
       this._timeout = setTimeout(() => {
-        return this._flush();
+        this._flush();
       }, this.maxTime);
     }
     return ret;
