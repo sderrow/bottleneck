@@ -43,9 +43,7 @@ class Group {
     }
   }
 
-  key(key) {
-    key ??= "";
-
+  key(key = "") {
     let limiter = this.instances[key];
     if (!limiter) {
       limiter = new Bottleneck(
@@ -61,10 +59,8 @@ class Group {
     return limiter;
   }
 
-  async deleteKey(key) {
+  async deleteKey(key = "") {
     let deleted;
-    key ??= "";
-
     const instance = this.instances[key];
     if (this.connection) {
       deleted = await this.connection.__runCommand__([
@@ -140,9 +136,7 @@ class Group {
     }
   }
 
-  disconnect(flush) {
-    flush ??= true;
-
+  disconnect(flush = true) {
     if (!this.sharedConnection) {
       return this.connection?.disconnect(flush);
     }

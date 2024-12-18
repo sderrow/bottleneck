@@ -123,10 +123,10 @@ class RedisDatastore {
     }
   }
 
-  __disconnect__(flush) {
+  async __disconnect__(flush) {
     clearInterval(this.heartbeat);
     if (this.sharedConnection) {
-      return this.connection.__removeLimiter__(this.instance);
+      await this.connection.__removeLimiter__(this.instance);
     } else {
       return this.connection.disconnect(flush);
     }

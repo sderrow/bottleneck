@@ -1,9 +1,3 @@
-/* eslint-disable
-    no-undef,
-    no-unused-vars,
-*/
-// TODO: This file was created by bulk-decaffeinate.
-// Fix any style issues and re-enable lint.
 /*
  * decaffeinate suggestions:
  * DS101: Remove unnecessary use of Array.from
@@ -127,12 +121,8 @@ class Bottleneck {
       }
     })();
 
-    this._queues.on("leftzero", () =>
-      __guardMethod__(this._store.heartbeat, "ref", (o) => o.ref()),
-    );
-    this._queues.on("zero", () =>
-      __guardMethod__(this._store.heartbeat, "unref", (o) => o.unref()),
-    );
+    this._queues.on("leftzero", () => this._store.heartbeat?.ref());
+    this._queues.on("zero", () => this._store.heartbeat?.unref());
   }
 
   _validateOptions(options, invalid) {
@@ -163,11 +153,8 @@ class Bottleneck {
     return this._store.__publish__(message);
   }
 
-  disconnect(flush) {
-    if (flush == null) {
-      flush = true;
-    }
-    return this._store.__disconnect__(flush);
+  async disconnect(flush = true) {
+    await this._store.__disconnect__(flush);
   }
 
   chain(_limiter) {

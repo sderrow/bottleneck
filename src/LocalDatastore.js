@@ -1,7 +1,3 @@
-/* eslint-disable
-    no-undef,
-    no-unused-vars,
-*/
 // TODO: This file was created by bulk-decaffeinate.
 // Fix any style issues and re-enable lint.
 /*
@@ -79,22 +75,18 @@ class LocalDatastore {
     }
   }
 
-  __publish__(message) {
-    await(this.yieldLoop());
+  async __publish__(message) {
+    await this.yieldLoop();
     return this.instance.Events.trigger("message", message.toString());
   }
 
-  __disconnect__(flush) {
-    await(this.yieldLoop());
+  async __disconnect__() {
+    await this.yieldLoop();
     clearInterval(this.heartbeat);
-    return Promise.resolve();
   }
 
   yieldLoop(t) {
-    if (t == null) {
-      t = 0;
-    }
-    return new Promise((resolve, reject) => setTimeout(resolve, t));
+    return new Promise((resolve) => setTimeout(resolve, t ?? 0));
   }
 
   computePenalty() {
