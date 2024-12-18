@@ -1,9 +1,3 @@
-/* eslint-disable
-    no-undef,
-    no-unused-vars,
-*/
-// TODO: This file was created by bulk-decaffeinate.
-// Fix any style issues and re-enable lint.
 /*
  * decaffeinate suggestions:
  * DS101: Remove unnecessary use of Array.from
@@ -18,28 +12,22 @@ const Events = require("./Events");
 const Scripts = require("./Scripts");
 
 class IORedisConnection {
-  static initClass() {
-    this.prototype.datastore = "ioredis";
-    this.prototype.defaults = {
-      Redis: null,
-      clientOptions: {},
-      clusterNodes: null,
-      client: null,
-      Events: null,
-    };
-  }
+  datastore = "ioredis";
+  defaults = {
+    Redis: null,
+    clientOptions: {},
+    clusterNodes: null,
+    client: null,
+    Events: null,
+  };
 
   constructor(options) {
-    if (options == null) {
-      options = {};
-    }
+    options ??= {};
     parser.load(options, this.defaults, this);
-    if (this.Redis == null) {
-      this.Redis = eval("require")("ioredis");
-    } // Obfuscated or else Webpack/Angular will try to inline the optional ioredis module. To override this behavior: pass the ioredis module to Bottleneck as the 'Redis' option.
-    if (this.Events == null) {
-      this.Events = new Events(this);
-    }
+
+    // Obfuscated or else Webpack/Angular will try to inline the optional ioredis module. To override this behavior: pass the ioredis module to Bottleneck as the 'Redis' option.
+    this.Redis ??= eval("require")("ioredis");
+    this.Events ??= new Events(this);
     this.terminated = false;
 
     if (this.clusterNodes != null) {
@@ -48,9 +36,7 @@ class IORedisConnection {
     } else if (this.client != null && this.client.duplicate == null) {
       this.subscriber = new this.Redis.Cluster(this.client.startupNodes, this.client.options);
     } else {
-      if (this.client == null) {
-        this.client = new this.Redis(this.clientOptions);
-      }
+      this.client ??= new this.Redis(this.clientOptions);
       this.subscriber = this.client.duplicate();
     }
     this.limiters = {};
@@ -66,19 +52,17 @@ class IORedisConnection {
 
   _setup(client, sub) {
     client.setMaxListeners(0);
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve) => {
       client.on("error", (e) => this.Events.trigger("error", e));
       if (sub) {
         client.on("message", (channel, message) => {
-          return this.limiters[channel] != null
-            ? this.limiters[channel]._store.onMessage(channel, message)
-            : undefined;
+          this.limiters[channel]?._store.onMessage(channel, message);
         });
       }
       if (client.status === "ready") {
-        return resolve();
+        resolve();
       } else {
-        return client.once("ready", resolve);
+        client.once("ready", resolve);
       }
     });
   }
@@ -89,33 +73,34 @@ class IORedisConnection {
     );
   }
 
-  __runCommand__(cmd) {
-    await(this.ready);
-    const array = await(this.client.pipeline([cmd]).exec()),
-      [_, deleted] = Array.from(array[0]);
+  async __runCommand__(cmd) {
+    await this.ready;
+    const [[, deleted]] = await this.client.pipeline([cmd]).exec();
     return deleted;
   }
 
-  __addLimiter__(instance) {
-    return Promise.all(
+  async __addLimiter__(instance) {
+    await Promise.all(
       [instance.channel(), instance.channel_client()].map((channel) => {
-        return new Promise((resolve, reject) => {
-          return this.subscriber.subscribe(channel, () => {
+        return new Promise((resolve) => {
+          this.subscriber.subscribe(channel, () => {
             this.limiters[channel] = instance;
-            return resolve();
+            resolve();
           });
         });
       }),
     );
   }
 
-  __removeLimiter__(instance) {
-    return [instance.channel(), instance.channel_client()].forEach((channel) => {
-      if (!this.terminated) {
-        await(this.subscriber.unsubscribe(channel));
-      }
-      return delete this.limiters[channel];
-    });
+  async __removeLimiter__(instance) {
+    await Promise.all(
+      [instance.channel(), instance.channel_client()].map(async (channel) => {
+        if (!this.terminated) {
+          await this.subscriber.unsubscribe(channel);
+        }
+        delete this.limiters[channel];
+      }),
+    );
   }
 
   __scriptArgs__(name, id, args, cb) {
@@ -127,25 +112,20 @@ class IORedisConnection {
     return this.client[name].bind(this.client);
   }
 
-  disconnect(flush) {
-    if (flush == null) {
-      flush = true;
-    }
-    for (var k of Array.from(Object.keys(this.limiters))) {
-      clearInterval(this.limiters[k]._store.heartbeat);
+  async disconnect(flush = true) {
+    for (const v of Object.values(this.limiters)) {
+      clearInterval(v._store.heartbeat);
     }
     this.limiters = {};
     this.terminated = true;
 
     if (flush) {
-      return Promise.all([this.client.quit(), this.subscriber.quit()]);
+      await Promise.all([this.client.quit(), this.subscriber.quit()]);
     } else {
       this.client.disconnect();
       this.subscriber.disconnect();
-      return Promise.resolve();
     }
   }
 }
-IORedisConnection.initClass();
 
 module.exports = IORedisConnection;

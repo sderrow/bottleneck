@@ -1,9 +1,3 @@
-/* eslint-disable
-    no-undef,
-    no-unused-vars,
-*/
-// TODO: This file was created by bulk-decaffeinate.
-// Fix any style issues and re-enable lint.
 /*
  * decaffeinate suggestions:
  * DS101: Remove unnecessary use of Array.from
@@ -17,32 +11,23 @@ const Events = require("./Events");
 const Scripts = require("./Scripts");
 
 class RedisConnection {
-  static initClass() {
-    this.prototype.datastore = "redis";
-    this.prototype.defaults = {
-      Redis: null,
-      clientOptions: {},
-      client: null,
-      Events: null,
-    };
-  }
+  defaults = {
+    Redis: null,
+    clientOptions: {},
+    client: null,
+    Events: null,
+  };
+  datastore = "redis";
 
   constructor(options) {
-    if (options == null) {
-      options = {};
-    }
+    options ??= {};
     parser.load(options, this.defaults, this);
-    if (this.Redis == null) {
-      this.Redis = eval("require")("redis");
-    } // Obfuscated or else Webpack/Angular will try to inline the optional redis module. To override this behavior: pass the redis module to Bottleneck as the 'Redis' option.
-    if (this.Events == null) {
-      this.Events = new Events(this);
-    }
+    // Obfuscated or else Webpack/Angular will try to inline the optional redis module. To override this behavior: pass the redis module to Bottleneck as the 'Redis' option.
+    this.Redis ??= eval("require")("redis");
+    this.Events ??= new Events(this);
     this.terminated = false;
 
-    if (this.client == null) {
-      this.client = this.Redis.createClient(this.clientOptions);
-    }
+    this.client ??= this.Redis.createClient(this.clientOptions);
     this.subscriber = this.client.duplicate();
     this.limiters = {};
     this.shas = {};
@@ -54,19 +39,17 @@ class RedisConnection {
 
   _setup(client, sub) {
     client.setMaxListeners(0);
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve) => {
       client.on("error", (e) => this.Events.trigger("error", e));
       if (sub) {
         client.on("message", (channel, message) => {
-          return this.limiters[channel] != null
-            ? this.limiters[channel]._store.onMessage(channel, message)
-            : undefined;
+          this.limiters[channel]?._store.onMessage(channel, message);
         });
       }
       if (client.ready) {
-        return resolve();
+        resolve();
       } else {
-        return client.once("ready", resolve);
+        client.once("ready", resolve);
       }
     });
   }
@@ -74,12 +57,12 @@ class RedisConnection {
   _loadScript(name) {
     return new Promise((resolve, reject) => {
       const payload = Scripts.payload(name);
-      return this.client.multi([["script", "load", payload]]).exec((err, replies) => {
+      this.client.multi([["script", "load", payload]]).exec((err, replies) => {
         if (err != null) {
-          return reject(err);
+          reject(err);
         }
         this.shas[name] = replies[0];
-        return resolve(replies[0]);
+        resolve(replies[0]);
       });
     });
   }
@@ -88,55 +71,53 @@ class RedisConnection {
     return Promise.all(Scripts.names.map((k) => this._loadScript(k)));
   }
 
-  __runCommand__(cmd) {
-    await(this.ready);
+  async __runCommand__(cmd) {
+    await this.ready;
     return new Promise((resolve, reject) => {
-      return this.client.multi([cmd]).exec_atomic(function (err, replies) {
+      this.client.multi([cmd]).exec_atomic(function (err, replies) {
         if (err != null) {
-          return reject(err);
+          reject(err);
         } else {
-          return resolve(replies[0]);
+          resolve(replies[0]);
         }
       });
     });
   }
 
-  __addLimiter__(instance) {
-    return Promise.all(
+  async __addLimiter__(instance) {
+    await Promise.all(
       [instance.channel(), instance.channel_client()].map((channel) => {
-        return new Promise((resolve, reject) => {
+        return new Promise((resolve) => {
           var handler = (chan) => {
             if (chan === channel) {
               this.subscriber.removeListener("subscribe", handler);
               this.limiters[channel] = instance;
-              return resolve();
+              resolve();
             }
           };
           this.subscriber.on("subscribe", handler);
-          return this.subscriber.subscribe(channel);
+          this.subscriber.subscribe(channel);
         });
       }),
     );
   }
 
-  __removeLimiter__(instance) {
-    return Promise.all(
-      [instance.channel(), instance.channel_client()].map((channel) => {
+  async __removeLimiter__(instance) {
+    await Promise.all(
+      [instance.channel(), instance.channel_client()].map(async (channel) => {
         if (!this.terminated) {
-          await(
-            new Promise((resolve, reject) => {
-              return this.subscriber.unsubscribe(channel, function (err, chan) {
-                if (err != null) {
-                  return reject(err);
-                }
-                if (chan === channel) {
-                  return resolve();
-                }
-              });
-            }),
-          );
+          await new Promise((resolve, reject) => {
+            return this.subscriber.unsubscribe(channel, function (err, chan) {
+              if (err != null) {
+                return reject(err);
+              }
+              if (chan === channel) {
+                return resolve();
+              }
+            });
+          });
         }
-        return delete this.limiters[channel];
+        delete this.limiters[channel];
       }),
     );
   }
@@ -146,25 +127,20 @@ class RedisConnection {
     return [this.shas[name], keys.length].concat(keys, args, cb);
   }
 
-  __scriptFn__(name) {
+  __scriptFn__() {
     return this.client.evalsha.bind(this.client);
   }
 
-  disconnect(flush) {
-    if (flush == null) {
-      flush = true;
-    }
-    for (var k of Array.from(Object.keys(this.limiters))) {
-      clearInterval(this.limiters[k]._store.heartbeat);
+  async disconnect(flush = true) {
+    for (const v of Object.values(this.limiters)) {
+      clearInterval(v._store.heartbeat);
     }
     this.limiters = {};
     this.terminated = true;
 
     this.client.end(flush);
     this.subscriber.end(flush);
-    return Promise.resolve();
   }
 }
-RedisConnection.initClass();
 
 module.exports = RedisConnection;
