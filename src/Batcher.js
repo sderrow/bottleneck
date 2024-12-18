@@ -1,22 +1,11 @@
-/* eslint-disable
-    no-unused-vars,
-*/
 const parser = require("./parser");
 const Events = require("./Events");
 
 class Batcher {
-  static initClass() {
-    this.prototype.defaults = {
-      maxTime: null,
-      maxSize: null,
-    };
-  }
+  defaults = { maxTime: null, maxSize: null };
 
   constructor(options) {
-    if (options == null) {
-      options = {};
-    }
-    this.options = options;
+    this.options = options ?? {};
     parser.load(this.options, this.defaults, this);
     this.Events = new Events(this);
     this._arr = [];
@@ -25,7 +14,7 @@ class Batcher {
   }
 
   _resetPromise() {
-    this._promise = new Promise((res, rej) => {
+    this._promise = new Promise((res) => {
       this._resolve = res;
     });
   }
@@ -41,7 +30,7 @@ class Batcher {
 
   add(data) {
     this._arr.push(data);
-    const ret = this._promise;
+    const existingPromise = this._promise;
     if (this._arr.length === this.maxSize) {
       this._flush();
     } else if (this.maxTime != null && this._arr.length === 1) {
@@ -49,9 +38,8 @@ class Batcher {
         this._flush();
       }, this.maxTime);
     }
-    return ret;
+    return existingPromise;
   }
 }
-Batcher.initClass();
 
 module.exports = Batcher;

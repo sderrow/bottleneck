@@ -1,8 +1,3 @@
-/* eslint-disable
-    no-undef,
-*/
-// TODO: This file was created by bulk-decaffeinate.
-// Fix any style issues and re-enable lint.
 /*
  * decaffeinate suggestions:
  * DS101: Remove unnecessary use of Array.from
@@ -15,29 +10,23 @@
  */
 const parser = require("./parser");
 const Events = require("./Events");
+const Bottleneck = require("./Bottleneck");
 const RedisConnection = require("./RedisConnection");
 const IORedisConnection = require("./IORedisConnection");
 const Scripts = require("./Scripts");
 
 class Group {
-  static initClass() {
-    this.prototype.defaults = {
-      timeout: 1000 * 60 * 5,
-      connection: null,
-      id: "group-key",
-    };
-  }
+  defaults = {
+    timeout: 1000 * 60 * 5,
+    connection: null,
+    id: "group-key",
+  };
 
   constructor(limiterOptions) {
-    this.deleteKey = this.deleteKey.bind(this);
-    if (limiterOptions == null) {
-      limiterOptions = {};
-    }
-    this.limiterOptions = limiterOptions;
+    this.limiterOptions = limiterOptions ?? {};
     parser.load(this.limiterOptions, this.defaults, this);
     this.Events = new Events(this);
     this.instances = {};
-    this.Bottleneck = require("./Bottleneck");
     this._startAutoCleanup();
     this.sharedConnection = this.connection != null;
 
@@ -55,61 +44,50 @@ class Group {
   }
 
   key(key) {
-    if (key == null) {
-      key = "";
+    key ??= "";
+
+    let limiter = this.instances[key];
+    if (!limiter) {
+      limiter = new Bottleneck(
+        Object.assign(this.limiterOptions, {
+          id: `${this.id}-${key}`,
+          timeout: this.timeout,
+          connection: this.connection,
+        }),
+      );
+      this.Events.trigger("created", limiter, key);
+      this.instances[key] = limiter;
     }
-    return this.instances[key] != null
-      ? this.instances[key]
-      : (() => {
-          const limiter = (this.instances[key] = new this.Bottleneck(
-            Object.assign(this.limiterOptions, {
-              id: `${this.id}-${key}`,
-              timeout: this.timeout,
-              connection: this.connection,
-            }),
-          ));
-          this.Events.trigger("created", limiter, key);
-          return limiter;
-        })();
+    return limiter;
   }
 
-  deleteKey(key) {
+  async deleteKey(key) {
     let deleted;
-    if (key == null) {
-      key = "";
-    }
+    key ??= "";
+
     const instance = this.instances[key];
     if (this.connection) {
-      deleted = await(
-        this.connection.__runCommand__([
-          "del",
-          ...Array.from(Scripts.allKeys(`${this.id}-${key}`)),
-        ]),
-      );
+      deleted = await this.connection.__runCommand__([
+        "del",
+        ...Scripts.allKeys(`${this.id}-${key}`),
+      ]);
     }
     if (instance != null) {
       delete this.instances[key];
-      await(instance.disconnect());
+      await instance.disconnect();
     }
     return instance != null || deleted > 0;
   }
 
   limiters() {
-    return (() => {
-      const result = [];
-      for (var k in this.instances) {
-        var v = this.instances[k];
-        result.push({ key: k, limiter: v });
-      }
-      return result;
-    })();
+    return Object.entries(this.instances).map(([key, limiter]) => ({ key, limiter }));
   }
 
   keys() {
     return Object.keys(this.instances);
   }
 
-  clusterKeys() {
+  async clusterKeys() {
     if (this.connection == null) {
       return Promise.resolve(this.keys());
     }
@@ -118,20 +96,18 @@ class Group {
     const start = `b_${this.id}-`.length;
     const end = "_settings".length;
     while (cursor !== 0) {
-      var [next, found] = Array.from(
-        await(
-          this.connection.__runCommand__([
-            "scan",
-            cursor != null ? cursor : 0,
-            "match",
-            `b_${this.id}-*_settings`,
-            "count",
-            10000,
-          ]),
-        ),
+      const [next, found] = Array.from(
+        await this.connection.__runCommand__([
+          "scan",
+          cursor ?? 0,
+          "match",
+          `b_${this.id}-*_settings`,
+          "count",
+          10000,
+        ]),
       );
       cursor = ~~next;
-      for (var k of Array.from(found)) {
+      for (const k of found) {
         keys.push(k.slice(start, -end));
       }
     }
@@ -140,35 +116,23 @@ class Group {
 
   _startAutoCleanup() {
     clearInterval(this.interval);
-    return __guardMethod__(
-      (this.interval = setInterval(() => {
-        const time = Date.now();
-        return (() => {
-          const result = [];
-          for (var k in this.instances) {
-            var v = this.instances[k];
-            try {
-              if (await(v._store.__groupCheck__(time))) {
-                result.push(this.deleteKey(k));
-              } else {
-                result.push(undefined);
-              }
-            } catch (e) {
-              result.push(v.Events.trigger("error", e));
-            }
+
+    this.interval = setInterval(async () => {
+      const time = Date.now();
+      for (const [k, v] of Object.entries(this.instances)) {
+        try {
+          if (await v._store.__groupCheck__(time)) {
+            this.deleteKey(k);
           }
-          return result;
-        })();
-      }, this.timeout / 2)),
-      "unref",
-      (o) => o.unref(),
-    );
+        } catch (e) {
+          v.Events.trigger("error", e);
+        }
+      }
+    }, this.timeout / 2).unref();
   }
 
   updateSettings(options) {
-    if (options == null) {
-      options = {};
-    }
+    options ??= {};
     parser.overwrite(options, this.defaults, this);
     parser.overwrite(options, options, this.limiterOptions);
     if (options.timeout != null) {
@@ -177,22 +141,12 @@ class Group {
   }
 
   disconnect(flush) {
-    if (flush == null) {
-      flush = true;
-    }
+    flush ??= true;
+
     if (!this.sharedConnection) {
-      return this.connection != null ? this.connection.disconnect(flush) : undefined;
+      return this.connection?.disconnect(flush);
     }
   }
 }
-Group.initClass();
 
 module.exports = Group;
-
-function __guardMethod__(obj, methodName, transform) {
-  if (typeof obj !== "undefined" && obj !== null && typeof obj[methodName] === "function") {
-    return transform(obj, methodName);
-  } else {
-    return undefined;
-  }
-}
