@@ -1,14 +1,3 @@
-/*
- * decaffeinate suggestions:
- * DS101: Remove unnecessary use of Array.from
- * DS102: Remove unnecessary code created because of implicit returns
- * DS103: Rewrite code to no longer use __guard__, or convert again using --optional-chaining
- * DS201: Simplify complex destructure assignments
- * DS205: Consider reworking code to avoid use of IIFEs
- * DS206: Consider reworking classes to avoid initClass
- * DS207: Consider shorter variations of null checks
- * Full docs: https://github.com/decaffeinate/decaffeinate/blob/main/docs/suggestions.md
- */
 const NUM_PRIORITIES = 10;
 const DEFAULT_PRIORITY = 5;
 
@@ -20,81 +9,78 @@ const RedisDatastore = require("./RedisDatastore");
 const Events = require("./Events");
 const States = require("./States");
 const Sync = require("./Sync");
-
+const BottleneckError = require("./BottleneckError");
+const Group = require("./Group");
+const RedisConnection = require("./RedisConnection");
+const IORedisConnection = require("./IORedisConnection");
+const Batcher = require("./Batcher");
+const versionJson = require("./version.json");
 class Bottleneck {
-  static initClass() {
-    Bottleneck.default = Bottleneck;
-    Bottleneck.Events = Events;
-    Bottleneck.version = Bottleneck.prototype.version = require("./version.json").version;
-    Bottleneck.strategy = Bottleneck.prototype.strategy = {
-      LEAK: 1,
-      OVERFLOW: 2,
-      OVERFLOW_PRIORITY: 4,
-      BLOCK: 3,
-    };
-    Bottleneck.BottleneckError =
-      Bottleneck.prototype.BottleneckError = require("./BottleneckError");
-    Bottleneck.Group = Bottleneck.prototype.Group = require("./Group");
-    Bottleneck.RedisConnection =
-      Bottleneck.prototype.RedisConnection = require("./RedisConnection");
-    Bottleneck.IORedisConnection =
-      Bottleneck.prototype.IORedisConnection = require("./IORedisConnection");
-    Bottleneck.Batcher = Bottleneck.prototype.Batcher = require("./Batcher");
-    this.prototype.jobDefaults = {
-      priority: DEFAULT_PRIORITY,
-      weight: 1,
-      expiration: null,
-      id: "<no-id>",
-    };
-    this.prototype.storeDefaults = {
-      maxConcurrent: null,
-      minTime: 0,
-      highWater: null,
-      strategy: Bottleneck.prototype.strategy.LEAK,
-      penalty: null,
-      reservoir: null,
-      reservoirRefreshInterval: null,
-      reservoirRefreshAmount: null,
-      reservoirIncreaseInterval: null,
-      reservoirIncreaseAmount: null,
-      reservoirIncreaseMaximum: null,
-    };
-    this.prototype.localStoreDefaults = {
-      Promise,
-      timeout: null,
-      heartbeatInterval: 250,
-    };
-    this.prototype.redisStoreDefaults = {
-      Promise,
-      timeout: null,
-      heartbeatInterval: 5000,
-      clientTimeout: 10000,
-      Redis: null,
-      clientOptions: {},
-      clusterNodes: null,
-      clearDatastore: false,
-      connection: null,
-    };
-    this.prototype.instanceDefaults = {
-      datastore: "local",
-      connection: null,
-      id: "<no-id>",
-      rejectOnDrop: true,
-      trackDoneStatus: false,
-      Promise,
-    };
-    this.prototype.stopDefaults = {
-      enqueueErrorMessage: "This limiter has been stopped and cannot accept new jobs.",
-      dropWaitingJobs: true,
-      dropErrorMessage: "This limiter has been stopped.",
-    };
-  }
+  static BottleneckError = BottleneckError;
+  static Group = Group;
+  static RedisConnection = RedisConnection;
+  static IORedisConnection = IORedisConnection;
+  static Batcher = Batcher;
+  static Events = Events;
+  static strategy = {
+    LEAK: 1,
+    OVERFLOW: 2,
+    OVERFLOW_PRIORITY: 4,
+    BLOCK: 3,
+  };
+
+  version = versionJson.version;
+  jobDefaults = {
+    priority: DEFAULT_PRIORITY,
+    weight: 1,
+    expiration: null,
+    id: "<no-id>",
+  };
+  storeDefaults = {
+    maxConcurrent: null,
+    minTime: 0,
+    highWater: null,
+    strategy: Bottleneck.prototype.strategy.LEAK,
+    penalty: null,
+    reservoir: null,
+    reservoirRefreshInterval: null,
+    reservoirRefreshAmount: null,
+    reservoirIncreaseInterval: null,
+    reservoirIncreaseAmount: null,
+    reservoirIncreaseMaximum: null,
+  };
+  localStoreDefaults = {
+    Promise,
+    timeout: null,
+    heartbeatInterval: 250,
+  };
+  redisStoreDefaults = {
+    Promise,
+    timeout: null,
+    heartbeatInterval: 5000,
+    clientTimeout: 10000,
+    Redis: null,
+    clientOptions: {},
+    clusterNodes: null,
+    clearDatastore: false,
+    connection: null,
+  };
+  instanceDefaults = {
+    datastore: "local",
+    connection: null,
+    id: "<no-id>",
+    rejectOnDrop: true,
+    trackDoneStatus: false,
+    Promise,
+  };
+  stopDefaults = {
+    enqueueErrorMessage: "This limiter has been stopped and cannot accept new jobs.",
+    dropWaitingJobs: true,
+    dropErrorMessage: "This limiter has been stopped.",
+  };
 
   constructor(options, ...invalid) {
-    this._addToQueue = this._addToQueue.bind(this);
-    if (options == null) {
-      options = {};
-    }
+    options ??= {};
     this._validateOptions(options, invalid);
     parser.load(options, this.instanceDefaults, this);
     this._queues = new Queues(NUM_PRIORITIES);
@@ -108,26 +94,23 @@ class Bottleneck {
     this._registerLock = new Sync("register");
     const storeOptions = parser.load(options, this.storeDefaults, {});
 
-    this._store = (() => {
-      let storeInstanceOptions;
-      if (this.datastore === "redis" || this.datastore === "ioredis" || this.connection != null) {
-        storeInstanceOptions = parser.load(options, this.redisStoreDefaults, {});
-        return new RedisDatastore(this, storeOptions, storeInstanceOptions);
-      } else if (this.datastore === "local") {
-        storeInstanceOptions = parser.load(options, this.localStoreDefaults, {});
-        return new LocalDatastore(this, storeOptions, storeInstanceOptions);
-      } else {
-        throw new Bottleneck.prototype.BottleneckError(`Invalid datastore type: ${this.datastore}`);
-      }
-    })();
+    if (this.datastore === "redis" || this.datastore === "ioredis" || this.connection != null) {
+      const opts = parser.load(options, this.redisStoreDefaults, {});
+      this._store = new RedisDatastore(this, storeOptions, opts);
+    } else if (this.datastore === "local") {
+      const opts = parser.load(options, this.localStoreDefaults, {});
+      this._store = new LocalDatastore(this, storeOptions, opts);
+    } else {
+      throw new BottleneckError(`Invalid datastore type: ${this.datastore}`);
+    }
 
-    this._queues.on("leftzero", () => this._store.heartbeat?.ref());
-    this._queues.on("zero", () => this._store.heartbeat?.unref());
+    this._queues.on("leftzero", () => this._store.heartbeat?.ref?.());
+    this._queues.on("zero", () => this._store.heartbeat?.unref?.());
   }
 
   _validateOptions(options, invalid) {
     if (options == null || typeof options !== "object" || invalid.length !== 0) {
-      throw new Bottleneck.prototype.BottleneckError(
+      throw new BottleneckError(
         "Bottleneck v2 takes a single object argument. Refer to https://github.com/SGrondin/bottleneck#upgrading-to-v2 if you're upgrading from Bottleneck v1.",
       );
     }
@@ -198,10 +181,7 @@ class Bottleneck {
     return Math.random().toString(36).slice(2);
   }
 
-  check(weight) {
-    if (weight == null) {
-      weight = 1;
-    }
+  check(weight = 1) {
     return this._store.__check__(weight);
   }
 
@@ -215,9 +195,9 @@ class Bottleneck {
     }
   }
 
-  _free(index, job, options, eventInfo) {
+  async _free(index, job, options, eventInfo) {
     try {
-      const { running } = await(this._store.__free__(index, options.weight));
+      const { running } = await this._store.__free__(index, options.weight);
       this.Events.trigger("debug", `Freed ${options.id}`, eventInfo);
       if (running === 0 && this.empty()) {
         return this.Events.trigger("idle");
@@ -248,121 +228,117 @@ class Bottleneck {
     });
   }
 
-  _drainOne(capacity) {
-    return this._registerLock.schedule(() => {
+  async _drainOne(capacity) {
+    return this._registerLock.schedule(async () => {
       let next;
       if (this.queued() === 0) {
-        return Promise.resolve(null);
+        return null;
       }
       const queue = this._queues.getFirst();
       const { options, args } = (next = queue.first());
       if (capacity != null && options.weight > capacity) {
-        return Promise.resolve(null);
+        return null;
       }
       this.Events.trigger("debug", `Draining ${options.id}`, { args, options });
       const index = this._randomIndex();
-      return this._store
-        .__register__(index, options.weight, options.expiration)
-        .then(({ success, wait, reservoir }) => {
-          this.Events.trigger("debug", `Drained ${options.id}`, { success, args, options });
-          if (success) {
-            queue.shift();
-            const empty = this.empty();
-            if (empty) {
-              this.Events.trigger("empty");
-            }
-            if (reservoir === 0) {
-              this.Events.trigger("depleted", empty);
-            }
-            this._run(index, next, wait);
-            return Promise.resolve(options.weight);
-          } else {
-            return Promise.resolve(null);
-          }
-        });
+
+      const { success, wait, reservoir } = await this._store.__register__(
+        index,
+        options.weight,
+        options.expiration,
+      );
+
+      this.Events.trigger("debug", `Drained ${options.id}`, { success, args, options });
+
+      if (success) {
+        queue.shift();
+        const empty = this.empty();
+        if (empty) {
+          this.Events.trigger("empty");
+        }
+        if (reservoir === 0) {
+          this.Events.trigger("depleted", empty);
+        }
+        this._run(index, next, wait);
+        return options.weight;
+      } else {
+        return null;
+      }
     });
   }
 
-  _drainAll(capacity, total) {
-    if (total == null) {
-      total = 0;
+  async _drainAll(capacity, total = 0) {
+    try {
+      const drained = await this._drainOne(capacity);
+      if (drained != null) {
+        const newCapacity = capacity != null ? capacity - drained : capacity;
+        return this._drainAll(newCapacity, total + drained);
+      } else {
+        return total;
+      }
+    } catch (e) {
+      this.Events.trigger("error", e);
     }
-    return this._drainOne(capacity)
-      .then((drained) => {
-        if (drained != null) {
-          const newCapacity = capacity != null ? capacity - drained : capacity;
-          return this._drainAll(newCapacity, total + drained);
-        } else {
-          return Promise.resolve(total);
-        }
-      })
-      .catch((e) => this.Events.trigger("error", e));
   }
 
   _dropAllQueued(message) {
     return this._queues.shiftAll((job) => job.doDrop({ message }));
   }
 
-  stop(options) {
-    if (options == null) {
-      options = {};
-    }
+  async stop(options) {
+    options ??= {};
     options = parser.load(options, this.stopDefaults);
+
     const waitForExecuting = (at) => {
       const finished = () => {
         const { counts } = this._states;
         return counts[0] + counts[1] + counts[2] + counts[3] === at;
       };
-      return new Promise((resolve, reject) => {
+      return new Promise((resolve) => {
         if (finished()) {
-          return resolve();
+          resolve();
         } else {
-          return this.on("done", () => {
+          this.on("done", () => {
             if (finished()) {
               this.removeAllListeners("done");
-              return resolve();
+              resolve();
             }
           });
         }
       });
     };
-    const done = (() => {
-      if (options.dropWaitingJobs) {
-        this._run = (index, next) => next.doDrop({ message: options.dropErrorMessage });
-        this._drainOne = () => Promise.resolve(null);
-        return this._registerLock.schedule(() =>
-          this._submitLock.schedule(() => {
-            for (var k in this._scheduled) {
-              var v = this._scheduled[k];
-              if (this.jobStatus(v.job.options.id) === "RUNNING") {
-                clearTimeout(v.timeout);
-                clearTimeout(v.expiration);
-                v.job.doDrop({ message: options.dropErrorMessage });
-              }
+
+    this._receive = (job) => job._reject(new BottleneckError(options.enqueueErrorMessage));
+    this.stop = () => Promise.reject(new BottleneckError("stop() has already been called"));
+
+    if (options.dropWaitingJobs) {
+      this._run = (index, next) => next.doDrop({ message: options.dropErrorMessage });
+      this._drainOne = () => Promise.resolve(null);
+      await this._registerLock.schedule(() =>
+        this._submitLock.schedule(async () => {
+          for (const v of Object.values(this._scheduled)) {
+            if (this.jobStatus(v.job.options.id) === "RUNNING") {
+              clearTimeout(v.timeout);
+              clearTimeout(v.expiration);
+              v.job.doDrop({ message: options.dropErrorMessage });
             }
-            this._dropAllQueued(options.dropErrorMessage);
-            return waitForExecuting(0);
-          }),
-        );
-      } else {
-        return this.schedule({ priority: NUM_PRIORITIES - 1, weight: 0 }, () =>
-          waitForExecuting(1),
-        );
-      }
-    })();
-    this._receive = (job) =>
-      job._reject(new Bottleneck.prototype.BottleneckError(options.enqueueErrorMessage));
-    this.stop = () =>
-      Promise.reject(new Bottleneck.prototype.BottleneckError("stop() has already been called"));
-    return done;
+          }
+          this._dropAllQueued(options.dropErrorMessage);
+          await waitForExecuting(0);
+        }),
+      );
+    } else {
+      await this.schedule({ priority: NUM_PRIORITIES - 1, weight: 0 }, () => waitForExecuting(1));
+    }
   }
 
-  _addToQueue(job) {
+  async _addToQueue(job) {
     let blocked, reachedHWM, strategy;
     const { args, options } = job;
     try {
-      ({ reachedHWM, blocked, strategy } = await(
-        this._store.__submit__(this.queued(), options.weight),
+      ({ reachedHWM, blocked, strategy } = await this._store.__submit__(
+        this.queued(),
+        options.weight,
       ));
     } catch (error) {
       this.Events.trigger("debug", `Could not queue ${options.id}`, { args, options, error });
@@ -374,19 +350,18 @@ class Bottleneck {
       job.doDrop();
       return true;
     } else if (reachedHWM) {
-      const shifted = (() => {
-        if (strategy === Bottleneck.prototype.strategy.LEAK) {
-          return this._queues.shiftLastFrom(options.priority);
-        } else if (strategy === Bottleneck.prototype.strategy.OVERFLOW_PRIORITY) {
-          return this._queues.shiftLastFrom(options.priority + 1);
-        } else if (strategy === Bottleneck.prototype.strategy.OVERFLOW) {
-          return job;
-        }
-      })();
+      let shifted;
+      if (strategy === Bottleneck.strategy.LEAK) {
+        shifted = this._queues.shiftLastFrom(options.priority);
+      } else if (strategy === Bottleneck.strategy.OVERFLOW_PRIORITY) {
+        shifted = this._queues.shiftLastFrom(options.priority + 1);
+      } else if (strategy === Bottleneck.strategy.OVERFLOW) {
+        shifted = job;
+      }
       if (shifted != null) {
         shifted.doDrop();
       }
-      if (shifted == null || strategy === Bottleneck.prototype.strategy.OVERFLOW) {
+      if (shifted == null || strategy === Bottleneck.strategy.OVERFLOW) {
         if (shifted == null) {
           job.doDrop();
         }
@@ -396,16 +371,14 @@ class Bottleneck {
 
     job.doQueue(reachedHWM, blocked);
     this._queues.push(job);
-    await(this._drainAll());
+    await this._drainAll();
     return reachedHWM;
   }
 
   _receive(job) {
     if (this._states.jobStatus(job.options.id) != null) {
       job._reject(
-        new Bottleneck.prototype.BottleneckError(
-          `A job with the same id already exists (id=${job.options.id})`,
-        ),
+        new BottleneckError(`A job with the same id already exists (id=${job.options.id})`),
       );
       return false;
     } else {
@@ -417,25 +390,18 @@ class Bottleneck {
   submit(...args) {
     let cb, fn, options;
     if (typeof args[0] === "function") {
-      let adjustedLength;
-      (fn = args[0]),
-        (adjustedLength = Math.max(args.length, 2)),
-        (args = args.slice(1, adjustedLength - 1)),
-        (cb = args[adjustedLength - 1]);
+      cb = args.pop();
+      [fn, ...args] = args;
       options = parser.load({}, this.jobDefaults);
     } else {
-      let adjustedLength1;
-      (options = args[0]),
-        (fn = args[1]),
-        (adjustedLength1 = Math.max(args.length, 3)),
-        (args = args.slice(2, adjustedLength1 - 1)),
-        (cb = args[adjustedLength1 - 1]);
+      cb = args.pop();
+      [options, fn, ...args] = args;
       options = parser.load(options, this.jobDefaults);
     }
 
     const task = (...args) => {
       return new Promise((resolve, reject) =>
-        fn(...Array.from(args), (...args) => (args[0] != null ? reject : resolve)(args)),
+        fn(...args, (...args) => (args[0] != null ? reject : resolve)(args)),
       );
     };
 
@@ -447,13 +413,12 @@ class Bottleneck {
       this.rejectOnDrop,
       this.Events,
       this._states,
-      Promise,
     );
     job.promise
-      .then((args) => (typeof cb === "function" ? cb(...Array.from(args || [])) : undefined))
+      .then((args) => (typeof cb === "function" ? cb(...(args || [])) : undefined))
       .catch(function (args) {
         if (Array.isArray(args)) {
-          return typeof cb === "function" ? cb(...Array.from(args || [])) : undefined;
+          return typeof cb === "function" ? cb(...args) : undefined;
         } else {
           return typeof cb === "function" ? cb(args) : undefined;
         }
@@ -464,10 +429,10 @@ class Bottleneck {
   schedule(...args) {
     let options, task;
     if (typeof args[0] === "function") {
-      [task, ...args] = Array.from(args);
+      [task, ...args] = args;
       options = {};
     } else {
-      [options, task, ...args] = Array.from(args);
+      [options, task, ...args] = args;
     }
     const job = new Job(
       task,
@@ -477,7 +442,6 @@ class Bottleneck {
       this.rejectOnDrop,
       this.Events,
       this._states,
-      Promise,
     );
     this._receive(job);
     return job.promise;
@@ -486,17 +450,15 @@ class Bottleneck {
   wrap(fn) {
     const schedule = this.schedule.bind(this);
     const wrapped = function (...args) {
-      return schedule(fn.bind(this), ...Array.from(args));
+      return schedule(fn.bind(this), ...args);
     };
-    wrapped.withOptions = (options, ...args) => schedule(options, fn, ...Array.from(args));
+    wrapped.withOptions = (options, ...args) => schedule(options, fn, ...args);
     return wrapped;
   }
 
-  updateSettings(options) {
-    if (options == null) {
-      options = {};
-    }
-    await(this._store.__updateSettings__(parser.overwrite(options, this.storeDefaults)));
+  async updateSettings(options) {
+    options ??= {};
+    await this._store.__updateSettings__(parser.overwrite(options, this.storeDefaults));
     parser.overwrite(options, this.instanceDefaults, this);
     return this;
   }
@@ -505,21 +467,10 @@ class Bottleneck {
     return this._store.__currentReservoir__();
   }
 
-  incrementReservoir(incr) {
-    if (incr == null) {
-      incr = 0;
-    }
+  incrementReservoir(incr = 0) {
     return this._store.__incrementReservoir__(incr);
   }
 }
-Bottleneck.initClass();
 
 module.exports = Bottleneck;
-
-function __guardMethod__(obj, methodName, transform) {
-  if (typeof obj !== "undefined" && obj !== null && typeof obj[methodName] === "function") {
-    return transform(obj, methodName);
-  } else {
-    return undefined;
-  }
-}
+module.exports.default = Bottleneck;

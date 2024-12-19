@@ -1,13 +1,3 @@
-/*
- * decaffeinate suggestions:
- * DS101: Remove unnecessary use of Array.from
- * DS102: Remove unnecessary code created because of implicit returns
- * DS103: Rewrite code to no longer use __guard__, or convert again using --optional-chaining
- * DS205: Consider reworking code to avoid use of IIFEs
- * DS206: Consider reworking classes to avoid initClass
- * DS207: Consider shorter variations of null checks
- * Full docs: https://github.com/decaffeinate/decaffeinate/blob/main/docs/suggestions.md
- */
 const parser = require("./parser");
 const Events = require("./Events");
 const Bottleneck = require("./Bottleneck");
@@ -92,16 +82,14 @@ class Group {
     const start = `b_${this.id}-`.length;
     const end = "_settings".length;
     while (cursor !== 0) {
-      const [next, found] = Array.from(
-        await this.connection.__runCommand__([
-          "scan",
-          cursor ?? 0,
-          "match",
-          `b_${this.id}-*_settings`,
-          "count",
-          10000,
-        ]),
-      );
+      const [next, found] = await this.connection.__runCommand__([
+        "scan",
+        cursor ?? 0,
+        "match",
+        `b_${this.id}-*_settings`,
+        "count",
+        10000,
+      ]);
       cursor = ~~next;
       for (const k of found) {
         keys.push(k.slice(start, -end));
@@ -124,7 +112,7 @@ class Group {
           v.Events.trigger("error", e);
         }
       }
-    }, this.timeout / 2).unref();
+    }, this.timeout / 2).unref?.();
   }
 
   updateSettings(options) {

@@ -1,14 +1,7 @@
-/* eslint-disable
-    no-undef,
-    no-unused-vars,
-*/
-// TODO: This file was created by bulk-decaffeinate.
-// Fix any style issues and re-enable lint.
 /*
  * decaffeinate suggestions:
  * DS101: Remove unnecessary use of Array.from
  * DS102: Remove unnecessary code created because of implicit returns
- * DS103: Rewrite code to no longer use __guard__, or convert again using --optional-chaining
  * DS205: Consider reworking code to avoid use of IIFEs
  * DS207: Consider shorter variations of null checks
  * Full docs: https://github.com/decaffeinate/decaffeinate/blob/main/docs/suggestions.md
@@ -61,15 +54,11 @@ class RedisDatastore {
       .then(() => this.connection.__addLimiter__(this.instance))
       .then(() => this.runScript("register_client", [this.instance.queued()]))
       .then(() => {
-        __guardMethod__(
-          (this.heartbeat = setInterval(() => {
-            return this.runScript("heartbeat", []).catch((e) =>
-              this.instance.Events.trigger("error", e),
-            );
-          }, this.heartbeatInterval)),
-          "unref",
-          (o) => o.unref(),
-        );
+        this.heartbeat = setInterval(() => {
+          return this.runScript("heartbeat", []).catch((e) =>
+            this.instance.Events.trigger("error", e),
+          );
+        }, this.heartbeatInterval).unref?.();
         return this.clients;
       });
   }
@@ -280,11 +269,3 @@ class RedisDatastore {
 }
 
 module.exports = RedisDatastore;
-
-function __guardMethod__(obj, methodName, transform) {
-  if (typeof obj !== "undefined" && obj !== null && typeof obj[methodName] === "function") {
-    return transform(obj, methodName);
-  } else {
-    return undefined;
-  }
-}

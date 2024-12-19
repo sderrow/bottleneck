@@ -3,7 +3,6 @@
 /*
  * decaffeinate suggestions:
  * DS102: Remove unnecessary code created because of implicit returns
- * DS103: Rewrite code to no longer use __guard__, or convert again using --optional-chaining
  * DS207: Consider shorter variations of null checks
  * Full docs: https://github.com/decaffeinate/decaffeinate/blob/main/docs/suggestions.md
  */
@@ -33,45 +32,41 @@ class LocalDatastore {
         (this.storeOptions.reservoirIncreaseInterval != null &&
           this.storeOptions.reservoirIncreaseAmount != null))
     ) {
-      return __guardMethod__(
-        (this.heartbeat = setInterval(
-          () => {
-            const now = Date.now();
+      this.heartbeat = setInterval(
+        () => {
+          const now = Date.now();
 
-            if (
-              this.storeOptions.reservoirRefreshInterval != null &&
-              now >= this._lastReservoirRefresh + this.storeOptions.reservoirRefreshInterval
-            ) {
-              this._lastReservoirRefresh = now;
-              this.storeOptions.reservoir = this.storeOptions.reservoirRefreshAmount;
-              this.instance._drainAll(this.computeCapacity());
+          if (
+            this.storeOptions.reservoirRefreshInterval != null &&
+            now >= this._lastReservoirRefresh + this.storeOptions.reservoirRefreshInterval
+          ) {
+            this._lastReservoirRefresh = now;
+            this.storeOptions.reservoir = this.storeOptions.reservoirRefreshAmount;
+            this.instance._drainAll(this.computeCapacity());
+          }
+
+          if (
+            this.storeOptions.reservoirIncreaseInterval != null &&
+            now >= this._lastReservoirIncrease + this.storeOptions.reservoirIncreaseInterval
+          ) {
+            const {
+              reservoirIncreaseAmount: amount,
+              reservoirIncreaseMaximum: maximum,
+              reservoir,
+            } = this.storeOptions;
+            this._lastReservoirIncrease = now;
+            const incr = maximum != null ? Math.min(amount, maximum - reservoir) : amount;
+            if (incr > 0) {
+              this.storeOptions.reservoir += incr;
+              return this.instance._drainAll(this.computeCapacity());
             }
+          }
+        },
 
-            if (
-              this.storeOptions.reservoirIncreaseInterval != null &&
-              now >= this._lastReservoirIncrease + this.storeOptions.reservoirIncreaseInterval
-            ) {
-              const {
-                reservoirIncreaseAmount: amount,
-                reservoirIncreaseMaximum: maximum,
-                reservoir,
-              } = this.storeOptions;
-              this._lastReservoirIncrease = now;
-              const incr = maximum != null ? Math.min(amount, maximum - reservoir) : amount;
-              if (incr > 0) {
-                this.storeOptions.reservoir += incr;
-                return this.instance._drainAll(this.computeCapacity());
-              }
-            }
-          },
-
-          this.heartbeatInterval,
-        )),
-        "unref",
-        (o) => o.unref(),
-      );
+        this.heartbeatInterval,
+      ).unref?.();
     } else {
-      return clearInterval(this.heartbeat);
+      clearInterval(this.heartbeat);
     }
   }
 
@@ -141,15 +136,15 @@ class LocalDatastore {
     return capacity == null || weight <= capacity;
   }
 
-  __incrementReservoir__(incr) {
-    await(this.yieldLoop());
+  async __incrementReservoir__(incr) {
+    await this.yieldLoop();
     const reservoir = (this.storeOptions.reservoir += incr);
     this.instance._drainAll(this.computeCapacity());
     return reservoir;
   }
 
-  __currentReservoir__() {
-    await(this.yieldLoop());
+  async __currentReservoir__() {
+    await this.yieldLoop();
     return this.storeOptions.reservoir;
   }
 
@@ -161,14 +156,14 @@ class LocalDatastore {
     return this.conditionsCheck(weight) && this._nextRequest - now <= 0;
   }
 
-  __check__(weight) {
-    await(this.yieldLoop());
+  async __check__(weight) {
+    await this.yieldLoop();
     const now = Date.now();
     return this.check(weight, now);
   }
 
-  __register__(index, weight, expiration) {
-    await(this.yieldLoop());
+  async __register__(index, weight, expiration) {
+    await this.yieldLoop();
     const now = Date.now();
     if (this.conditionsCheck(weight)) {
       this._running += weight;
@@ -187,8 +182,8 @@ class LocalDatastore {
     return this.storeOptions.strategy === 3;
   }
 
-  __submit__(queueLength, weight) {
-    await(this.yieldLoop());
+  async __submit__(queueLength, weight) {
+    await this.yieldLoop();
     if (this.storeOptions.maxConcurrent != null && weight > this.storeOptions.maxConcurrent) {
       throw new BottleneckError(
         `Impossible to add a job having a weight of ${weight} to a limiter having a maxConcurrent setting of ${this.storeOptions.maxConcurrent}`,
@@ -208,8 +203,8 @@ class LocalDatastore {
     return { reachedHWM, blocked, strategy: this.storeOptions.strategy };
   }
 
-  __free__(index, weight) {
-    await(this.yieldLoop());
+  async __free__(index, weight) {
+    await this.yieldLoop();
     this._running -= weight;
     this._done += weight;
     this.instance._drainAll(this.computeCapacity());
@@ -218,11 +213,3 @@ class LocalDatastore {
 }
 
 module.exports = LocalDatastore;
-
-function __guardMethod__(obj, methodName, transform) {
-  if (typeof obj !== "undefined" && obj !== null && typeof obj[methodName] === "function") {
-    return transform(obj, methodName);
-  } else {
-    return undefined;
-  }
-}

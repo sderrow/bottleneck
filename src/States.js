@@ -1,12 +1,3 @@
-// TODO: This file was created by bulk-decaffeinate.
-// Sanity-check the conversion and remove this comment.
-/*
- * decaffeinate suggestions:
- * DS102: Remove unnecessary code created because of implicit returns
- * DS205: Consider reworking code to avoid use of IIFEs
- * DS207: Consider shorter variations of null checks
- * Full docs: https://github.com/decaffeinate/decaffeinate/blob/main/docs/suggestions.md
- */
 const BottleneckError = require("./BottleneckError");
 class States {
   constructor(status) {
@@ -21,10 +12,10 @@ class States {
     if (current != null && next < this.status.length) {
       this.counts[current]--;
       this.counts[next]++;
-      return this._jobs[id]++;
+      this._jobs[id]++;
     } else if (current != null) {
       this.counts[current]--;
-      return delete this._jobs[id];
+      delete this._jobs[id];
     }
   }
 
@@ -44,7 +35,7 @@ class States {
   }
 
   jobStatus(id) {
-    return this.status[this._jobs[id]] != null ? this.status[this._jobs[id]] : null;
+    return this.status[this._jobs[id]] ?? null;
   }
 
   statusJobs(status) {
@@ -53,16 +44,13 @@ class States {
       if (pos < 0) {
         throw new BottleneckError(`status must be one of ${this.status.join(", ")}`);
       }
-      return (() => {
-        const result = [];
-        for (var k in this._jobs) {
-          var v = this._jobs[k];
-          if (v === pos) {
-            result.push(k);
-          }
+      const result = [];
+      for (const [k, v] of Object.entries(this._jobs)) {
+        if (v === pos) {
+          result.push(k);
         }
-        return result;
-      })();
+      }
+      return result;
     } else {
       return Object.keys(this._jobs);
     }

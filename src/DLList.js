@@ -1,12 +1,3 @@
-// TODO: This file was created by bulk-decaffeinate.
-// Sanity-check the conversion and remove this comment.
-/*
- * decaffeinate suggestions:
- * DS102: Remove unnecessary code created because of implicit returns
- * DS205: Consider reworking code to avoid use of IIFEs
- * DS207: Consider shorter variations of null checks
- * Full docs: https://github.com/decaffeinate/decaffeinate/blob/main/docs/suggestions.md
- */
 class DLList {
   constructor(incr, decr) {
     this.incr = incr;
@@ -17,9 +8,7 @@ class DLList {
   }
   push(value) {
     this.length++;
-    if (typeof this.incr === "function") {
-      this.incr();
-    }
+    this.incr?.();
     const node = { value, prev: this._last, next: null };
     if (this._last != null) {
       this._last.next = node;
@@ -27,16 +16,13 @@ class DLList {
     } else {
       this._first = this._last = node;
     }
-    return undefined;
   }
   shift() {
     if (this._first == null) {
       return;
     } else {
       this.length--;
-      if (typeof this.decr === "function") {
-        this.decr();
-      }
+      this.decr?.();
     }
     const { value } = this._first;
     if ((this._first = this._first.next) != null) {
@@ -47,20 +33,16 @@ class DLList {
     return value;
   }
   first() {
-    if (this._first != null) {
-      return this._first.value;
-    }
+    return this._first?.value;
   }
   getArray() {
     let node = this._first;
-    return (() => {
-      const result = [];
-      while (node != null) {
-        var ref;
-        result.push(((ref = node), (node = node.next), ref.value));
-      }
-      return result;
-    })();
+    const result = [];
+    while (node != null) {
+      var ref;
+      result.push(((ref = node), (node = node.next), ref.value));
+    }
+    return result;
   }
   forEachShift(cb) {
     let node = this.shift();
@@ -68,26 +50,23 @@ class DLList {
       cb(node);
       node = this.shift();
     }
-    return undefined;
   }
   debug() {
     let node = this._first;
-    return (() => {
-      const result = [];
-      while (node != null) {
-        var ref;
-        result.push(
-          ((ref = node),
-          (node = node.next),
-          {
-            value: ref.value,
-            prev: ref.prev != null ? ref.prev.value : undefined,
-            next: ref.next != null ? ref.next.value : undefined,
-          }),
-        );
-      }
-      return result;
-    })();
+    const result = [];
+    while (node != null) {
+      var ref;
+      result.push(
+        ((ref = node),
+        (node = node.next),
+        {
+          value: ref.value,
+          prev: ref.prev?.value,
+          next: ref.next?.value,
+        }),
+      );
+    }
+    return result;
   }
 }
 
