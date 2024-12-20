@@ -1,6 +1,5 @@
 const parser = require("./parser");
 const Events = require("./Events");
-const Bottleneck = require("./Bottleneck");
 const RedisConnection = require("./RedisConnection");
 const IORedisConnection = require("./IORedisConnection");
 const Scripts = require("./Scripts");
@@ -13,12 +12,14 @@ class Group {
   };
 
   constructor(limiterOptions) {
+    this.deleteKey = this.deleteKey.bind(this);
     this.limiterOptions = limiterOptions ?? {};
     parser.load(this.limiterOptions, this.defaults, this);
     this.Events = new Events(this);
     this.instances = {};
     this._startAutoCleanup();
     this.sharedConnection = this.connection != null;
+    this.Bottleneck = require("./Bottleneck");
 
     if (this.connection == null) {
       if (this.limiterOptions.datastore === "redis") {
@@ -36,7 +37,7 @@ class Group {
   key(key = "") {
     let limiter = this.instances[key];
     if (!limiter) {
-      limiter = new Bottleneck(
+      limiter = new this.Bottleneck(
         Object.assign(this.limiterOptions, {
           id: `${this.id}-${key}`,
           timeout: this.timeout,

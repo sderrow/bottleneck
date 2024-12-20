@@ -1,11 +1,3 @@
-/*
- * decaffeinate suggestions:
- * DS101: Remove unnecessary use of Array.from
- * DS102: Remove unnecessary code created because of implicit returns
- * DS201: Simplify complex destructure assignments
- * DS207: Consider shorter variations of null checks
- * Full docs: https://github.com/decaffeinate/decaffeinate/blob/main/docs/suggestions.md
- */
 const NUM_PRIORITIES = 10;
 const DEFAULT_PRIORITY = 5;
 
@@ -46,15 +38,11 @@ class Job {
     return Math.random().toString(36).slice(2);
   }
 
-  doDrop(...args) {
-    const val = args[0],
-      obj = val != null ? val : {},
-      { error } = obj,
-      val1 = obj.message,
-      message = val1 != null ? val1 : "This job has been dropped by Bottleneck";
+  doDrop(params) {
+    const { error, message = "This job has been dropped by Bottleneck" } = params || {};
     if (this._states.remove(this.options.id)) {
       if (this.rejectOnDrop) {
-        this._reject(error != null ? error : new BottleneckError(message));
+        this._reject(error ?? new BottleneckError(message));
       }
       this.Events.trigger("dropped", {
         args: this.args,

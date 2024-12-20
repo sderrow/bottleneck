@@ -6,7 +6,9 @@
   "typings": "bottleneck.d.ts",
   "scripts": {
     "test": "mocha test",
-    "test-all": "./scripts/test_all.sh"
+    "test-all": "./scripts/test_all.sh",
+    "check-types": "tsc --noEmit --strict --lib es2023,dom,dom.iterable test.ts",
+    "build": "./scripts/build.sh"
   },
   "repository": {
     "type": "git",

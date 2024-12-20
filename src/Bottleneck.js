@@ -40,7 +40,7 @@ class Bottleneck {
     maxConcurrent: null,
     minTime: 0,
     highWater: null,
-    strategy: Bottleneck.prototype.strategy.LEAK,
+    strategy: Bottleneck.strategy.LEAK,
     penalty: null,
     reservoir: null,
     reservoirRefreshInterval: null,
@@ -80,6 +80,7 @@ class Bottleneck {
   };
 
   constructor(options, ...invalid) {
+    this._addToQueue = this._addToQueue.bind(this);
     options ??= {};
     this._validateOptions(options, invalid);
     parser.load(options, this.instanceDefaults, this);

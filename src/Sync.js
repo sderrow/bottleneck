@@ -1,6 +1,7 @@
 const DLList = require("./DLList");
 class Sync {
   constructor(name) {
+    this.schedule = this.schedule.bind(this);
     this.name = name;
     this._running = 0;
     this._queue = new DLList();
