@@ -249,7 +249,7 @@ class RedisDatastore {
         strategy,
       };
     } catch (e) {
-      if (e.message.indexOf("OVERWEIGHT") === 0) {
+      if (/^(ERR )?OVERWEIGHT/.test(e.message)) {
         let maxConcurrent;
         [, weight, maxConcurrent] = e.message.split(":");
         throw new BottleneckError(
