@@ -1,10 +1,3 @@
-/*
- * decaffeinate suggestions:
- * DS101: Remove unnecessary use of Array.from
- * DS102: Remove unnecessary code created because of implicit returns
- * DS207: Consider shorter variations of null checks
- * Full docs: https://github.com/decaffeinate/decaffeinate/blob/main/docs/suggestions.md
- */
 const DLList = require("./DLList");
 const Events = require("./Events");
 
@@ -12,13 +5,14 @@ class Queues {
   constructor(num_priorities) {
     this.Events = new Events(this);
     this._length = 0;
-    this._lists = __range__(1, num_priorities, true).map(
-      (i) =>
-        new DLList(
-          () => this.incr(),
-          () => this.decr(),
-        ),
-    );
+    this._lists = [];
+    for (let i = 0; i < num_priorities; i++) {
+      const list = new DLList(
+        () => this.incr(),
+        () => this.decr(),
+      );
+      this._lists.push(list);
+    }
   }
 
   incr() {
@@ -50,13 +44,8 @@ class Queues {
   }
 
   getFirst(arr) {
-    if (arr == null) {
-      arr = this._lists;
-    }
-    for (var list of Array.from(arr)) {
-      if (list.length > 0) {
-        return list;
-      }
+    for (const list of arr ?? this._lists) {
+      if (list.length > 0) return list;
     }
     return [];
   }
@@ -67,13 +56,3 @@ class Queues {
 }
 
 module.exports = Queues;
-
-function __range__(left, right, inclusive) {
-  let range = [];
-  let ascending = left < right;
-  let end = !inclusive ? right : ascending ? right + 1 : right - 1;
-  for (let i = left; ascending ? i < end : i > end; ascending ? i++ : i--) {
-    range.push(i);
-  }
-  return range;
-}

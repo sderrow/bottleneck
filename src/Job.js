@@ -103,7 +103,7 @@ class Job {
     return this.Events.trigger("scheduled", { args: this.args, options: this.options });
   }
 
-  doExecute(chained, clearGlobalState, run, free) {
+  async doExecute(chained, clearGlobalState, run, free) {
     if (this.retryCount === 0) {
       this._assertStatus("RUNNING");
       this._states.next(this.options.id);
@@ -114,15 +114,13 @@ class Job {
     this.Events.trigger("executing", eventInfo);
 
     try {
-      const passed = await(
-        chained != null
-          ? chained.schedule(this.options, this.task, ...Array.from(this.args))
-          : this.task(...Array.from(this.args || [])),
-      );
+      const passed = await (chained != null
+        ? chained.schedule(this.options, this.task, ...this.args)
+        : this.task(...(this.args || [])));
 
       if (clearGlobalState()) {
         this.doDone(eventInfo);
-        await(free(this.options, eventInfo));
+        await free(this.options, eventInfo);
         this._assertStatus("DONE");
         return this._resolve(passed);
       }
@@ -141,9 +139,9 @@ class Job {
     return this._onFailure(error, eventInfo, clearGlobalState, run, free);
   }
 
-  _onFailure(error, eventInfo, clearGlobalState, run, free) {
+  async _onFailure(error, eventInfo, clearGlobalState, run, free) {
     if (clearGlobalState()) {
-      const retry = await(this.Events.trigger("failed", error, eventInfo));
+      const retry = await this.Events.trigger("failed", error, eventInfo);
       if (retry != null) {
         const retryAfter = ~~retry;
         this.Events.trigger(
@@ -155,7 +153,7 @@ class Job {
         return run(retryAfter);
       } else {
         this.doDone(eventInfo);
-        await(free(this.options, eventInfo));
+        await free(this.options, eventInfo);
         this._assertStatus("DONE");
         return this._reject(error);
       }

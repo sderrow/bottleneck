@@ -63,39 +63,37 @@ class RedisDatastore {
       });
   }
 
-  __publish__(message) {
-    const { client } = await(this.ready);
+  async __publish__(message) {
+    const { client } = await this.ready;
     return client.publish(this.instance.channel(), `message:${message.toString()}`);
   }
 
-  onMessage(channel, message) {
+  async onMessage(channel, message) {
     try {
       const pos = message.indexOf(":");
       const [type, data] = Array.from([message.slice(0, pos), message.slice(pos + 1)]);
       if (type === "capacity") {
-        return await(this.instance._drainAll(data.length > 0 ? ~~data : undefined));
+        return await this.instance._drainAll(data.length > 0 ? ~~data : undefined);
       } else if (type === "capacity-priority") {
         const [rawCapacity, priorityClient, counter] = Array.from(data.split(":"));
         const capacity = rawCapacity.length > 0 ? ~~rawCapacity : undefined;
         if (priorityClient === this.clientId) {
-          const drained = await(this.instance._drainAll(capacity));
+          const drained = await this.instance._drainAll(capacity);
           const newCapacity = capacity != null ? capacity - (drained || 0) : "";
-          return await(
-            this.clients.client.publish(
-              this.instance.channel(),
-              `capacity-priority:${newCapacity}::${counter}`,
-            ),
+          return await this.clients.client.publish(
+            this.instance.channel(),
+            `capacity-priority:${newCapacity}::${counter}`,
           );
         } else if (priorityClient === "") {
           clearTimeout(this.capacityPriorityCounters[counter]);
           delete this.capacityPriorityCounters[counter];
           return this.instance._drainAll(capacity);
         } else {
-          return (this.capacityPriorityCounters[counter] = setTimeout(() => {
+          return (this.capacityPriorityCounters[counter] = setTimeout(async () => {
             try {
               delete this.capacityPriorityCounters[counter];
-              await(this.runScript("blacklist_client", [priorityClient]));
-              return await(this.instance._drainAll(capacity));
+              await this.runScript("blacklist_client", [priorityClient]);
+              return await this.instance._drainAll(capacity);
             } catch (e) {
               return this.instance.Events.trigger("error", e);
             }
@@ -104,7 +102,7 @@ class RedisDatastore {
       } else if (type === "message") {
         return this.instance.Events.trigger("message", data);
       } else if (type === "blocked") {
-        return await(this.instance._dropAllQueued());
+        return await this.instance._dropAllQueued();
       }
     } catch (error) {
       const e = error;
@@ -121,9 +119,9 @@ class RedisDatastore {
     }
   }
 
-  runScript(name, args) {
+  async runScript(name, args) {
     if (name !== "init" && name !== "register_client") {
-      await(this.ready);
+      await this.ready;
     }
     return new Promise((resolve, reject) => {
       const all_args = [Date.now(), this.clientId].concat(args);
@@ -139,7 +137,7 @@ class RedisDatastore {
           return resolve(replies);
         },
       );
-      return this.connection.__scriptFn__(name)(...Array.from(arr || []));
+      return this.connection.__scriptFn__(name)(...(arr || []));
     }).catch((e) => {
       if (
         typeof e.message === "string" &&
@@ -166,13 +164,12 @@ class RedisDatastore {
   }
 
   prepareArray(arr) {
-    return Array.from(arr).map((x) => (x != null ? x.toString() : ""));
+    return arr.map((x) => (x != null ? x.toString() : ""));
   }
 
   prepareObject(obj) {
     const arr = [];
-    for (var k in obj) {
-      var v = obj[k];
+    for (const [k, v] of Object.entries(obj)) {
       arr.push(k, v != null ? v.toString() : "");
     }
     return arr;
@@ -195,8 +192,8 @@ class RedisDatastore {
     return !!b;
   }
 
-  __updateSettings__(options) {
-    await(this.runScript("update_settings", this.prepareObject(options)));
+  async __updateSettings__(options) {
+    await this.runScript("update_settings", this.prepareObject(options));
     return parser.overwrite(options, options, this.storeOptions);
   }
 
@@ -212,8 +209,8 @@ class RedisDatastore {
     return this.runScript("done", []);
   }
 
-  __groupCheck__() {
-    return this.convertBool(await(this.runScript("group_check", [])));
+  async __groupCheck__() {
+    return this.convertBool(await this.runScript("group_check", []));
   }
 
   __incrementReservoir__(incr) {
@@ -224,14 +221,16 @@ class RedisDatastore {
     return this.runScript("current_reservoir", []);
   }
 
-  __check__(weight) {
-    return this.convertBool(await(this.runScript("check", this.prepareArray([weight]))));
+  async __check__(weight) {
+    return this.convertBool(await this.runScript("check", this.prepareArray([weight])));
   }
 
-  __register__(index, weight, expiration) {
-    const [success, wait, reservoir] = Array.from(
-      await(this.runScript("register", this.prepareArray([index, weight, expiration]))),
+  async __register__(index, weight, expiration) {
+    const [success, wait, reservoir] = await this.runScript(
+      "register",
+      this.prepareArray([index, weight, expiration]),
     );
+
     return {
       success: this.convertBool(success),
       wait,
@@ -239,10 +238,10 @@ class RedisDatastore {
     };
   }
 
-  __submit__(queueLength, weight) {
+  async __submit__(queueLength, weight) {
     try {
       const [reachedHWM, blocked, strategy] = Array.from(
-        await(this.runScript("submit", this.prepareArray([queueLength, weight]))),
+        await this.runScript("submit", this.prepareArray([queueLength, weight])),
       );
       return {
         reachedHWM: this.convertBool(reachedHWM),
@@ -251,8 +250,8 @@ class RedisDatastore {
       };
     } catch (e) {
       if (e.message.indexOf("OVERWEIGHT") === 0) {
-        let maxConcurrent, overweight;
-        [overweight, weight, maxConcurrent] = Array.from(e.message.split(":"));
+        let maxConcurrent;
+        [, weight, maxConcurrent] = e.message.split(":");
         throw new BottleneckError(
           `Impossible to add a job having a weight of ${weight} to a limiter having a maxConcurrent setting of ${maxConcurrent}`,
         );
@@ -262,8 +261,8 @@ class RedisDatastore {
     }
   }
 
-  __free__(index, weight) {
-    const running = await(this.runScript("free", this.prepareArray([index])));
+  async __free__(index, weight) {
+    const running = await this.runScript("free", this.prepareArray([index]));
     return { running };
   }
 }

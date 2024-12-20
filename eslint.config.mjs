@@ -9,6 +9,22 @@ export default [
   pluginJs.configs.recommended,
   prettierConfig,
   {
+    rules: {
+      "eslint/no-unused-vars": [
+        "warn",
+        {
+          args: "all",
+          argsIgnorePattern: "^_",
+          caughtErrors: "all",
+          caughtErrorsIgnorePattern: "^_",
+          destructuredArrayIgnorePattern: "^_",
+          varsIgnorePattern: "^_",
+          ignoreRestSiblings: true,
+        },
+      ],
+    },
+  },
+  {
     ignores: ["**/.yarn", ".pnp.cjs", ".pnp.loader.mjs", "eslint.config.mjs"],
   },
 ];

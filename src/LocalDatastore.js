@@ -88,31 +88,31 @@ class LocalDatastore {
       : 15 * this.storeOptions.minTime || 5000;
   }
 
-  __updateSettings__(options) {
-    await(this.yieldLoop());
+  async __updateSettings__(options) {
+    await this.yieldLoop();
     parser.overwrite(options, options, this.storeOptions);
     this._startHeartbeat();
     this.instance._drainAll(this.computeCapacity());
     return true;
   }
 
-  __running__() {
-    await(this.yieldLoop());
+  async __running__() {
+    await this.yieldLoop();
     return this._running;
   }
 
-  __queued__() {
-    await(this.yieldLoop());
+  async __queued__() {
+    await this.yieldLoop();
     return this.instance.queued();
   }
 
-  __done__() {
-    await(this.yieldLoop());
+  async __done__() {
+    await this.yieldLoop();
     return this._done;
   }
 
-  __groupCheck__(time) {
-    await(this.yieldLoop());
+  async __groupCheck__(time) {
+    await this.yieldLoop();
     return this._nextRequest + this.timeout < time;
   }
 
@@ -160,7 +160,7 @@ class LocalDatastore {
     return this.check(weight, now);
   }
 
-  async __register__(index, weight, expiration) {
+  async __register__(index, weight, _expiration) {
     await this.yieldLoop();
     const now = Date.now();
     if (this.conditionsCheck(weight)) {
