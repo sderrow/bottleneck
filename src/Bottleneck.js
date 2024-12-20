@@ -286,7 +286,7 @@ class Bottleneck {
     return this._queues.shiftAll((job) => job.doDrop({ message }));
   }
 
-  async stop(options) {
+  stop(options) {
     options ??= {};
     options = parser.load(options, this.stopDefaults);
 
@@ -309,14 +309,12 @@ class Bottleneck {
       });
     };
 
-    this._receive = (job) => job._reject(new BottleneckError(options.enqueueErrorMessage));
-    this.stop = () => Promise.reject(new BottleneckError("stop() has already been called"));
-
+    let done;
     if (options.dropWaitingJobs) {
       this._run = (index, next) => next.doDrop({ message: options.dropErrorMessage });
-      this._drainOne = () => Promise.resolve(null);
-      await this._registerLock.schedule(() =>
-        this._submitLock.schedule(async () => {
+      this._drainOne = () => this.Promise.resolve(null);
+      done = this._registerLock.schedule(() =>
+        this._submitLock.schedule(() => {
           for (const v of Object.values(this._scheduled)) {
             if (this.jobStatus(v.job.options.id) === "RUNNING") {
               clearTimeout(v.timeout);
@@ -325,12 +323,17 @@ class Bottleneck {
             }
           }
           this._dropAllQueued(options.dropErrorMessage);
-          await waitForExecuting(0);
+          return waitForExecuting(0);
         }),
       );
     } else {
-      await this.schedule({ priority: NUM_PRIORITIES - 1, weight: 0 }, () => waitForExecuting(1));
+      done = this.schedule({ priority: NUM_PRIORITIES - 1, weight: 0 }, () => waitForExecuting(1));
     }
+
+    this._receive = (job) => job._reject(new BottleneckError(options.enqueueErrorMessage));
+    this.stop = () => this.Promise.reject(new BottleneckError("stop() has already been called"));
+
+    return done;
   }
 
   async _addToQueue(job) {
