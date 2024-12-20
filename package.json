@@ -44,7 +44,7 @@
     "ioredis": "^5.4.1",
     "mocha": "^6.1.4",
     "prettier": "^3.4.2",
-    "redis": "^4.7.0",
+    "redis": "^2.8.0",
     "regenerator-runtime": "^0.12.1",
     "typescript": "^5.7.2"
   },
