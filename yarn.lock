@@ -309,7 +309,6 @@ __metadata:
     mocha: "npm:^6.1.4"
     prettier: "npm:^3.4.2"
     redis: "npm:^2.8.0"
-    regenerator-runtime: "npm:^0.12.1"
     typescript: "npm:^5.7.2"
   languageName: unknown
   linkType: soft
@@ -1956,13 +1955,6 @@ __metadata:
     gopd: "npm:^1.2.0"
     which-builtin-type: "npm:^1.2.0"
   checksum: 10c0/720479dd7a72a20d66efaca507ed7c7e18403d24ce764f436130464d4a516a12ed8a9a2714dcabc3e1296f9a31f914ba1095e2371619df23d3ac56c4f8c8bae1
-  languageName: node
-  linkType: hard
-
-"regenerator-runtime@npm:^0.12.1":
-  version: 0.12.1
-  resolution: "regenerator-runtime@npm:0.12.1"
-  checksum: 10c0/dbefbb38f5d6d55261aec1182d7c97ac93f2eec6ef9c756d9656eb5152f5cb3f8d873df020ddb4a3a8126c2ac1a3c2e534413cffe18d8f89b1c2a480a0a38601
   languageName: node
   linkType: hard
 
