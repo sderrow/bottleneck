@@ -42,7 +42,7 @@
     "eslint-config-prettier": "^9.1.0",
     "globals": "^15.14.0",
     "ioredis": "^5.4.1",
-    "mocha": "^6.1.4",
+    "mocha": "^11.0.1",
     "prettier": "^3.4.2",
     "redis": "^2.8.0",
     "typescript": "^5.7.2"
