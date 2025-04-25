@@ -391,7 +391,6 @@ declare module "bottleneck/light" {
         trigger(name: string, ...args: any[]): Promise<any>;
     }
 }
-
 class Bottleneck {
     public static readonly strategy: {
         /**
@@ -565,67 +564,15 @@ class Bottleneck {
       */
     chain(limiter?: Bottleneck): Bottleneck;
 
-    wrap<R>(fn: () => PromiseLike<R>): (() => Promise<R>) & { withOptions: (options: Bottleneck.JobOptions) => Promise<R>; };
-    wrap<R, A1>(fn: (arg1: A1) => PromiseLike<R>): ((arg1: A1) => Promise<R>) & { withOptions: (options: Bottleneck.JobOptions, arg1: A1) => Promise<R>; };
-    wrap<R, A1, A2>(fn: (arg1: A1, arg2: A2) => PromiseLike<R>): ((arg1: A1, arg2: A2) => Promise<R>) & { withOptions: (options: Bottleneck.JobOptions, arg1: A1, arg2: A2) => Promise<R>; };
-    wrap<R, A1, A2, A3>(fn: (arg1: A1, arg2: A2, arg3: A3) => PromiseLike<R>): ((arg1: A1, arg2: A2, arg3: A3) => Promise<R>) & { withOptions: (options: Bottleneck.JobOptions, arg1: A1, arg2: A2, arg3: A3) => Promise<R>; };
-    wrap<R, A1, A2, A3, A4>(fn: (arg1: A1, arg2: A2, arg3: A3, arg4: A4) => PromiseLike<R>): ((arg1: A1, arg2: A2, arg3: A3, arg4: A4) => Promise<R>) & { withOptions: (options: Bottleneck.JobOptions, arg1: A1, arg2: A2, arg3: A3, arg4: A4) => Promise<R>; };
-    wrap<R, A1, A2, A3, A4, A5>(fn: (arg1: A1, arg2: A2, arg3: A3, arg4: A4, arg5: A5) => PromiseLike<R>): ((arg1: A1, arg2: A2, arg3: A3, arg4: A4, arg5: A5) => Promise<R>) & { withOptions: (options: Bottleneck.JobOptions, arg1: A1, arg2: A2, arg3: A3, arg4: A4, arg5: A5) => Promise<R>; };
-    wrap<R, A1, A2, A3, A4, A5, A6>(fn: (arg1: A1, arg2: A2, arg3: A3, arg4: A4, arg5: A5, arg6: A6) => PromiseLike<R>): ((arg1: A1, arg2: A2, arg3: A3, arg4: A4, arg5: A5, arg6: A6) => Promise<R>) & { withOptions: (options: Bottleneck.JobOptions, arg1: A1, arg2: A2, arg3: A3, arg4: A4, arg5: A5, arg6: A6) => Promise<R>; };
-    wrap<R, A1, A2, A3, A4, A5, A6, A7>(fn: (arg1: A1, arg2: A2, arg3: A3, arg4: A4, arg5: A5, arg6: A6, arg7: A7) => PromiseLike<R>): ((arg1: A1, arg2: A2, arg3: A3, arg4: A4, arg5: A5, arg6: A6, arg7: A7) => Promise<R>) & { withOptions: (options: Bottleneck.JobOptions, arg1: A1, arg2: A2, arg3: A3, arg4: A4, arg5: A5, arg6: A6, arg7: A7) => Promise<R>; };
-    wrap<R, A1, A2, A3, A4, A5, A6, A7, A8>(fn: (arg1: A1, arg2: A2, arg3: A3, arg4: A4, arg5: A5, arg6: A6, arg7: A7, arg8: A8) => PromiseLike<R>): ((arg1: A1, arg2: A2, arg3: A3, arg4: A4, arg5: A5, arg6: A6, arg7: A7, arg8: A8) => Promise<R>) & { withOptions: (options: Bottleneck.JobOptions, arg1: A1, arg2: A2, arg3: A3, arg4: A4, arg5: A5, arg6: A6, arg7: A7, arg8: A8) => Promise<R>; };
-    wrap<R, A1, A2, A3, A4, A5, A6, A7, A8, A9>(fn: (arg1: A1, arg2: A2, arg3: A3, arg4: A4, arg5: A5, arg6: A6, arg7: A7, arg8: A8, arg9: A9) => PromiseLike<R>): ((arg1: A1, arg2: A2, arg3: A3, arg4: A4, arg5: A5, arg6: A6, arg7: A7, arg8: A8, arg9: A9) => Promise<R>) & { withOptions: (options: Bottleneck.JobOptions, arg1: A1, arg2: A2, arg3: A3, arg4: A4, arg5: A5, arg6: A6, arg7: A7, arg8: A8, arg9: A9) => Promise<R>; };
-    wrap<R, A1, A2, A3, A4, A5, A6, A7, A8, A9, A10>(fn: (arg1: A1, arg2: A2, arg3: A3, arg4: A4, arg5: A5, arg6: A6, arg7: A7, arg8: A8, arg9: A9, arg10: A10) => PromiseLike<R>): ((arg1: A1, arg2: A2, arg3: A3, arg4: A4, arg5: A5, arg6: A6, arg7: A7, arg8: A8, arg9: A9, arg10: A10) => Promise<R>) & { withOptions: (options: Bottleneck.JobOptions, arg1: A1, arg2: A2, arg3: A3, arg4: A4, arg5: A5, arg6: A6, arg7: A7, arg8: A8, arg9: A9, arg10: A10) => Promise<R>; };
+    wrap<R, Args extends any[]>(fn: (...args: Args) => PromiseLike<R>): ((...args: Args) => Promise<R>) & { withOptions: (options: Bottleneck.JobOptions, ...args: Args) => Promise<R>; };
 
-    submit<R>(fn: (callback: Bottleneck.Callback<R>) => void, callback: Bottleneck.Callback<R>): void;
-    submit<R, A1>(fn: (arg1: A1, callback: Bottleneck.Callback<R>) => void, arg1: A1, callback: Bottleneck.Callback<R>): void;
-    submit<R, A1, A2>(fn: (arg1: A1, arg2: A2, callback: Bottleneck.Callback<R>) => void, arg1: A1, arg2: A2, callback: Bottleneck.Callback<R>): void;
-    submit<R, A1, A2, A3>(fn: (arg1: A1, arg2: A2, arg3: A3, callback: Bottleneck.Callback<R>) => void, arg1: A1, arg2: A2, arg3: A3, callback: Bottleneck.Callback<R>): void;
-    submit<R, A1, A2, A3, A4>(fn: (arg1: A1, arg2: A2, arg3: A3, arg4: A4, callback: Bottleneck.Callback<R>) => void, arg1: A1, arg2: A2, arg3: A3, arg4: A4, callback: Bottleneck.Callback<R>): void;
-    submit<R, A1, A2, A3, A4, A5>(fn: (arg1: A1, arg2: A2, arg3: A3, arg4: A4, arg5: A5, callback: Bottleneck.Callback<R>) => void, arg1: A1, arg2: A2, arg3: A3, arg4: A4, arg5: A5, callback: Bottleneck.Callback<R>): void;
-    submit<R, A1, A2, A3, A4, A5, A6>(fn: (arg1: A1, arg2: A2, arg3: A3, arg4: A4, arg5: A5, arg6: A6, callback: Bottleneck.Callback<R>) => void, arg1: A1, arg2: A2, arg3: A3, arg4: A4, arg5: A5, arg6: A6, callback: Bottleneck.Callback<R>): void;
-    submit<R, A1, A2, A3, A4, A5, A6, A7>(fn: (arg1: A1, arg2: A2, arg3: A3, arg4: A4, arg5: A5, arg6: A6, arg7: A7, callback: Bottleneck.Callback<R>) => void, arg1: A1, arg2: A2, arg3: A3, arg4: A4, arg5: A5, arg6: A6, arg7: A7, callback: Bottleneck.Callback<R>): void;
-    submit<R, A1, A2, A3, A4, A5, A6, A7, A8>(fn: (arg1: A1, arg2: A2, arg3: A3, arg4: A4, arg5: A5, arg6: A6, arg7: A7, arg8: A8, callback: Bottleneck.Callback<R>) => void, arg1: A1, arg2: A2, arg3: A3, arg4: A4, arg5: A5, arg6: A6, arg7: A7, arg8: A8, callback: Bottleneck.Callback<R>): void;
-    submit<R, A1, A2, A3, A4, A5, A6, A7, A8, A9>(fn: (arg1: A1, arg2: A2, arg3: A3, arg4: A4, arg5: A5, arg6: A6, arg7: A7, arg8: A8, arg9: A9, callback: Bottleneck.Callback<R>) => void, arg1: A1, arg2: A2, arg3: A3, arg4: A4, arg5: A5, arg6: A6, arg7: A7, arg8: A8, arg9: A9, callback: Bottleneck.Callback<R>): void;
-    submit<R, A1, A2, A3, A4, A5, A6, A7, A8, A9, A10>(fn: (arg1: A1, arg2: A2, arg3: A3, arg4: A4, arg5: A5, arg6: A6, arg7: A7, arg8: A8, arg9: A9, arg10: A10, callback: Bottleneck.Callback<R>) => void, arg1: A1, arg2: A2, arg3: A3, arg4: A4, arg5: A5, arg6: A6, arg7: A7, arg8: A8, arg9: A9, arg10: A10, callback: Bottleneck.Callback<R>): void;
+    submit<R, Args extends any[]>(fn: (...args: [...Args, Bottleneck.Callback<R>]) => void, ...args: [...Args, Bottleneck.Callback<R>]): void;
+    submit<R, Args extends any[]>(options: Bottleneck.JobOptions, fn: (...args: [...Args, Bottleneck.Callback<R>]) => void, ...args: [...Args, Bottleneck.Callback<R>]): void;
 
-    submit<R>(options: Bottleneck.JobOptions, fn: (callback: Bottleneck.Callback<R>) => void, callback: Bottleneck.Callback<R>): void;
-    submit<R, A1>(options: Bottleneck.JobOptions, fn: (arg1: A1, callback: Bottleneck.Callback<R>) => void, arg1: A1, callback: Bottleneck.Callback<R>): void;
-    submit<R, A1, A2>(options: Bottleneck.JobOptions, fn: (arg1: A1, arg2: A2, callback: Bottleneck.Callback<R>) => void, arg1: A1, arg2: A2, callback: Bottleneck.Callback<R>): void;
-    submit<R, A1, A2, A3>(options: Bottleneck.JobOptions, fn: (arg1: A1, arg2: A2, arg3: A3, callback: Bottleneck.Callback<R>) => void, arg1: A1, arg2: A2, arg3: A3, callback: Bottleneck.Callback<R>): void;
-    submit<R, A1, A2, A3, A4>(options: Bottleneck.JobOptions, fn: (arg1: A1, arg2: A2, arg3: A3, arg4: A4, callback: Bottleneck.Callback<R>) => void, arg1: A1, arg2: A2, arg3: A3, arg4: A4, callback: Bottleneck.Callback<R>): void;
-    submit<R, A1, A2, A3, A4, A5>(options: Bottleneck.JobOptions, fn: (arg1: A1, arg2: A2, arg3: A3, arg4: A4, arg5: A5, callback: Bottleneck.Callback<R>) => void, arg1: A1, arg2: A2, arg3: A3, arg4: A4, arg5: A5, callback: Bottleneck.Callback<R>): void;
-    submit<R, A1, A2, A3, A4, A5, A6>(options: Bottleneck.JobOptions, fn: (arg1: A1, arg2: A2, arg3: A3, arg4: A4, arg5: A5, arg6: A6, callback: Bottleneck.Callback<R>) => void, arg1: A1, arg2: A2, arg3: A3, arg4: A4, arg5: A5, arg6: A6, callback: Bottleneck.Callback<R>): void;
-    submit<R, A1, A2, A3, A4, A5, A6, A7>(options: Bottleneck.JobOptions, fn: (arg1: A1, arg2: A2, arg3: A3, arg4: A4, arg5: A5, arg6: A6, arg7: A7, callback: Bottleneck.Callback<R>) => void, arg1: A1, arg2: A2, arg3: A3, arg4: A4, arg5: A5, arg6: A6, arg7: A7, callback: Bottleneck.Callback<R>): void;
-    submit<R, A1, A2, A3, A4, A5, A6, A7, A8>(options: Bottleneck.JobOptions, fn: (arg1: A1, arg2: A2, arg3: A3, arg4: A4, arg5: A5, arg6: A6, arg7: A7, arg8: A8, callback: Bottleneck.Callback<R>) => void, arg1: A1, arg2: A2, arg3: A3, arg4: A4, arg5: A5, arg6: A6, arg7: A7, arg8: A8, callback: Bottleneck.Callback<R>): void;
-    submit<R, A1, A2, A3, A4, A5, A6, A7, A8, A9>(options: Bottleneck.JobOptions, fn: (arg1: A1, arg2: A2, arg3: A3, arg4: A4, arg5: A5, arg6: A6, arg7: A7, arg8: A8, arg9: A9, callback: Bottleneck.Callback<R>) => void, arg1: A1, arg2: A2, arg3: A3, arg4: A4, arg5: A5, arg6: A6, arg7: A7, arg8: A8, arg9: A9, callback: Bottleneck.Callback<R>): void;
-    submit<R, A1, A2, A3, A4, A5, A6, A7, A8, A9, A10>(options: Bottleneck.JobOptions, fn: (arg1: A1, arg2: A2, arg3: A3, arg4: A4, arg5: A5, arg6: A6, arg7: A7, arg8: A8, arg9: A9, arg10: A10, callback: Bottleneck.Callback<R>) => void, arg1: A1, arg2: A2, arg3: A3, arg4: A4, arg5: A5, arg6: A6, arg7: A7, arg8: A8, arg9: A9, arg10: A10, callback: Bottleneck.Callback<R>): void;
-
-    schedule<R>(fn: () => PromiseLike<R>): Promise<R>;
-    schedule<R, A1>(fn: (arg1: A1) => PromiseLike<R>, arg1: A1): Promise<R>;
-    schedule<R, A1, A2>(fn: (arg1: A1, arg2: A2) => PromiseLike<R>, arg1: A1, arg2: A2): Promise<R>;
-    schedule<R, A1, A2, A3>(fn: (arg1: A1, arg2: A2, arg3: A3) => PromiseLike<R>, arg1: A1, arg2: A2, arg3: A3): Promise<R>;
-    schedule<R, A1, A2, A3, A4>(fn: (arg1: A1, arg2: A2, arg3: A3, arg4: A4) => PromiseLike<R>, arg1: A1, arg2: A2, arg3: A3, arg4: A4): Promise<R>;
-    schedule<R, A1, A2, A3, A4, A5>(fn: (arg1: A1, arg2: A2, arg3: A3, arg4: A4, arg5: A5) => PromiseLike<R>, arg1: A1, arg2: A2, arg3: A3, arg4: A4, arg5: A5): Promise<R>;
-    schedule<R, A1, A2, A3, A4, A5, A6>(fn: (arg1: A1, arg2: A2, arg3: A3, arg4: A4, arg5: A5, arg6: A6) => PromiseLike<R>, arg1: A1, arg2: A2, arg3: A3, arg4: A4, arg5: A5, arg6: A6): Promise<R>;
-    schedule<R, A1, A2, A3, A4, A5, A6, A7>(fn: (arg1: A1, arg2: A2, arg3: A3, arg4: A4, arg5: A5, arg6: A6, arg7: A7) => PromiseLike<R>, arg1: A1, arg2: A2, arg3: A3, arg4: A4, arg5: A5, arg6: A6, arg7: A7): Promise<R>;
-    schedule<R, A1, A2, A3, A4, A5, A6, A7, A8>(fn: (arg1: A1, arg2: A2, arg3: A3, arg4: A4, arg5: A5, arg6: A6, arg7: A7, arg8: A8) => PromiseLike<R>, arg1: A1, arg2: A2, arg3: A3, arg4: A4, arg5: A5, arg6: A6, arg7: A7, arg8: A8): Promise<R>;
-    schedule<R, A1, A2, A3, A4, A5, A6, A7, A8, A9>(fn: (arg1: A1, arg2: A2, arg3: A3, arg4: A4, arg5: A5, arg6: A6, arg7: A7, arg8: A8, arg9: A9) => PromiseLike<R>, arg1: A1, arg2: A2, arg3: A3, arg4: A4, arg5: A5, arg6: A6, arg7: A7, arg8: A8, arg9: A9): Promise<R>;
-    schedule<R, A1, A2, A3, A4, A5, A6, A7, A8, A9, A10>(fn: (arg1: A1, arg2: A2, arg3: A3, arg4: A4, arg5: A5, arg6: A6, arg7: A7, arg8: A8, arg9: A9, arg10: A10) => PromiseLike<R>, arg1: A1, arg2: A2, arg3: A3, arg4: A4, arg5: A5, arg6: A6, arg7: A7, arg8: A8, arg9: A9, arg10: A10): Promise<R>;
-
-    schedule<R>(options: Bottleneck.JobOptions, fn: () => PromiseLike<R>): Promise<R>;
-    schedule<R, A1>(options: Bottleneck.JobOptions, fn: (arg1: A1) => PromiseLike<R>, arg1: A1): Promise<R>;
-    schedule<R, A1, A2>(options: Bottleneck.JobOptions, fn: (arg1: A1, arg2: A2) => PromiseLike<R>, arg1: A1, arg2: A2): Promise<R>;
-    schedule<R, A1, A2, A3>(options: Bottleneck.JobOptions, fn: (arg1: A1, arg2: A2, arg3: A3) => PromiseLike<R>, arg1: A1, arg2: A2, arg3: A3): Promise<R>;
-    schedule<R, A1, A2, A3, A4>(options: Bottleneck.JobOptions, fn: (arg1: A1, arg2: A2, arg3: A3, arg4: A4) => PromiseLike<R>, arg1: A1, arg2: A2, arg3: A3, arg4: A4): Promise<R>;
-    schedule<R, A1, A2, A3, A4, A5>(options: Bottleneck.JobOptions, fn: (arg1: A1, arg2: A2, arg3: A3, arg4: A4, arg5: A5) => PromiseLike<R>, arg1: A1, arg2: A2, arg3: A3, arg4: A4, arg5: A5): Promise<R>;
-    schedule<R, A1, A2, A3, A4, A5, A6>(options: Bottleneck.JobOptions, fn: (arg1: A1, arg2: A2, arg3: A3, arg4: A4, arg5: A5, arg6: A6) => PromiseLike<R>, arg1: A1, arg2: A2, arg3: A3, arg4: A4, arg5: A5, arg6: A6): Promise<R>;
-    schedule<R, A1, A2, A3, A4, A5, A6, A7>(options: Bottleneck.JobOptions, fn: (arg1: A1, arg2: A2, arg3: A3, arg4: A4, arg5: A5, arg6: A6, arg7: A7) => PromiseLike<R>, arg1: A1, arg2: A2, arg3: A3, arg4: A4, arg5: A5, arg6: A6, arg7: A7): Promise<R>;
-    schedule<R, A1, A2, A3, A4, A5, A6, A7, A8>(options: Bottleneck.JobOptions, fn: (arg1: A1, arg2: A2, arg3: A3, arg4: A4, arg5: A5, arg6: A6, arg7: A7, arg8: A8) => PromiseLike<R>, arg1: A1, arg2: A2, arg3: A3, arg4: A4, arg5: A5, arg6: A6, arg7: A7, arg8: A8): Promise<R>;
-    schedule<R, A1, A2, A3, A4, A5, A6, A7, A8, A9>(options: Bottleneck.JobOptions, fn: (arg1: A1, arg2: A2, arg3: A3, arg4: A4, arg5: A5, arg6: A6, arg7: A7, arg8: A8, arg9: A9) => PromiseLike<R>, arg1: A1, arg2: A2, arg3: A3, arg4: A4, arg5: A5, arg6: A6, arg7: A7, arg8: A8, arg9: A9): Promise<R>;
-    schedule<R, A1, A2, A3, A4, A5, A6, A7, A8, A9, A10>(options: Bottleneck.JobOptions, fn: (arg1: A1, arg2: A2, arg3: A3, arg4: A4, arg5: A5, arg6: A6, arg7: A7, arg8: A8, arg9: A9, arg10: A10) => PromiseLike<R>, arg1: A1, arg2: A2, arg3: A3, arg4: A4, arg5: A5, arg6: A6, arg7: A7, arg8: A8, arg9: A9, arg10: A10): Promise<R>;
+    schedule<R, Args extends any[]>(fn: (...args: Args) => PromiseLike<R>, ...args: Args): Promise<R>;
+    schedule<R, Args extends any[]>(options: Bottleneck.JobOptions, fn: (...args: Args) => PromiseLike<R>, ...args: Args): Promise<R>;
 }
 
-export default Bottleneck;
+export default Bottleneck
 }
 
