@@ -1786,7 +1786,11 @@
 
 	      var base;
 
-	      if (this.heartbeat == null && (this.storeOptions.reservoirRefreshInterval != null && this.storeOptions.reservoirRefreshAmount != null || this.storeOptions.reservoirIncreaseInterval != null && this.storeOptions.reservoirIncreaseAmount != null)) {
+	      if (this.heartbeat != null) {
+	        clearInterval(this.heartbeat);
+	      }
+
+	      if (this.storeOptions.reservoirRefreshInterval != null && this.storeOptions.reservoirRefreshAmount != null || this.storeOptions.reservoirIncreaseInterval != null && this.storeOptions.reservoirIncreaseAmount != null) {
 	        return typeof (base = this.heartbeat = setInterval(function () {
 	          var amount, incr, maximum, now, reservoir;
 	          now = Date.now();
@@ -1812,8 +1816,6 @@
 	            }
 	          }
 	        }, this.heartbeatInterval)).unref === "function" ? base.unref() : void 0;
-	      } else {
-	        return clearInterval(this.heartbeat);
 	      }
 	    }
 	  }, {

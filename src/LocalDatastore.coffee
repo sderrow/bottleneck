@@ -14,7 +14,9 @@ class LocalDatastore
     @_startHeartbeat()
 
   _startHeartbeat: ->
-    if !@heartbeat? and ((
+    if @heartbeat? then clearInterval @heartbeat
+
+    if ((
       @storeOptions.reservoirRefreshInterval? and @storeOptions.reservoirRefreshAmount?
     ) or (
       @storeOptions.reservoirIncreaseInterval? and @storeOptions.reservoirIncreaseAmount?
@@ -36,7 +38,6 @@ class LocalDatastore
               @instance._drainAll @computeCapacity()
 
         , @heartbeatInterval).unref?()
-    else clearInterval @heartbeat
 
   __publish__: (message) ->
     await @yieldLoop()
