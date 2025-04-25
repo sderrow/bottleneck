@@ -17,7 +17,7 @@ describe('General', function () {
     it('Should not leak memory on instantiation', async function () {
       c = makeTest()
       this.timeout(8000)
-      const { iterate } = require('leakage')
+      const { iterate } = require('@token-cjg/leakage')
 
       const result = await iterate.async(async () => {
         const limiter = new Bottleneck({ datastore: 'local' })
@@ -30,7 +30,7 @@ describe('General', function () {
     it('Should not leak memory running jobs', async function () {
       c = makeTest()
       this.timeout(12000)
-      const { iterate } = require('leakage')
+      const { iterate } = require('@token-cjg/leakage')
       const limiter = new Bottleneck({ datastore: 'local', maxConcurrent: 1, minTime: 10 })
       await limiter.ready()
       var ctr = 0
