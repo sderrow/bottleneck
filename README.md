@@ -1,17 +1,23 @@
 # bottleneck
 
-[![Downloads][npm-downloads]][npm-url]
-[![version][npm-version]][npm-url]
-[![License][npm-license]][license-url]
-
-
 Bottleneck is a lightweight and zero-dependency Task Scheduler and Rate Limiter for Node.js and the browser.
 
 Bottleneck is an easy solution as it adds very little complexity to your code. It is battle-hardened, reliable and production-ready and used on a large scale in private companies and open source software.
 
 It supports **Clustering**: it can rate limit jobs across multiple Node.js instances. It uses Redis and strictly atomic operations to stay reliable in the presence of unreliable clients and networks. It also supports *Redis Cluster* and *Redis Sentinel*.
 
-**[Upgrading from version 1?](#upgrading-to-v2)**
+## Why this fork exists
+
+The original [bottleneck library](https://github.com/SGrondin/bottleneck) appears no longer maintained, so this is a fork that addresses a few key issues that have been identified in the last few years:
+
+- [Redis 7 error message handling](https://github.com/sderrow/bottleneck/commit/e479267fe5120db0432652c31753dc9e16969be8)
+- [updateSettings not working for local datastore](https://github.com/sderrow/bottleneck/pull/3)
+- [Typescript fixes](https://github.com/sderrow/bottleneck/commit/62e1cf43ae639ab25181f5d544692ad6098eb9ce) and [enhancements](https://github.com/sderrow/bottleneck/commit/44caf901fd8e0af06c4aba6572276a44e5ef2a13)
+
+### No breaking changes
+Despite the major version bump, that's just to signify that this is a fork. There are no breaking JS changes right now. Technically, the TypeScript version was bumped to 4.X from 2.6 in order to support variadic tuples for `schedule`, `wrap`, and `submit`.
+
+## Table of Contents
 
 <!-- toc -->
 
@@ -1021,9 +1027,4 @@ The tests must also pass in Clustering mode and using the ES5 bundle. You'll nee
 
 All contributions are appreciated and will be considered.
 
-[license-url]: https://github.com/SGrondin/bottleneck/blob/master/LICENSE
-
-[npm-url]: https://www.npmjs.com/package/bottleneck
-[npm-license]: https://img.shields.io/npm/l/bottleneck.svg?style=flat
-[npm-version]: https://img.shields.io/npm/v/bottleneck.svg?style=flat
-[npm-downloads]: https://img.shields.io/npm/dm/bottleneck.svg?style=flat
+[license-url]: https://github.com/sderrow/bottleneck/blob/master/LICENSE
