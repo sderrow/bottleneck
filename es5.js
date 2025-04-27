@@ -3902,7 +3902,7 @@
 
 	var Sync_1 = Sync;
 
-	var version = "2.19.5";
+	var version = "3.0.6";
 	var version$1 = {
 		version: version
 	};
