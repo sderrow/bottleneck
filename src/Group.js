@@ -1,80 +1,135 @@
-parser = require "./parser"
-Events = require "./Events"
-RedisConnection = require "./RedisConnection"
-IORedisConnection = require "./IORedisConnection"
-Scripts = require "./Scripts"
+const parser = require("./parser");
+const Events = require("./Events");
+const RedisConnection = require("./RedisConnection");
+const IORedisConnection = require("./IORedisConnection");
+const Scripts = require("./Scripts");
 
-class Group
-  defaults:
-    timeout: 1000 * 60 * 5
-    connection: null
-    Promise: Promise
-    id: "group-key"
+class Group {
+  defaults = {
+    timeout: 1000 * 60 * 5,
+    connection: null,
+    id: "group-key",
+  };
 
-  constructor: (@limiterOptions={}) ->
-    parser.load @limiterOptions, @defaults, @
-    @Events = new Events @
-    @instances = {}
-    @Bottleneck = require "./Bottleneck"
-    @_startAutoCleanup()
-    @sharedConnection = @connection?
+  constructor(limiterOptions) {
+    this.deleteKey = this.deleteKey.bind(this);
+    this.limiterOptions = limiterOptions ?? {};
+    parser.load(this.limiterOptions, this.defaults, this);
+    this.Events = new Events(this);
+    this.instances = {};
+    this._startAutoCleanup();
+    this.sharedConnection = this.connection != null;
+    this.Bottleneck = require("./Bottleneck");
 
-    if !@connection?
-      if @limiterOptions.datastore == "redis"
-        @connection = new RedisConnection Object.assign {}, @limiterOptions, { @Events }
-      else if @limiterOptions.datastore == "ioredis"
-        @connection = new IORedisConnection Object.assign {}, @limiterOptions, { @Events }
-
-  key: (key="") -> @instances[key] ? do =>
-    limiter = @instances[key] = new @Bottleneck Object.assign @limiterOptions, {
-      id: "#{@id}-#{key}",
-      @timeout,
-      @connection
+    if (this.connection == null) {
+      if (this.limiterOptions.datastore === "redis") {
+        this.connection = new RedisConnection(
+          Object.assign({}, this.limiterOptions, { Events: this.Events }),
+        );
+      } else if (this.limiterOptions.datastore === "ioredis") {
+        this.connection = new IORedisConnection(
+          Object.assign({}, this.limiterOptions, { Events: this.Events }),
+        );
+      }
     }
-    @Events.trigger "created", limiter, key
-    limiter
+  }
 
-  deleteKey: (key="") =>
-    instance = @instances[key]
-    if @connection
-      deleted = await @connection.__runCommand__ ['del', Scripts.allKeys("#{@id}-#{key}")...]
-    if instance?
-      delete @instances[key]
-      await instance.disconnect()
-    instance? or deleted > 0
+  key(key = "") {
+    let limiter = this.instances[key];
+    if (!limiter) {
+      limiter = new this.Bottleneck(
+        Object.assign(this.limiterOptions, {
+          id: `${this.id}-${key}`,
+          timeout: this.timeout,
+          connection: this.connection,
+        }),
+      );
+      this.Events.trigger("created", limiter, key);
+      this.instances[key] = limiter;
+    }
+    return limiter;
+  }
 
-  limiters: -> { key: k, limiter: v } for k, v of @instances
+  async deleteKey(key = "") {
+    let deleted;
+    const instance = this.instances[key];
+    if (this.connection) {
+      deleted = await this.connection.__runCommand__([
+        "del",
+        ...Scripts.allKeys(`${this.id}-${key}`),
+      ]);
+    }
+    if (instance != null) {
+      delete this.instances[key];
+      await instance.disconnect();
+    }
+    return instance != null || deleted > 0;
+  }
 
-  keys: -> Object.keys @instances
+  limiters() {
+    return Object.entries(this.instances).map(([key, limiter]) => ({ key, limiter }));
+  }
 
-  clusterKeys: ->
-    if !@connection? then return @Promise.resolve @keys()
-    keys = []
-    cursor = null
-    start = "b_#{@id}-".length
-    end = "_settings".length
-    until cursor == 0
-      [next, found] = await @connection.__runCommand__ ["scan", (cursor ? 0), "match", "b_#{@id}-*_settings", "count", 10000]
-      cursor = ~~next
-      keys.push(k.slice(start, -end)) for k in found
-    keys
+  keys() {
+    return Object.keys(this.instances);
+  }
 
-  _startAutoCleanup: ->
-    clearInterval @interval
-    (@interval = setInterval =>
-      time = Date.now()
-      for k, v of @instances
-        try if await v._store.__groupCheck__(time) then @deleteKey k
-        catch e then v.Events.trigger "error", e
-    , (@timeout / 2)).unref?()
+  async clusterKeys() {
+    if (this.connection == null) {
+      return Promise.resolve(this.keys());
+    }
+    const keys = [];
+    let cursor = null;
+    const start = `b_${this.id}-`.length;
+    const end = "_settings".length;
+    while (cursor !== 0) {
+      const [next, found] = await this.connection.__runCommand__([
+        "scan",
+        cursor ?? 0,
+        "match",
+        `b_${this.id}-*_settings`,
+        "count",
+        10000,
+      ]);
+      cursor = ~~next;
+      for (const k of found) {
+        keys.push(k.slice(start, -end));
+      }
+    }
+    return keys;
+  }
 
-  updateSettings: (options={}) ->
-    parser.overwrite options, @defaults, @
-    parser.overwrite options, options, @limiterOptions
-    @_startAutoCleanup() if options.timeout?
+  _startAutoCleanup() {
+    clearInterval(this.interval);
 
-  disconnect: (flush=true) ->
-    if !@sharedConnection
-      @connection?.disconnect flush
+    this.interval = setInterval(async () => {
+      const time = Date.now();
+      for (const [k, v] of Object.entries(this.instances)) {
+        try {
+          if (await v._store.__groupCheck__(time)) {
+            this.deleteKey(k);
+          }
+        } catch (e) {
+          v.Events.trigger("error", e);
+        }
+      }
+    }, this.timeout / 2).unref?.();
+  }
 
-module.exports = Group
+  updateSettings(options) {
+    options ??= {};
+    parser.overwrite(options, this.defaults, this);
+    parser.overwrite(options, options, this.limiterOptions);
+    if (options.timeout != null) {
+      return this._startAutoCleanup();
+    }
+  }
+
+  disconnect(flush = true) {
+    if (!this.sharedConnection) {
+      return this.connection?.disconnect(flush);
+    }
+  }
+}
+
+module.exports = Group;
