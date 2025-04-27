@@ -1,84 +1,122 @@
-parser = require "./parser"
-Events = require "./Events"
-Scripts = require "./Scripts"
+const parser = require("./parser");
+const Events = require("./Events");
+const Scripts = require("./Scripts");
 
-class IORedisConnection
-  datastore: "ioredis"
-  defaults:
-    Redis: null
-    clientOptions: {}
-    clusterNodes: null
-    client: null
-    Promise: Promise
-    Events: null
+class IORedisConnection {
+  datastore = "ioredis";
+  defaults = {
+    Redis: null,
+    clientOptions: {},
+    clusterNodes: null,
+    client: null,
+    Events: null,
+  };
 
-  constructor: (options={}) ->
-    parser.load options, @defaults, @
-    @Redis ?= eval("require")("ioredis") # Obfuscated or else Webpack/Angular will try to inline the optional ioredis module. To override this behavior: pass the ioredis module to Bottleneck as the 'Redis' option.
-    @Events ?= new Events @
-    @terminated = false
+  constructor(options) {
+    options ??= {};
+    parser.load(options, this.defaults, this);
 
-    if @clusterNodes?
-      @client = new @Redis.Cluster @clusterNodes, @clientOptions
-      @subscriber = new @Redis.Cluster @clusterNodes, @clientOptions
-    else if @client? and !@client.duplicate?
-      @subscriber = new @Redis.Cluster @client.startupNodes, @client.options
-    else
-      @client ?= new @Redis @clientOptions
-      @subscriber = @client.duplicate()
-    @limiters = {}
+    // Obfuscated or else Webpack/Angular will try to inline the optional ioredis module. To override this behavior: pass the ioredis module to Bottleneck as the 'Redis' option.
+    this.Redis ??= eval("require")("ioredis");
+    this.Events ??= new Events(this);
+    this.terminated = false;
 
-    @ready = @Promise.all [@_setup(@client, false), @_setup(@subscriber, true)]
-    .then =>
-      @_loadScripts()
-      { @client, @subscriber }
+    if (this.clusterNodes != null) {
+      this.client = new this.Redis.Cluster(this.clusterNodes, this.clientOptions);
+      this.subscriber = new this.Redis.Cluster(this.clusterNodes, this.clientOptions);
+    } else if (this.client != null && this.client.duplicate == null) {
+      this.subscriber = new this.Redis.Cluster(this.client.startupNodes, this.client.options);
+    } else {
+      this.client ??= new this.Redis(this.clientOptions);
+      this.subscriber = this.client.duplicate();
+    }
+    this.limiters = {};
 
-  _setup: (client, sub) ->
-    client.setMaxListeners 0
-    new @Promise (resolve, reject) =>
-      client.on "error", (e) => @Events.trigger "error", e
-      if sub
-        client.on "message", (channel, message) =>
-          @limiters[channel]?._store.onMessage channel, message
-      if client.status == "ready" then resolve()
-      else client.once "ready", resolve
+    this.ready = Promise.all([
+      this._setup(this.client, false),
+      this._setup(this.subscriber, true),
+    ]).then(() => {
+      this._loadScripts();
+      return { client: this.client, subscriber: this.subscriber };
+    });
+  }
 
-  _loadScripts: -> Scripts.names.forEach (name) => @client.defineCommand name, { lua: Scripts.payload(name) }
+  _setup(client, sub) {
+    client.setMaxListeners(0);
+    return new Promise((resolve) => {
+      client.on("error", (e) => this.Events.trigger("error", e));
+      if (sub) {
+        client.on("message", (channel, message) => {
+          this.limiters[channel]?._store.onMessage(channel, message);
+        });
+      }
+      if (client.status === "ready") {
+        resolve();
+      } else {
+        client.once("ready", resolve);
+      }
+    });
+  }
 
-  __runCommand__: (cmd) ->
-    await @ready
-    [[_, deleted]] = await @client.pipeline([cmd]).exec()
-    deleted
+  _loadScripts() {
+    return Scripts.names.forEach((name) =>
+      this.client.defineCommand(name, { lua: Scripts.payload(name) }),
+    );
+  }
 
-  __addLimiter__: (instance) ->
-    @Promise.all [instance.channel(), instance.channel_client()].map (channel) =>
-      new @Promise (resolve, reject) =>
-        @subscriber.subscribe channel, =>
-          @limiters[channel] = instance
-          resolve()
+  async __runCommand__(cmd) {
+    await this.ready;
+    const [[, deleted]] = await this.client.pipeline([cmd]).exec();
+    return deleted;
+  }
 
-  __removeLimiter__: (instance) ->
-    [instance.channel(), instance.channel_client()].forEach (channel) =>
-      await @subscriber.unsubscribe channel unless @terminated
-      delete @limiters[channel]
+  async __addLimiter__(instance) {
+    await Promise.all(
+      [instance.channel(), instance.channel_client()].map((channel) => {
+        return new Promise((resolve) => {
+          this.subscriber.subscribe(channel, () => {
+            this.limiters[channel] = instance;
+            resolve();
+          });
+        });
+      }),
+    );
+  }
 
-  __scriptArgs__: (name, id, args, cb) ->
-    keys = Scripts.keys name, id
-    [keys.length].concat keys, args, cb
+  async __removeLimiter__(instance) {
+    await Promise.all(
+      [instance.channel(), instance.channel_client()].map(async (channel) => {
+        if (!this.terminated) {
+          await this.subscriber.unsubscribe(channel);
+        }
+        delete this.limiters[channel];
+      }),
+    );
+  }
 
-  __scriptFn__: (name) ->
-    @client[name].bind(@client)
+  __scriptArgs__(name, id, args, cb) {
+    const keys = Scripts.keys(name, id);
+    return [keys.length].concat(keys, args, cb);
+  }
 
-  disconnect: (flush=true) ->
-    clearInterval(@limiters[k]._store.heartbeat) for k in Object.keys @limiters
-    @limiters = {}
-    @terminated = true
+  __scriptFn__(name) {
+    return this.client[name].bind(this.client);
+  }
 
-    if flush
-      @Promise.all [@client.quit(), @subscriber.quit()]
-    else
-      @client.disconnect()
-      @subscriber.disconnect()
-      @Promise.resolve()
+  async disconnect(flush = true) {
+    for (const v of Object.values(this.limiters)) {
+      clearInterval(v._store.heartbeat);
+    }
+    this.limiters = {};
+    this.terminated = true;
 
-module.exports = IORedisConnection
+    if (flush) {
+      await Promise.all([this.client.quit(), this.subscriber.quit()]);
+    } else {
+      this.client.disconnect();
+      this.subscriber.disconnect();
+    }
+  }
+}
+
+module.exports = IORedisConnection;

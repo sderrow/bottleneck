@@ -1,3 +1,3 @@
-class BottleneckError extends Error
+class BottleneckError extends Error {}
 
-module.exports = BottleneckError
+module.exports = BottleneckError;

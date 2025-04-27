@@ -1,39 +1,45 @@
-parser = require "./parser"
-Events = require "./Events"
+const parser = require("./parser");
+const Events = require("./Events");
 
-class Batcher
-  defaults:
-    maxTime: null
-    maxSize: null
-    Promise: Promise
+class Batcher {
+  defaults = { maxTime: null, maxSize: null };
 
-  constructor: (@options={}) ->
-    parser.load @options, @defaults, @
-    @Events = new Events @
-    @_arr = []
-    @_resetPromise()
-    @_lastFlush = Date.now()
+  constructor(options) {
+    this.options = options ?? {};
+    parser.load(this.options, this.defaults, this);
+    this.Events = new Events(this);
+    this._arr = [];
+    this._resetPromise();
+    this._lastFlush = Date.now();
+  }
 
-  _resetPromise: ->
-    @_promise = new @Promise (res, rej) => @_resolve = res
+  _resetPromise() {
+    this._promise = new Promise((res) => {
+      this._resolve = res;
+    });
+  }
 
-  _flush: ->
-    clearTimeout @_timeout
-    @_lastFlush = Date.now()
-    @_resolve()
-    @Events.trigger "batch", @_arr
-    @_arr = []
-    @_resetPromise()
+  _flush() {
+    clearTimeout(this._timeout);
+    this._lastFlush = Date.now();
+    this._resolve();
+    this.Events.trigger("batch", this._arr);
+    this._arr = [];
+    this._resetPromise();
+  }
 
-  add: (data) ->
-    @_arr.push data
-    ret = @_promise
-    if @_arr.length == @maxSize
-      @_flush()
-    else if @maxTime? and @_arr.length == 1
-      @_timeout = setTimeout =>
-        @_flush()
-      , @maxTime
-    ret
+  add(data) {
+    this._arr.push(data);
+    const existingPromise = this._promise;
+    if (this._arr.length === this.maxSize) {
+      this._flush();
+    } else if (this.maxTime != null && this._arr.length === 1) {
+      this._timeout = setTimeout(() => {
+        this._flush();
+      }, this.maxTime);
+    }
+    return existingPromise;
+  }
+}
 
-module.exports = Batcher
+module.exports = Batcher;
