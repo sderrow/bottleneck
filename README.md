@@ -50,7 +50,7 @@ Despite the major version bump, that's just to signify that this is a fork. Ther
 ## Install
 
 ```
-npm install --save bottleneck
+npm install --save @sderrow/bottleneck
 ```
 
 ```js
