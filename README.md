@@ -53,10 +53,21 @@ Despite the major version bump, that's just to signify that this is a fork. Ther
 npm install --save @sderrow/bottleneck
 ```
 
+If you don't want to refactor all your import/require calls for this fork, you can change your package.json dependencies list so the bottleneck line looks like:
+
+```
+"dependencies": {
+  ...
+  "bottleneck": "npm:@sderrow/bottleneck@^3"
+  ...
+}
+```
+
+Note: To support older browsers and Node <6.0, you must import the ES5 bundle instead.
+
 ```js
 import Bottleneck from "bottleneck";
 
-// Note: To support older browsers and Node <6.0, you must import the ES5 bundle instead.
 var Bottleneck = require("bottleneck/es5");
 ```
 
