@@ -1,6 +1,6 @@
 {
-  "name": "bottleneck",
-  "version": "2.19.5",
+  "name": "@sderrow/bottleneck",
+  "version": "3.0.4",
   "description": "Distributed task scheduler and rate limiter",
   "main": "lib/index.js",
   "typings": "bottleneck.d.ts",
@@ -8,10 +8,7 @@
     "test": "mocha test",
     "test-all": "./scripts/test_all.sh"
   },
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/SGrondin/bottleneck"
-  },
+  "repository": "github:sderrow/bottleneck",
   "keywords": [
     "async rate limiter",
     "rate limiter",
@@ -29,9 +26,14 @@
   "author": {
     "name": "Simon Grondin"
   },
+  "contributors": [
+    {
+      "name": "Sean Derrow"
+    }
+  ],
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/SGrondin/bottleneck/issues"
+    "url": "https://github.com/sderrow/bottleneck/issues"
   },
   "devDependencies": {
     "@babel/core": "^7.5.0",
