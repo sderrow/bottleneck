@@ -4,6 +4,15 @@
   "description": "Distributed task scheduler and rate limiter",
   "main": "lib/index.js",
   "typings": "bottleneck.d.ts",
+  "files": [
+    "lib/",
+    "es5.js",
+    "light.js",
+    "light.d.ts",
+    "bottleneck.d.ts",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "test": "mocha test",
     "test-all": "./scripts/test_all.sh"
