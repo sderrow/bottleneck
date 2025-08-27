@@ -1,4 +1,4 @@
-declare module "bottleneck/light" {
+declare module "@sderrow/bottleneck/light" {
     namespace Bottleneck {
     type ConstructorOptions = {
         /**
