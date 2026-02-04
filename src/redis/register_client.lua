@@ -9,4 +9,7 @@ end
 
 redis.call('zadd', client_last_seen_key, now, client)
 
+local groupTimeout = tonumber(redis.call('hget', settings_key, 'groupTimeout'))
+refresh_expiration(0, 0, groupTimeout)
+
 return {}
