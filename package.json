@@ -14,10 +14,14 @@
     "LICENSE"
   ],
   "scripts": {
+    "build": "./scripts/build.sh",
     "test": "mocha test",
     "test-all": "./scripts/test_all.sh"
   },
-  "repository": "github:sderrow/bottleneck",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sderrow/bottleneck.git"
+  },
   "keywords": [
     "async rate limiter",
     "rate limiter",
