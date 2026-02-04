@@ -225,6 +225,39 @@ if (process.env.DATASTORE === 'redis' || process.env.DATASTORE === 'ioredis') {
       })
     })
 
+    it('Should set TTL on all keys including client_* keys after register_client', async function () {
+      c = makeTest({ timeout: 5 * 60 * 1000 })
+
+      await c.limiter.ready()
+
+      // Get all 8 keys for this limiter
+      var keys = limiterKeys(c.limiter)
+
+      // Identify the client_* keys
+      var clientKeys = keys.filter(k => k.includes('_client_'))
+      
+      // First verify that client_* keys actually exist (were created by register_client)
+      for (var i = 0; i < clientKeys.length; i++) {
+        var key = clientKeys[i]
+        var exists = await runCommand(c.limiter, 'exists', [key])
+        assert(exists === 1, `Expected ${key} to exist after register_client, but it doesn't`)
+      }
+  
+      // Now verify that all keys have TTL set
+      for (var i = 0; i < keys.length; i++) {
+        var key = keys[i]
+        var ttl = await runCommand(c.limiter, 'ttl', [key])
+        
+        if (ttl == -2) continue; // key doesn't exist
+
+        // TTL should be around 300 seconds (5 minutes)
+        // -1 means no TTL (the bug we're fixing), -2 means key doesn't exist
+        assert(ttl >= 290 && ttl <= 305, 
+          `Expected TTL between 290-305 for ${key}, got ${ttl}. ` +
+          `(-1 means no TTL set, -2 means key doesn't exist)`)
+      }
+    })
+
     it('Should compute reservoir increased based on number of missed intervals', async function () {
       const settings = {
         id: 'missed-intervals',

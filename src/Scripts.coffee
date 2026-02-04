@@ -72,7 +72,7 @@ templates =
   register_client:
     keys: exports.allKeys
     headers: ["validate_keys"]
-    refresh_expiration: false
+    refresh_expiration: true
     code: lua["register_client.lua"]
   blacklist_client:
     keys: exports.allKeys
