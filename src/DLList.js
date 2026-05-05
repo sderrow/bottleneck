@@ -39,7 +39,7 @@ class DLList {
     let node = this._first;
     const result = [];
     while (node != null) {
-      var ref;
+      let ref;
       result.push(((ref = node), (node = node.next), ref.value));
     }
     return result;
@@ -55,7 +55,7 @@ class DLList {
     let node = this._first;
     const result = [];
     while (node != null) {
-      var ref;
+      let ref;
       result.push(
         ((ref = node),
         (node = node.next),
