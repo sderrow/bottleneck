@@ -1,0 +1,63 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["typescript", "unicorn", "oxc", "eslint", "vitest", "node"],
+  "env": {
+    "builtin": true,
+    "node": true
+  },
+  "categories": {
+    "correctness": "error",
+    "suspicious": "error",
+    "perf": "error"
+  },
+  "options": {
+    "reportUnusedDisableDirectives": "error"
+  },
+  "ignorePatterns": ["**/.gitignore", "**/node_modules", "dist/**", "test.ts"],
+  "rules": {
+    "no-unused-vars": [
+      "warn",
+      {
+        "vars": "all",
+        "varsIgnorePattern": "^_",
+        "args": "after-used",
+        "argsIgnorePattern": "^_",
+        "ignoreRestSiblings": true,
+        "fix": {
+          "imports": "safe-fix",
+          "variables": "off"
+        }
+      }
+    ],
+    "no-await-in-loop": "off",
+    "no-underscore-dangle": "off", // Disabled because it's a common pattern in the codebase
+    "no-array-constructor": "error",
+    "typescript/no-explicit-any": "off", // Disabled because it's a common pattern in the codebase
+    "typescript/no-require-imports": "off", // Disabled because it's a common pattern in the codebase
+    "typescript/no-unsafe-function-type": "error",
+    "typescript/consistent-type-imports": ["error", { "fixStyle": "inline-type-imports" }],
+    "typescript/ban-ts-comment": "error",
+    "typescript/no-empty-object-type": "error",
+    "typescript/no-namespace": "error",
+    "unicorn/no-array-reverse": "off",
+    "unicorn/no-array-sort": "off",
+    "vitest/valid-describe-callback": "off",
+    "vitest/expect-expect": [
+      "error",
+      {
+        "assertFunctionNames": [
+          "expect",
+          "expect.**",
+          "expectTypeOf",
+          "assert",
+          "assertType",
+          "assert.**",
+          "**.pNoErrVal",
+          "**.checkResultsOrder",
+          "**.checkDuration",
+          "**.noErrVal"
+        ]
+      }
+    ]
+  }
+}

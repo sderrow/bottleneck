@@ -1,0 +1,5 @@
+"*.{js,jsx,cjs,mjs,ts,tsx,cts,mts}":
+  - oxfmt --no-error-on-unmatched-pattern
+  - oxlint --fix --no-error-on-unmatched-pattern
+"!(*.{js,jsx,cjs,mjs,ts,tsx,cts,mts,sh})":
+  - oxfmt --no-error-on-unmatched-pattern

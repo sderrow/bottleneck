@@ -391,27 +391,27 @@ class Bottleneck {
     }
   }
 
-  submit(...args) {
+  submit(...sargs) {
     let cb, fn, options;
-    if (typeof args[0] === "function") {
-      cb = args.pop();
-      [fn, ...args] = args;
+    if (typeof sargs[0] === "function") {
+      cb = sargs.pop();
+      [fn, ...sargs] = sargs;
       options = parser.load({}, this.jobDefaults);
     } else {
-      cb = args.pop();
-      [options, fn, ...args] = args;
+      cb = sargs.pop();
+      [options, fn, ...sargs] = sargs;
       options = parser.load(options, this.jobDefaults);
     }
 
-    const task = (...args) => {
+    const task = (...targs) => {
       return new Promise((resolve, reject) =>
-        fn(...args, (...args) => (args[0] != null ? reject : resolve)(args)),
+        fn(...targs, (...args) => (args[0] != null ? reject : resolve)(args)),
       );
     };
 
     const job = new Job(
       task,
-      args,
+      sargs,
       options,
       this.jobDefaults,
       this.rejectOnDrop,

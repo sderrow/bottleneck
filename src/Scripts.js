@@ -1,4 +1,4 @@
-const lua = require("../ref/lua.json");
+const lua = require("./redis");
 
 const headers = {
   refs: lua["refs.lua"],
@@ -10,7 +10,7 @@ const headers = {
   get_time: lua["get_time.lua"],
 };
 
-exports.allKeys = id => [
+exports.allKeys = (id) => [
   // HASH
   `b_${id}_settings`,
 
@@ -100,34 +100,19 @@ const templates = {
   },
   check: {
     keys: exports.allKeys,
-    headers: [
-      "validate_keys",
-      "validate_client",
-      "process_tick",
-      "conditions_check",
-    ],
+    headers: ["validate_keys", "validate_client", "process_tick", "conditions_check"],
     refresh_expiration: false,
     code: lua["check.lua"],
   },
   submit: {
     keys: exports.allKeys,
-    headers: [
-      "validate_keys",
-      "validate_client",
-      "process_tick",
-      "conditions_check",
-    ],
+    headers: ["validate_keys", "validate_client", "process_tick", "conditions_check"],
     refresh_expiration: true,
     code: lua["submit.lua"],
   },
   register: {
     keys: exports.allKeys,
-    headers: [
-      "validate_keys",
-      "validate_client",
-      "process_tick",
-      "conditions_check",
-    ],
+    headers: ["validate_keys", "validate_client", "process_tick", "conditions_check"],
     refresh_expiration: true,
     code: lua["register.lua"],
   },
@@ -160,9 +145,9 @@ exports.payload = function (name) {
   return Array.prototype
     .concat(
       headers.refs,
-      template.headers.map(h => headers[h]),
+      template.headers.map((h) => headers[h]),
       template.refresh_expiration ? headers.refresh_expiration : "",
-      template.code
+      template.code,
     )
     .join("\n");
 };
