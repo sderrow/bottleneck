@@ -5,14 +5,14 @@ const parser = require("./parser");
 const Queues = require("./Queues");
 const Job = require("./Job");
 const LocalDatastore = require("./LocalDatastore");
-const RedisDatastore = require("./RedisDatastore");
+const RedisDatastore = require("./cluster/RedisDatastore");
 const Events = require("./Events");
 const States = require("./States");
 const Sync = require("./Sync");
 const BottleneckError = require("./BottleneckError");
 const Group = require("./Group");
-const RedisConnection = require("./RedisConnection");
-const IORedisConnection = require("./IORedisConnection");
+const RedisConnection = require("./cluster/RedisConnection");
+const IORedisConnection = require("./cluster/IORedisConnection");
 const Batcher = require("./Batcher");
 const version = require("../package.json").version;
 class Bottleneck {

@@ -1,6 +1,6 @@
 var makeTest = require("./context");
 var Bottleneck = require("./bottleneck");
-var Scripts = require("../src/Scripts.js");
+var Scripts = require("../src/cluster/Scripts.js");
 var assert = require("assert");
 const { describe, it, afterEach } = require("mocha");
 
@@ -15,12 +15,7 @@ if (process.env.DATASTORE === "redis" || process.env.DATASTORE === "ioredis") {
     return runCommand(limiter, "del", limiterKeys(limiter));
   };
   var runCommand = function (limiter, command, args) {
-    return new Promise(function (resolve, reject) {
-      limiter._store.clients.client[command](...args, function (err, data) {
-        if (err != null) return reject(err);
-        return resolve(data);
-      });
-    });
+    return limiter._store.connection.__runCommand__([command, ...args]);
   };
 
   describe("Cluster-only", function () {
@@ -803,8 +798,13 @@ if (process.env.DATASTORE === "redis" || process.env.DATASTORE === "ioredis") {
     });
 
     it("Should safely handle connection failures", function () {
+      // node-redis v4+ uses a nested socket option shape; ioredis stays flat.
+      var failingOptions =
+        process.env.DATASTORE === "redis"
+          ? { socket: { port: 1, reconnectStrategy: () => false } }
+          : { port: 1 };
       c = makeTest({
-        clientOptions: { port: 1 },
+        clientOptions: failingOptions,
         errorEventsExpected: true,
       });
 

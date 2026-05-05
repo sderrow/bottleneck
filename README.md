@@ -18,7 +18,13 @@ More importantly, this library has been rewritten with modern-day JS (courtesy o
 
 ### Breaking changes in v4
 
-ES5 is no longer supported.
+- The ES5 build has been removed (`require("bottleneck/es5")` no longer exists). If you need broad-browser support, use the UMD `@sderrow/bottleneck/light` build instead.
+- Cluster mode now requires `redis` v4+ (drops v2/v3) or `ioredis` v5+. The unsupported `redis` v2/v3 client API has been removed.
+- `ioredis` and `redis` are now optional **peer dependencies**. Your application must install whichever client it uses.
+- The `Redis` constructor option is now required when `datastore` is `"redis"` or `"ioredis"` (unless you pass a pre-built `client` or `connection`). Bottleneck no longer implicitly does `require("ioredis")` for you.
+- Internal Redis-only modules now live under `src/cluster/`. Only relevant if you imported from internal paths; the public API is unchanged.
+
+See [Upgrading to v4](#upgrading-to-v4) for migration steps.
 
 ## Table of Contents
 
@@ -46,6 +52,8 @@ ES5 is no longer supported.
 - [Clustering](#clustering)
 - [Debugging Your Application](#debugging-your-application)
 - [Upgrading To v2](#upgrading-to-v2)
+- [Upgrading To v3](#upgrading-to-v3)
+- [Upgrading To v4](#upgrading-to-v4)
 - [Contributing](#contributing)
 
 <!-- tocstop -->
@@ -203,7 +211,7 @@ limiter.schedule(object.doSomething.bind(object));
 limiter.schedule(() => object.doSomething());
 ```
 
-- Bottleneck requires Node 6+ to function. However, an ES5 build is included: `var Bottleneck = require("bottleneck/es5");`.
+- Bottleneck targets modern Node.js. For browser usage, a UMD build without cluster support ships under the `@sderrow/bottleneck/light` subpath import.
 
 - Make sure you're catching `"error"` events emitted by your limiters!
 
@@ -842,64 +850,52 @@ Bottleneck will attempt to spread load evenly across limiters.
 
 ### Enabling Clustering
 
-First, add `redis` or `ioredis` to your application's dependencies:
+First, add `redis` or `ioredis` to your application's dependencies. Both are optional **peer dependencies** of Bottleneck — install whichever you intend to use:
 
 ```bash
-# NodeRedis (https://github.com/NodeRedis/node_redis)
-npm install --save redis
+# node-redis (https://github.com/redis/node-redis) — v4 or v5
+pnpm add redis@^4   # or: npm install redis@^4 / yarn add redis@^4
 
-# or ioredis (https://github.com/luin/ioredis)
-npm install --save ioredis
+# or ioredis (https://github.com/redis/ioredis) — v5
+pnpm add ioredis@^5
 ```
 
-Then create a limiter or a Group:
+Then import the client and pass it to Bottleneck via the `Redis` constructor option (Bottleneck does not implicitly require either client at runtime):
 
 ```js
+import Redis from "ioredis"; // or: import { createClient } from "redis";
+
 const limiter = new Bottleneck({
   /* Some basic options */
   maxConcurrent: 5,
-  minTime: 500
-  id: "my-super-app" // All limiters with the same id will be clustered together
+  minTime: 500,
+  id: "my-super-app", // All limiters with the same id will be clustered together
 
   /* Clustering options */
-  datastore: "redis", // or "ioredis"
+  datastore: "ioredis", // or "redis"
+  Redis, // required (unless you pass a pre-built `client` or `connection`)
   clearDatastore: false,
   clientOptions: {
     host: "127.0.0.1",
-    port: 6379
+    port: 6379,
 
     // Redis client options
-    // Using NodeRedis? See https://github.com/NodeRedis/node_redis#options-object-properties
-    // Using ioredis? See https://github.com/luin/ioredis/blob/master/API.md#new-redisport-host-options
-  }
+    // Using node-redis? See https://github.com/redis/node-redis#createclient-configuration
+    // Using ioredis? See https://github.com/redis/ioredis#connect-to-redis
+  },
 });
 ```
 
-| Option           | Default         | Description                                                                                                                                                                                                                               |
-| ---------------- | --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `datastore`      | `"local"`       | Where the limiter stores its internal state. The default (`"local"`) keeps the state in the limiter itself. Set it to `"redis"` or `"ioredis"` to enable Clustering.                                                                      |
-| `clearDatastore` | `false`         | When set to `true`, on initial startup, the limiter will wipe any existing Bottleneck state data on the Redis db.                                                                                                                         |
-| `clientOptions`  | `{}`            | This object is passed directly to the redis client library you've selected.                                                                                                                                                               |
-| `clusterNodes`   | `null`          | **ioredis only.** When `clusterNodes` is not null, the client will be instantiated by calling `new Redis.Cluster(clusterNodes, clientOptions)` instead of `new Redis(clientOptions)`.                                                     |
-| `timeout`        | `null` (no TTL) | The Redis TTL in milliseconds ([TTL](https://redis.io/commands/ttl)) for the keys created by the limiter. When `timeout` is set, the limiter's state will be automatically removed from Redis after `timeout` milliseconds of inactivity. |
-| `Redis`          | `null`          | Overrides the import/require of the redis/ioredis library. You shouldn't need to set this option unless your application is failing to start due to a failure to require/import the client library.                                       |
+| Option           | Default         | Description                                                                                                                                                                                                                                                       |
+| ---------------- | --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `datastore`      | `"local"`       | Where the limiter stores its internal state. The default (`"local"`) keeps the state in the limiter itself. Set it to `"redis"` or `"ioredis"` to enable Clustering.                                                                                              |
+| `Redis`          | `null`          | The imported Redis library, e.g. `require("ioredis")` or `require("redis")`. **Required** when `datastore` is `"redis"` or `"ioredis"`, unless a pre-built `client` or `connection` is provided. Bottleneck does not implicitly require either client at runtime. |
+| `clearDatastore` | `false`         | When set to `true`, on initial startup, the limiter will wipe any existing Bottleneck state data on the Redis db.                                                                                                                                                 |
+| `clientOptions`  | `{}`            | This object is passed directly to the redis client library you've selected.                                                                                                                                                                                       |
+| `clusterNodes`   | `null`          | **ioredis only.** When `clusterNodes` is not null, the client will be instantiated by calling `new Redis.Cluster(clusterNodes, clientOptions)` instead of `new Redis(clientOptions)`.                                                                             |
+| `timeout`        | `null` (no TTL) | The Redis TTL in milliseconds ([TTL](https://redis.io/commands/ttl)) for the keys created by the limiter. When `timeout` is set, the limiter's state will be automatically removed from Redis after `timeout` milliseconds of inactivity.                         |
 
 **Note: When using Groups**, the `timeout` option has a default of `300000` milliseconds and the generated limiters automatically receive an `id` with the pattern `${group.id}-${KEY}`.
-
-**Note:** If you are seeing a runtime error due to the `require()` function not being able to load `redis`/`ioredis`, then directly pass the module as the `Redis` option. Example:
-
-```js
-import Redis from "ioredis";
-
-const limiter = new Bottleneck({
-  id: "my-super-app",
-  datastore: "ioredis",
-  clientOptions: { host: "12.34.56.78", port: 6379 },
-  Redis,
-});
-```
-
-Unfortunately, this is a side effect of having to disable inlining, which is necessary to make Bottleneck easy to use in the browser.
 
 ### Important considerations when Clustering
 
@@ -1001,11 +997,15 @@ Bottleneck needs to create 2 Redis Clients to function, one for normal operation
 By default, every Group and every standalone limiter (a limiter not created by a Group) will create their own Connection object, but it is possible to manually control this behavior. In this example, every Group and limiter is sharing the same Connection object and therefore the same 2 clients:
 
 ```js
+import Redis from "redis"; // or ioredis: import Redis from "ioredis";
+
+// Use Bottleneck.IORedisConnection when using ioredis
 const connection = new Bottleneck.RedisConnection({
+  Redis,
   clientOptions: {
-    /* NodeRedis/ioredis options */
+    /* node-redis/ioredis options */
   },
-  // ioredis also accepts `clusterNodes` here
+  // Bottleneck.IORedisConnection also accepts `clusterNodes` here
 });
 
 const limiter = new Bottleneck({ connection: connection });
@@ -1026,13 +1026,14 @@ connection.on("error", (err) => {
 });
 ```
 
-If you already have a NodeRedis/ioredis client, you can ask Bottleneck to reuse it, although currently the Connection object will still create a second client for pubsub operations:
+If you already have a node-redis/ioredis client, you can ask Bottleneck to reuse it, although currently the Connection object will still create a second client for pubsub operations:
 
 ```js
-import Redis from "redis";
-const client = new Redis.createClient({
+import { createClient } from "redis";
+const client = createClient({
   /* options */
 });
+await client.connect();
 
 const connection = new Bottleneck.RedisConnection({
   // `clientOptions` and `clusterNodes` will be ignored since we're passing a raw client
@@ -1110,17 +1111,105 @@ Version 2 is more user-friendly and powerful.
 
 After upgrading your code, please take a minute to read the [Debugging your application](#debugging-your-application) chapter.
 
+## Upgrading to v3
+
+There are no API or behavioral changes in v3. The major version bump only marks the initial republish of upstream `bottleneck@2` as `@sderrow/bottleneck` when this fork was created.
+
+If you are coming from upstream `bottleneck@2`, you only need to swap the package name. All your existing v2 code keeps working unchanged. The simplest path is the package alias documented in the [Install](#install) section, which lets you keep `import Bottleneck from "bottleneck"` everywhere:
+
+```json
+"dependencies": {
+  "bottleneck": "npm:@sderrow/bottleneck@^4"
+}
+```
+
+## Upgrading to v4
+
+The v4 release modernizes cluster mode and removes the legacy ES5 build. If you are not using `datastore: "redis"` or `datastore: "ioredis"`, no changes are required.
+
+### Cluster mode users
+
+Install whichever Redis client you use as a direct dependency. They are optional **peer dependencies** in v4:
+
+```bash
+pnpm add ioredis@^5
+# or
+pnpm add redis@^4
+```
+
+Pass the imported library to Bottleneck explicitly. Bottleneck no longer requires it for you:
+
+```diff
++ import Redis from "ioredis";
+
+  const limiter = new Bottleneck({
+    id: "my-app",
+    datastore: "ioredis",
+    clientOptions: { host: "127.0.0.1", port: 6379 },
++   Redis,
+  });
+```
+
+The same applies to `Bottleneck.Group` and to the standalone `Bottleneck.RedisConnection` / `Bottleneck.IORedisConnection` constructors. Pass `Redis` once at the top of your module and reuse the resulting Connection or Group across as many limiters as you want — see [Managing Redis Connections](#managing-redis-connections).
+
+If you previously hit "Bottleneck failed to require ioredis at runtime", that workaround paragraph is no longer needed. The implicit-require hack has been removed entirely.
+
+### Legacy `redis` v2/v3 users
+
+The minimum supported `redis` package version is now v4. The v2/v3 callback-style client API is no longer supported. Follow node-redis's own [v3-to-v4 migration guide](https://github.com/redis/node-redis/blob/master/docs/v3-to-v4.md) to upgrade your client. v5 is also fully supported.
+
+### ES5 users
+
+The `bottleneck/es5` import path has been removed. If you still need a build that runs in older browsers, use the UMD `@sderrow/bottleneck/light` build (which excludes cluster mode) and transpile in your own toolchain.
+
 ## Contributing
 
 This README is always in need of improvements. If wording can be clearer and simpler, please consider forking this repo and submitting a Pull Request, or simply opening an issue.
 
 Suggestions and bug reports are also welcome.
 
-To work on the Bottleneck code, simply clone the repo, makes your changes to the files located in `src/` only, then run `./scripts/build.sh && npm test` to ensure that everything is set up correctly.
+### Toolchain
 
-To speed up compilation time during development, run `./scripts/build.sh dev` instead. Make sure to build and test without `dev` before submitting a PR.
+- Node.js: pinned by [.nvmrc](.nvmrc).
+- Package manager: `pnpm`, managed via [corepack](https://nodejs.org/api/corepack.html). Run `corepack enable` once after cloning so the version pinned in [package.json](package.json) (`packageManager`) is used automatically.
+- Bundler: [`tsdown`](https://tsdown.dev) (configured in [tsdown.config.ts](tsdown.config.ts)). Builds are fast — there is no separate "dev" build mode.
+- Linter / formatter: [`oxlint`](https://oxc.rs/docs/guide/usage/linter.html) and [`oxfmt`](https://oxc.rs/docs/guide/usage/formatter.html).
+- Tests: [`mocha`](https://mochajs.org).
 
-The tests must also pass in Clustering mode and using the ES5 bundle. You'll need a Redis server running locally (latency needs to be minimal to run the tests). If the server isn't using the default hostname and port, you can set those in the `.env` file. Then run `./scripts/build.sh && npm run test-all`.
+### Source layout
+
+Make changes only inside `src/`:
+
+- `src/` — the local-mode core (browser-safe, no Redis dependencies).
+- `src/cluster/` — Redis-only modules (RedisDatastore, RedisConnection, IORedisConnection, Scripts, and `lua/*.lua`). Anything in this folder is excluded from the `dist/light.js` UMD build by the `excludeClustering` plugin in [tsdown.config.ts](tsdown.config.ts).
+
+### Common commands
+
+```bash
+pnpm install                # install dependencies
+pnpm run build              # build dist/index.js (CJS) and dist/light.js (UMD)
+pnpm run lint               # oxlint
+pnpm run format:check       # oxfmt --check (use `pnpm run format` to auto-fix)
+pnpm run check-types        # tsc --strict against test.ts
+pnpm test                   # run the test suite (local datastore)
+```
+
+### Running the full test matrix
+
+The tests must pass against the source, both bundled artifacts (`dist/index.js` and `dist/light.js`), and both Redis clients. You will need a Redis server running locally; latency to it should be minimal. Override the host/port with `REDIS_HOST` / `REDIS_PORT` env vars if needed.
+
+```bash
+pnpm run test                # source, local datastore
+pnpm run test:light          # light bundle (no cluster mode)
+pnpm run test:full           # full bundle, local datastore
+pnpm run test:ioredis        # source + ioredis
+pnpm run test:redis          # source + node-redis
+pnpm run test:full:ioredis   # full bundle + ioredis
+pnpm run test:full:redis     # full bundle + node-redis
+pnpm run test:all            # builds, then runs every combination above
+```
+
+The full set of checks run in CI is in [.github/workflows/ci.yaml](.github/workflows/ci.yaml); please make sure each step passes locally before opening a PR.
 
 All contributions are appreciated and will be considered.
 

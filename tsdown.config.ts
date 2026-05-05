@@ -9,13 +9,15 @@ const pkg = JSON.parse(fs.readFileSync(path.join(here, "package.json"), "utf8"))
 };
 
 const toPosix = (id: string) => id.replace(/\\/g, "/");
+const isClusterModule = (id: string) => toPosix(id).includes("/src/cluster/");
+const isLuaIndex = (id: string) => toPosix(id).endsWith("/src/cluster/lua/index.js");
+
 const cleanFor = (basename: string) => [`dist/${basename}.js`, `dist/${basename}.js.map`];
 
 const inlineLua: TsdownPlugin = {
   name: "inline-lua",
   load(id) {
-    const norm = id.replace(/\\/g, "/");
-    if (!norm.endsWith("/src/redis/index.js")) return null;
+    if (!isLuaIndex(id)) return null;
     const dir = path.dirname(id);
     const luaFiles = fs
       .readdirSync(dir)
@@ -35,18 +37,11 @@ const stub = `
 class Stub { constructor() { throw new Error("You must import the full version of Bottleneck to use clustering."); } }
 module.exports = Stub;
 `;
-const lightExclude = new Set([
-  "RedisDatastore.js",
-  "RedisConnection.js",
-  "IORedisConnection.js",
-  "Scripts.js",
-]);
 
 const excludeClustering: TsdownPlugin = {
   name: "exclude-clustering",
   load(id) {
-    const file = id.split("/").pop();
-    if (file && lightExclude.has(file)) return stub;
+    if (isClusterModule(id) && !isLuaIndex(id)) return stub;
   },
 };
 
