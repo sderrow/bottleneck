@@ -23,9 +23,11 @@ module.exports = function (options = {}) {
 
   if (options.datastore == null && process.env.DATASTORE === "redis") {
     options.datastore = "redis";
+    options.Redis ??= require("redis");
     setRedisClientOptions(options);
   } else if (options.datastore == null && process.env.DATASTORE === "ioredis") {
     options.datastore = "ioredis";
+    options.Redis ??= require("ioredis");
     setRedisClientOptions(options);
   } else {
     options.datastore = "local";

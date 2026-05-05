@@ -1,7 +1,7 @@
 var States = require("../src/States");
+var BottleneckError = require("../src/BottleneckError");
 var assert = require("assert");
 var c = require("./context")({ datastore: "local" });
-var Bottleneck = require("./bottleneck");
 const { describe, it } = require("mocha");
 
 describe("States", function () {
@@ -94,12 +94,10 @@ describe("States", function () {
     try {
       states.statusJobs("Z");
     } catch (err) {
-      if (process.env.BUILD !== "light") {
-        assert(
-          err instanceof Bottleneck.BottleneckError,
-          `Expected err to be a BottleneckError but was actually a ${err.constructor.name}`,
-        );
-      }
+      assert(
+        err instanceof BottleneckError,
+        `Expected err to be a BottleneckError but was actually a ${err.constructor.name}`,
+      );
       done();
     }
   });

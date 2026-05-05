@@ -63,7 +63,7 @@ if (process.env.DATASTORE === "ioredis") {
     });
 
     it("Should accept existing connections", function () {
-      var connection = new Bottleneck.IORedisConnection();
+      var connection = new Bottleneck.IORedisConnection({ Redis });
       connection.id = "super-connection";
       c = makeTest({
         minTime: 50,
@@ -124,11 +124,15 @@ if (process.env.DATASTORE === "ioredis") {
 
     it("Should trigger error events on the shared connection", function (done) {
       var connection = new Bottleneck.IORedisConnection({
+        Redis,
         clientOptions: {
           port: 1,
         },
       });
+      var fired = false;
       connection.on("error", function (_err) {
+        if (fired) return;
+        fired = true;
         c.mustEqual(c.limiter.datastore, "ioredis");
         connection.disconnect();
         done();
@@ -136,6 +140,7 @@ if (process.env.DATASTORE === "ioredis") {
 
       c = makeTest({ connection });
       c.limiter.on("error", function (err) {
+        if (fired) return;
         done(err);
       });
     });

@@ -74,11 +74,10 @@ declare module "bottleneck" {
        */
       readonly clusterNodes?: any;
       /**
-       * An existing Bottleneck.RedisConnection or Bottleneck.IORedisConnection object to use.
-       * If using, `datastore`, `clientOptions` and `clusterNodes` will be ignored.
-       */
-      /**
-       * Optional Redis/IORedis library from `require('ioredis')` or equivalent. If not, Bottleneck will attempt to require Redis/IORedis at runtime.
+       * Required when `datastore` is `"redis"` or `"ioredis"` and neither `client` nor
+       * `connection` is provided. Pass the imported library reference, e.g.
+       * `Redis: require('ioredis')` or `Redis: require('redis')`. Bottleneck no longer
+       * implicitly requires either client at runtime.
        */
       readonly Redis?: any;
       /**
@@ -163,39 +162,62 @@ declare module "bottleneck" {
       DONE?: number;
     };
 
-    type RedisConnectionOptions = {
-      /**
-       * This object is passed directly to NodeRedis' createClient() method.
-       */
-      readonly clientOptions?: any;
-      /**
-       * An existing NodeRedis client to use. If using, `clientOptions` will be ignored.
-       */
-      readonly client?: any;
-      /**
-       * Optional Redis library from `require('redis')` or equivalent. If not, Bottleneck will attempt to require Redis at runtime.
-       */
-      readonly Redis?: any;
-    };
+    /**
+     * Options for `new Bottleneck.RedisConnection(...)`. Either `Redis` (the imported
+     * `redis` library) or `client` (a pre-built NodeRedis client) is required.
+     */
+    type RedisConnectionOptions =
+      | {
+          /**
+           * The `redis` library, e.g. `require('redis')`. Required unless `client` is provided.
+           */
+          readonly Redis: any;
+          /**
+           * Passed directly to NodeRedis' `createClient()` method.
+           */
+          readonly clientOptions?: any;
+          readonly client?: never;
+        }
+      | {
+          /**
+           * An existing NodeRedis client to use. When provided, `clientOptions` is ignored.
+           */
+          readonly client: any;
+          readonly Redis?: never;
+          readonly clientOptions?: any;
+        };
 
-    type IORedisConnectionOptions = {
-      /**
-       * This object is passed directly to ioredis' constructor method.
-       */
-      readonly clientOptions?: any;
-      /**
-       * When `clusterNodes` is not null, the client will be instantiated by calling `new Redis.Cluster(clusterNodes, clientOptions)`.
-       */
-      readonly clusterNodes?: any;
-      /**
-       * An existing ioredis client to use. If using, `clientOptions` and `clusterNodes` will be ignored.
-       */
-      readonly client?: any;
-      /**
-       * Optional IORedis library from `require('ioredis')` or equivalent. If not, Bottleneck will attempt to require IORedis at runtime.
-       */
-      readonly Redis?: any;
-    };
+    /**
+     * Options for `new Bottleneck.IORedisConnection(...)`. Either `Redis` (the imported
+     * `ioredis` library) or `client` (a pre-built ioredis client) is required.
+     */
+    type IORedisConnectionOptions =
+      | {
+          /**
+           * The `ioredis` library, e.g. `require('ioredis')`. Required unless `client` is provided.
+           */
+          readonly Redis: any;
+          /**
+           * Passed directly to ioredis' constructor.
+           */
+          readonly clientOptions?: any;
+          /**
+           * When `clusterNodes` is not null, the client will be instantiated by calling
+           * `new Redis.Cluster(clusterNodes, clientOptions)`.
+           */
+          readonly clusterNodes?: any;
+          readonly client?: never;
+        }
+      | {
+          /**
+           * An existing ioredis client to use. When provided, `clientOptions` and
+           * `clusterNodes` are ignored.
+           */
+          readonly client: any;
+          readonly Redis?: never;
+          readonly clientOptions?: any;
+          readonly clusterNodes?: any;
+        };
 
     type BatcherOptions = {
       /**

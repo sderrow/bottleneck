@@ -22,7 +22,7 @@ if (process.env.DATASTORE === "redis") {
     });
 
     it("Should accept existing connections", function () {
-      var connection = new Bottleneck.RedisConnection();
+      var connection = new Bottleneck.RedisConnection({ Redis });
       connection.id = "super-connection";
       c = makeTest({
         minTime: 50,
@@ -44,14 +44,20 @@ if (process.env.DATASTORE === "redis") {
         })
         .then(function () {
           // Shared connections should not be disconnected by the limiter
-          c.mustEqual(c.limiter.clients().client.ready, true);
+          c.mustEqual(c.limiter.clients().client.isReady, true);
           return connection.disconnect();
         });
     });
 
-    it("Should accept existing redis clients", function () {
-      var client = Redis.createClient();
+    it("Should accept existing redis clients", async function () {
+      var client = Redis.createClient({
+        socket: {
+          host: process.env.REDIS_HOST,
+          port: process.env.REDIS_PORT ? Number(process.env.REDIS_PORT) : undefined,
+        },
+      });
       client.id = "super-client";
+      await client.connect();
 
       var connection = new Bottleneck.RedisConnection({ client });
       connection.id = "super-connection";
@@ -76,25 +82,33 @@ if (process.env.DATASTORE === "redis") {
         })
         .then(function () {
           // Shared connections should not be disconnected by the limiter
-          c.mustEqual(c.limiter.clients().client.ready, true);
+          c.mustEqual(c.limiter.clients().client.isReady, true);
           return connection.disconnect();
         });
     });
 
     it("Should trigger error events on the shared connection", function (done) {
       var connection = new Bottleneck.RedisConnection({
+        Redis,
         clientOptions: {
-          port: 1,
+          socket: {
+            port: 1,
+            reconnectStrategy: () => false,
+          },
         },
       });
+      var fired = false;
       connection.on("error", function (_err) {
+        if (fired) return;
+        fired = true;
         c.mustEqual(c.limiter.datastore, "redis");
         connection.disconnect();
         done();
       });
 
-      c = makeTest({ connection });
+      c = makeTest({ connection, errorEventsExpected: true });
       c.limiter.on("error", function (err) {
+        if (fired) return;
         done(err);
       });
     });

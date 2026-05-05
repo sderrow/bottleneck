@@ -1,4 +1,4 @@
-const lua = require("./redis");
+const lua = require("./lua");
 
 const headers = {
   refs: lua["refs.lua"],

@@ -1,8 +1,8 @@
 const parser = require("./parser");
 const Events = require("./Events");
-const RedisConnection = require("./RedisConnection");
-const IORedisConnection = require("./IORedisConnection");
-const Scripts = require("./Scripts");
+const RedisConnection = require("./cluster/RedisConnection");
+const IORedisConnection = require("./cluster/IORedisConnection");
+const Scripts = require("./cluster/Scripts");
 
 class Group {
   defaults = {

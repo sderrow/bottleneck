@@ -1,5 +1,5 @@
-const parser = require("./parser");
-const BottleneckError = require("./BottleneckError");
+const parser = require("../parser");
+const BottleneckError = require("../BottleneckError");
 const RedisConnection = require("./RedisConnection");
 const IORedisConnection = require("./IORedisConnection");
 
@@ -113,44 +113,30 @@ class RedisDatastore {
     if (name !== "init" && name !== "register_client") {
       await this.ready;
     }
-    return new Promise((resolve, reject) => {
-      const all_args = [Date.now(), this.clientId].concat(args);
-      this.instance.Events.trigger("debug", `Calling Redis script: ${name}.lua`, all_args);
-      const arr = this.connection.__scriptArgs__(
-        name,
-        this.originalId,
-        all_args,
-        function (err, replies) {
-          if (err != null) {
-            return reject(err);
-          }
-          return resolve(replies);
-        },
-      );
-      return this.connection.__scriptFn__(name)(...(arr || []));
-    }).catch((e) => {
+    const all_args = [Date.now(), this.clientId].concat(args);
+    this.instance.Events.trigger("debug", `Calling Redis script: ${name}.lua`, all_args);
+    try {
+      return await this.connection.__runScript__(name, this.originalId, all_args);
+    } catch (e) {
       if (
         typeof e.message === "string" &&
         e.message.match(/^(.*\s)?SETTINGS_KEY_NOT_FOUND$/) !== null
       ) {
         if (name === "heartbeat") {
-          return Promise.resolve();
-        } else {
-          return this.runScript("init", this.prepareInitSettings(false)).then(() =>
-            this.runScript(name, args),
-          );
+          return undefined;
         }
+        await this.runScript("init", this.prepareInitSettings(false));
+        return this.runScript(name, args);
       } else if (
         typeof e.message === "string" &&
         e.message.match(/^(.*\s)?UNKNOWN_CLIENT$/) !== null
       ) {
-        return this.runScript("register_client", [this.instance.queued()]).then(() =>
-          this.runScript(name, args),
-        );
+        await this.runScript("register_client", [this.instance.queued()]);
+        return this.runScript(name, args);
       } else {
-        return Promise.reject(e);
+        throw e;
       }
-    });
+    }
   }
 
   prepareArray(arr) {

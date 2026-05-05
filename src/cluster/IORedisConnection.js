@@ -1,5 +1,6 @@
-const parser = require("./parser");
-const Events = require("./Events");
+const parser = require("../parser");
+const Events = require("../Events");
+const BottleneckError = require("../BottleneckError");
 const Scripts = require("./Scripts");
 
 class IORedisConnection {
@@ -16,8 +17,13 @@ class IORedisConnection {
     options ??= {};
     parser.load(options, this.defaults, this);
 
-    // Obfuscated or else Webpack/Angular will try to inline the optional ioredis module. To override this behavior: pass the ioredis module to Bottleneck as the 'Redis' option.
-    this.Redis ??= eval("require")("ioredis");
+    if (this.Redis == null && this.client == null) {
+      throw new BottleneckError(
+        "Bottleneck cluster mode requires a `Redis` library reference or a pre-built `client`. " +
+          "Pass it explicitly: `new Bottleneck({ datastore: 'ioredis', Redis: require('ioredis'), clientOptions })`.",
+      );
+    }
+
     this.Events ??= new Events(this);
     this.terminated = false;
 
@@ -66,8 +72,13 @@ class IORedisConnection {
 
   async __runCommand__(cmd) {
     await this.ready;
-    const [[, deleted]] = await this.client.pipeline([cmd]).exec();
-    return deleted;
+    const [[, value]] = await this.client.pipeline([cmd]).exec();
+    return value;
+  }
+
+  __runScript__(name, id, args) {
+    const keys = Scripts.keys(name, id);
+    return this.client[name](keys.length, ...keys, ...args);
   }
 
   async __addLimiter__(instance) {
@@ -92,15 +103,6 @@ class IORedisConnection {
         delete this.limiters[channel];
       }),
     );
-  }
-
-  __scriptArgs__(name, id, args, cb) {
-    const keys = Scripts.keys(name, id);
-    return [keys.length].concat(keys, args, cb);
-  }
-
-  __scriptFn__(name) {
-    return this.client[name].bind(this.client);
   }
 
   async disconnect(flush = true) {

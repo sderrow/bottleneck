@@ -60,8 +60,11 @@
     "lint:fix": "oxlint --fix",
     "prepare": "husky",
     "prepublishOnly": "pnpm run build && pnpm run check-types",
-    "test": "mocha --timeout=10000 test",
-    "test-all": "pnpm run test:ioredis && pnpm run test:redis && pnpm run test:light && pnpm test",
+    "test": "mocha --node-option=expose-gc --timeout=10000 --exit test",
+    "test:all": "pnpm run build && pnpm run test:ioredis && pnpm run test:redis && pnpm run test:light && pnpm run test:full && pnpm run test:full:ioredis && pnpm run test:full:redis && pnpm test",
+    "test:full": "BUILD=full pnpm test",
+    "test:full:ioredis": "BUILD=full DATASTORE=ioredis pnpm test",
+    "test:full:redis": "BUILD=full DATASTORE=redis pnpm test",
     "test:ioredis": "DATASTORE=ioredis pnpm test",
     "test:light": "BUILD=light pnpm test",
     "test:redis": "DATASTORE=redis pnpm test"
@@ -75,9 +78,21 @@
     "mocha": "^11.7.1",
     "oxfmt": "^0.47.0",
     "oxlint": "^1.62.0",
-    "redis": "^2.8.0",
+    "redis": "^5.0.0",
     "tsdown": "^0.21.10",
     "typescript": "^6.0.3"
+  },
+  "peerDependencies": {
+    "ioredis": "^5",
+    "redis": "^4 || ^5"
+  },
+  "peerDependenciesMeta": {
+    "ioredis": {
+      "optional": true
+    },
+    "redis": {
+      "optional": true
+    }
   },
   "engines": {
     "node": ">=16"
