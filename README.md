@@ -1174,7 +1174,7 @@ Suggestions and bug reports are also welcome.
 - Package manager: `pnpm`, managed via [corepack](https://nodejs.org/api/corepack.html). Run `corepack enable` once after cloning so the version pinned in [package.json](package.json) (`packageManager`) is used automatically.
 - Bundler: [`tsdown`](https://tsdown.dev) (configured in [tsdown.config.ts](tsdown.config.ts)). Builds are fast — there is no separate "dev" build mode.
 - Linter / formatter: [`oxlint`](https://oxc.rs/docs/guide/usage/linter.html) and [`oxfmt`](https://oxc.rs/docs/guide/usage/formatter.html).
-- Tests: [`mocha`](https://mochajs.org).
+- Tests: [`vitest`](https://vitest.dev) (multi-project workspace in [vitest.config.ts](vitest.config.ts)).
 
 ### Source layout
 
@@ -1191,25 +1191,38 @@ pnpm run build              # build dist/index.js (CJS) and dist/light.js (UMD)
 pnpm run lint               # oxlint
 pnpm run format:check       # oxfmt --check (use `pnpm run format` to auto-fix)
 pnpm run check-types        # tsc --strict against test.ts
-pnpm test                   # run the test suite (local datastore)
+pnpm test                   # build + all non-memory Vitest projects in parallel
+pnpm run test:memory        # heap / iterateAsync checks (`--expose-gc`; slower)
+pnpm run test:all           # `pnpm test` + memory project (matches CI)
 ```
 
 ### Running the full test matrix
 
-The tests must pass against the source, both bundled artifacts (`dist/index.js` and `dist/light.js`), and both Redis clients. You will need a Redis server running locally; latency to it should be minimal. Override the host/port with `REDIS_HOST` / `REDIS_PORT` env vars if needed.
+Vitest projects:
+
+| Project                  | Role                                                                                                                  |
+| ------------------------ | --------------------------------------------------------------------------------------------------------------------- |
+| `local`                  | Full suite, local datastore (cluster tests excluded).                                                                 |
+| `ioredis` / `node-redis` | Same suite against Redis via Testcontainers (per-file container isolation, `maxWorkers: 3`, `FLUSHDB` between tests). |
+| `light-smoke`            | Loads `dist/light.js`, basic schedule, clustering stub error.                                                         |
+| `memory`                 | Heap stability tests only (`pnpm run test:memory` or `pnpm run test`).                                                |
+
+You need a container runtime (Docker Desktop, Colima, OrbStack, …) for the Redis-backed projects.
 
 ```bash
-pnpm run test                # source, local datastore
-pnpm run test:light          # light bundle (no cluster mode)
-pnpm run test:full           # full bundle, local datastore
-pnpm run test:ioredis        # source + ioredis
-pnpm run test:redis          # source + node-redis
-pnpm run test:full:ioredis   # full bundle + ioredis
-pnpm run test:full:redis     # full bundle + node-redis
-pnpm run test:all            # builds, then runs every combination above
+pnpm run test                # default CI-fast loop (no memory project)
+pnpm run test:memory         # memory project only
+pnpm run test:all            # everything including memory (same as CI `pnpm run test:all`)
 ```
 
-The full set of checks run in CI is in [.github/workflows/ci.yaml](.github/workflows/ci.yaml); please make sure each step passes locally before opening a PR.
+### Test conventions
+
+- Every test file explicitly imports from `vitest`: `import { describe, it, expect, ... } from "vitest"`.
+- New tests should use `makeLimiter()` from `test/helpers/limiter.js` for env-aware limiter construction with a separate `{ expectErrors }` meta argument.
+
+### CI
+
+CI is split into a `checks` job (format, lint, types, build) and a matrixed `test` job that runs each Vitest project independently. See [.github/workflows/ci.yaml](.github/workflows/ci.yaml); please make sure each step passes locally before opening a PR.
 
 All contributions are appreciated and will be considered.
 

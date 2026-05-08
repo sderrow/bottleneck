@@ -1,0 +1,23 @@
+name: Setup
+description: Enable corepack, set up Node.js with pnpm cache, install dependencies.
+
+# Note: actions/checkout is NOT in this composite — local composite actions
+# can't run before the repo is checked out, so callers must check out first
+# and then `uses: ./.github/actions/setup`.
+
+runs:
+  using: composite
+  steps:
+    - name: Enable corepack
+      run: corepack enable
+      shell: bash
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v6
+      with:
+        node-version-file: ".nvmrc"
+        cache: "pnpm"
+
+    - name: Install dependencies
+      run: pnpm install
+      shell: bash

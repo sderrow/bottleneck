@@ -50,11 +50,16 @@ class RedisConnection {
     this.ready = Promise.all([this._setup(this.client, false), this._setup(this.subscriber, true)])
       .then(() => this._loadScripts())
       .then(() => ({ client: this.client, subscriber: this.subscriber }));
+    this.ready.catch(() => {});
   }
 
   async _setup(client, _sub) {
     client.setMaxListeners?.(0);
-    client.on("error", (e) => this.Events.trigger("error", e));
+    client.on("error", (e) => {
+      if (!this.terminated) {
+        this.Events.trigger("error", e);
+      }
+    });
     await connectIfNeeded(client);
   }
 
@@ -64,7 +69,13 @@ class RedisConnection {
   }
 
   _loadScripts() {
-    return Promise.all(Scripts.names.map((k) => this._loadScript(k)));
+    return Promise.all(
+      Scripts.names.map((k) =>
+        this._loadScript(k).catch((e) => {
+          if (!this.terminated) throw e;
+        }),
+      ),
+    );
   }
 
   async __runCommand__(cmd) {
@@ -89,7 +100,7 @@ class RedisConnection {
     } catch (e) {
       if (typeof e?.message === "string" && e.message.startsWith("NOSCRIPT")) {
         await this._loadScript(name);
-        return this.client.evalSha(this.shas[name], { keys, arguments: stringArgs });
+        return await this.client.evalSha(this.shas[name], { keys, arguments: stringArgs });
       }
       throw e;
     }

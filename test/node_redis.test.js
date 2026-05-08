@@ -1,94 +1,97 @@
-var makeTest = require("./context");
-var Bottleneck = require("./bottleneck");
-const { describe, it, afterEach } = require("mocha");
-var Redis = require("redis");
+import { describe, it, afterEach, expect } from "vitest";
+import { createJobHarness } from "./helpers/job-tracking.js";
+const makeLimiter = require("./helpers/limiter");
+const Bottleneck = require("./bottleneck");
+const Redis = require("redis");
+const buildClientOptions = require("./redis-client-options");
 
-if (process.env.DATASTORE === "redis") {
-  describe("node_redis-only", function () {
-    var c;
+describe("node_redis-only", function () {
+  if (process.env.DATASTORE !== "redis") {
+    throw new Error("DATASTORE must be redis");
+  }
+  let limiter;
 
-    afterEach(function () {
-      return c.limiter.disconnect(false);
+  afterEach(function () {
+    return limiter.disconnect(false);
+  });
+
+  it("Should accept node_redis lib override", function () {
+    limiter = makeLimiter({
+      maxConcurrent: 2,
+      Redis,
     });
 
-    it("Should accept node_redis lib override", function () {
-      c = makeTest({
-        maxConcurrent: 2,
-        Redis,
-        clientOptions: {},
-      });
+    expect(limiter.datastore).toStrictEqual("redis");
+  });
 
-      c.mustEqual(c.limiter.datastore, "redis");
+  it("Should accept existing connections", function () {
+    const h = createJobHarness();
+    const connection = new Bottleneck.RedisConnection({
+      Redis,
+      clientOptions: buildClientOptions("redis"),
+    });
+    connection.id = "super-connection";
+    limiter = makeLimiter({
+      minTime: 50,
+      connection,
     });
 
-    it("Should accept existing connections", function () {
-      var connection = new Bottleneck.RedisConnection({ Redis });
-      connection.id = "super-connection";
-      c = makeTest({
-        minTime: 50,
-        connection,
+    h.pNoErrVal(limiter.schedule(h.promise, null, 1), 1);
+    h.pNoErrVal(limiter.schedule(h.promise, null, 2), 2);
+
+    return h
+      .flushLimiter(limiter)
+      .then(function (_results) {
+        h.checkResultsOrder([[1], [2]]);
+        h.checkDuration(50);
+        expect(limiter.connection.id).toStrictEqual("super-connection");
+        expect(limiter.datastore).toStrictEqual("redis");
+
+        return limiter.disconnect();
+      })
+      .then(function () {
+        expect(limiter.clients().client.isReady).toStrictEqual(true);
+        return connection.disconnect();
       });
+  });
 
-      c.pNoErrVal(c.limiter.schedule(c.promise, null, 1), 1);
-      c.pNoErrVal(c.limiter.schedule(c.promise, null, 2), 2);
+  it("Should accept existing redis clients", async function () {
+    const h = createJobHarness();
+    const client = Redis.createClient(buildClientOptions("redis"));
+    client.id = "super-client";
+    await client.connect();
 
-      return c
-        .last()
-        .then(function (_results) {
-          c.checkResultsOrder([[1], [2]]);
-          c.checkDuration(50);
-          c.mustEqual(c.limiter.connection.id, "super-connection");
-          c.mustEqual(c.limiter.datastore, "redis");
-
-          return c.limiter.disconnect();
-        })
-        .then(function () {
-          // Shared connections should not be disconnected by the limiter
-          c.mustEqual(c.limiter.clients().client.isReady, true);
-          return connection.disconnect();
-        });
+    const connection = new Bottleneck.RedisConnection({ client });
+    connection.id = "super-connection";
+    limiter = makeLimiter({
+      minTime: 50,
+      connection,
     });
 
-    it("Should accept existing redis clients", async function () {
-      var client = Redis.createClient({
-        socket: {
-          host: process.env.REDIS_HOST,
-          port: process.env.REDIS_PORT ? Number(process.env.REDIS_PORT) : undefined,
-        },
+    h.pNoErrVal(limiter.schedule(h.promise, null, 1), 1);
+    h.pNoErrVal(limiter.schedule(h.promise, null, 2), 2);
+
+    return h
+      .flushLimiter(limiter)
+      .then(function (_results) {
+        h.checkResultsOrder([[1], [2]]);
+        h.checkDuration(50);
+        expect(limiter.clients().client.id).toStrictEqual("super-client");
+        expect(limiter.connection.id).toStrictEqual("super-connection");
+        expect(limiter.datastore).toStrictEqual("redis");
+
+        return limiter.disconnect();
+      })
+      .then(function () {
+        expect(limiter.clients().client.isReady).toStrictEqual(true);
+        return connection.disconnect();
       });
-      client.id = "super-client";
-      await client.connect();
+  });
 
-      var connection = new Bottleneck.RedisConnection({ client });
-      connection.id = "super-connection";
-      c = makeTest({
-        minTime: 50,
-        connection,
-      });
-
-      c.pNoErrVal(c.limiter.schedule(c.promise, null, 1), 1);
-      c.pNoErrVal(c.limiter.schedule(c.promise, null, 2), 2);
-
-      return c
-        .last()
-        .then(function (_results) {
-          c.checkResultsOrder([[1], [2]]);
-          c.checkDuration(50);
-          c.mustEqual(c.limiter.clients().client.id, "super-client");
-          c.mustEqual(c.limiter.connection.id, "super-connection");
-          c.mustEqual(c.limiter.datastore, "redis");
-
-          return c.limiter.disconnect();
-        })
-        .then(function () {
-          // Shared connections should not be disconnected by the limiter
-          c.mustEqual(c.limiter.clients().client.isReady, true);
-          return connection.disconnect();
-        });
-    });
-
-    it("Should trigger error events on the shared connection", function (done) {
-      var connection = new Bottleneck.RedisConnection({
+  it("Should trigger error events on the shared connection", function () {
+    expect.hasAssertions();
+    return new Promise(function (resolve, reject) {
+      const connection = new Bottleneck.RedisConnection({
         Redis,
         clientOptions: {
           socket: {
@@ -97,20 +100,21 @@ if (process.env.DATASTORE === "redis") {
           },
         },
       });
-      var fired = false;
+      connection.ready.catch(() => {});
+      let fired = false;
+      limiter = makeLimiter({ connection }, { expectErrors: true });
       connection.on("error", function (_err) {
         if (fired) return;
         fired = true;
-        c.mustEqual(c.limiter.datastore, "redis");
+        expect(limiter.datastore).toStrictEqual("redis");
         connection.disconnect();
-        done();
+        resolve();
       });
 
-      c = makeTest({ connection, errorEventsExpected: true });
-      c.limiter.on("error", function (err) {
+      limiter.on("error", function (err) {
         if (fired) return;
-        done(err);
+        reject(err);
       });
     });
   });
-}
+});

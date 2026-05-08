@@ -107,7 +107,7 @@ class Group {
       for (const [k, v] of Object.entries(this.instances)) {
         try {
           if (await v._store.__groupCheck__(time)) {
-            this.deleteKey(k);
+            await this.deleteKey(k);
           }
         } catch (e) {
           v.Events.trigger("error", e);
@@ -126,6 +126,7 @@ class Group {
   }
 
   disconnect(flush = true) {
+    clearInterval(this.interval);
     if (!this.sharedConnection) {
       return this.connection?.disconnect(flush);
     }
