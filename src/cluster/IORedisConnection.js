@@ -50,7 +50,11 @@ class IORedisConnection {
   _setup(client, sub) {
     client.setMaxListeners(0);
     return new Promise((resolve) => {
-      client.on("error", (e) => this.Events.trigger("error", e));
+      client.on("error", (e) => {
+        if (!this.terminated) {
+          this.Events.trigger("error", e);
+        }
+      });
       if (sub) {
         client.on("message", (channel, message) => {
           this.limiters[channel]?._store.onMessage(channel, message);
@@ -111,6 +115,11 @@ class IORedisConnection {
     }
     this.limiters = {};
     this.terminated = true;
+
+    this.client.removeAllListeners?.("error");
+    this.client.on?.("error", () => {});
+    this.subscriber.removeAllListeners?.("error");
+    this.subscriber.on?.("error", () => {});
 
     if (flush) {
       await Promise.all([this.client.quit(), this.subscriber.quit()]);

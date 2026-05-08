@@ -4,6 +4,8 @@ const RedisConnection = require("./RedisConnection");
 const IORedisConnection = require("./IORedisConnection");
 
 class RedisDatastore {
+  _disconnecting = false;
+
   constructor(instance, storeOptions, storeInstanceOptions) {
     this.instance = instance;
     this.storeOptions = storeOptions;
@@ -44,13 +46,18 @@ class RedisDatastore {
       .then(() => this.connection.__addLimiter__(this.instance))
       .then(() => this.runScript("register_client", [this.instance.queued()]))
       .then(() => {
-        this.heartbeat = setInterval(() => {
-          return this.runScript("heartbeat", []).catch((e) =>
-            this.instance.Events.trigger("error", e),
-          );
-        }, this.heartbeatInterval).unref?.();
+        if (!this._disconnecting) {
+          this.heartbeat = setInterval(() => {
+            return this.runScript("heartbeat", []).catch((e) => {
+              if (!this._disconnecting) {
+                this.instance.Events.trigger("error", e);
+              }
+            });
+          }, this.heartbeatInterval).unref?.();
+        }
         return this.clients;
       });
+    this.ready.catch(() => {});
   }
 
   async __publish__(message) {
@@ -85,7 +92,9 @@ class RedisDatastore {
               await this.runScript("blacklist_client", [priorityClient]);
               return await this.instance._drainAll(capacity);
             } catch (e) {
-              return this.instance.Events.trigger("error", e);
+              if (!this._disconnecting) {
+                return this.instance.Events.trigger("error", e);
+              }
             }
           }, 1000));
         }
@@ -96,11 +105,14 @@ class RedisDatastore {
       }
     } catch (error) {
       const e = error;
-      return this.instance.Events.trigger("error", e);
+      if (!this._disconnecting) {
+        return this.instance.Events.trigger("error", e);
+      }
     }
   }
 
   async __disconnect__(flush) {
+    this._disconnecting = true;
     clearInterval(this.heartbeat);
     if (this.sharedConnection) {
       await this.connection.__removeLimiter__(this.instance);

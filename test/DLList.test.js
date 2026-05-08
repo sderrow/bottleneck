@@ -1,8 +1,7 @@
-var DLList = require("../src/DLList");
-var c = require("./context")({ datastore: "local" });
-const { describe, it } = require("mocha");
+import { describe, it, expect } from "vitest";
+const DLList = require("../src/DLList");
 
-var fakeQueues = function () {
+const fakeQueues = function () {
   this._length = 0;
   this.incr = () => this._length++;
   this.decr = () => this._length--;
@@ -11,136 +10,135 @@ var fakeQueues = function () {
 
 describe("DLList", function () {
   it("Should be created and be empty", function () {
-    new fakeQueues();
-    var list = new DLList();
-    c.mustEqual(list.getArray().length, 0);
+    const list = new DLList();
+    expect(list.getArray().length).toStrictEqual(0);
   });
 
   it("Should be possible to append once", function () {
-    var queues = new fakeQueues();
-    var list = new DLList(...queues.fns);
+    const queues = new fakeQueues();
+    const list = new DLList(...queues.fns);
     list.push(5);
-    var arr = list.getArray();
-    c.mustEqual(arr.length, 1);
-    c.mustEqual(list.length, 1);
-    c.mustEqual(queues._length, 1);
-    c.mustEqual(arr[0], 5);
+    const arr = list.getArray();
+    expect(arr.length).toStrictEqual(1);
+    expect(list.length).toStrictEqual(1);
+    expect(queues._length).toStrictEqual(1);
+    expect(arr[0]).toStrictEqual(5);
   });
 
   it("Should be possible to append multiple times", function () {
-    var queues = new fakeQueues();
-    var list = new DLList(...queues.fns);
+    const queues = new fakeQueues();
+    const list = new DLList(...queues.fns);
     list.push(5);
     list.push(6);
-    var arr = list.getArray();
-    c.mustEqual(arr.length, 2);
-    c.mustEqual(list.length, 2);
-    c.mustEqual(queues._length, 2);
-    c.mustEqual(arr[0], 5);
-    c.mustEqual(arr[1], 6);
+    let arr = list.getArray();
+    expect(arr.length).toStrictEqual(2);
+    expect(list.length).toStrictEqual(2);
+    expect(queues._length).toStrictEqual(2);
+    expect(arr[0]).toStrictEqual(5);
+    expect(arr[1]).toStrictEqual(6);
 
     list.push(10);
 
     arr = list.getArray();
-    c.mustEqual(arr.length, 3);
-    c.mustEqual(list.length, 3);
-    c.mustEqual(arr[0], 5);
-    c.mustEqual(arr[1], 6);
-    c.mustEqual(arr[2], 10);
+    expect(arr.length).toStrictEqual(3);
+    expect(list.length).toStrictEqual(3);
+    expect(arr[0]).toStrictEqual(5);
+    expect(arr[1]).toStrictEqual(6);
+    expect(arr[2]).toStrictEqual(10);
   });
 
   it("Should be possible to shift an empty list", function () {
-    var queues = new fakeQueues();
-    var list = new DLList(...queues.fns);
-    c.mustEqual(list.length, 0);
-    c.mustEqual(list.shift(), undefined);
-    var arr = list.getArray();
-    c.mustEqual(arr.length, 0);
-    c.mustEqual(list.length, 0);
-    c.mustEqual(list.shift(), undefined);
+    const queues = new fakeQueues();
+    const list = new DLList(...queues.fns);
+    expect(list.length).toStrictEqual(0);
+    expect(list.shift()).toStrictEqual();
+    let arr = list.getArray();
+    expect(arr.length).toStrictEqual(0);
+    expect(list.length).toStrictEqual(0);
+    expect(list.shift()).toStrictEqual();
     arr = list.getArray();
-    c.mustEqual(arr.length, 0);
-    c.mustEqual(list.length, 0);
-    c.mustEqual(queues._length, 0);
+    expect(arr.length).toStrictEqual(0);
+    expect(list.length).toStrictEqual(0);
+    expect(queues._length).toStrictEqual(0);
   });
 
   it("Should be possible to append then shift once", function () {
-    var queues = new fakeQueues();
-    var list = new DLList(...queues.fns);
+    const queues = new fakeQueues();
+    const list = new DLList(...queues.fns);
     list.push(5);
-    c.mustEqual(list.length, 1);
-    c.mustEqual(list.shift(), 5);
-    var arr = list.getArray();
-    c.mustEqual(arr.length, 0);
-    c.mustEqual(list.length, 0);
-    c.mustEqual(queues._length, 0);
+    expect(list.length).toStrictEqual(1);
+    expect(list.shift()).toStrictEqual(5);
+    const arr = list.getArray();
+    expect(arr.length).toStrictEqual(0);
+    expect(list.length).toStrictEqual(0);
+    expect(queues._length).toStrictEqual(0);
   });
 
   it("Should be possible to append then shift multiple times", function () {
-    var queues = new fakeQueues();
-    var list = new DLList(...queues.fns);
+    const queues = new fakeQueues();
+    const list = new DLList(...queues.fns);
     list.push(5);
-    c.mustEqual(list.length, 1);
-    c.mustEqual(list.shift(), 5);
-    c.mustEqual(list.length, 0);
+    expect(list.length).toStrictEqual(1);
+    expect(list.shift()).toStrictEqual(5);
+    expect(list.length).toStrictEqual(0);
 
     list.push(6);
-    c.mustEqual(list.length, 1);
-    c.mustEqual(list.shift(), 6);
-    c.mustEqual(list.length, 0);
-    c.mustEqual(queues._length, 0);
+    expect(list.length).toStrictEqual(1);
+    expect(list.shift()).toStrictEqual(6);
+    expect(list.length).toStrictEqual(0);
+    expect(queues._length).toStrictEqual(0);
   });
 
   it("Should pass a full test", function () {
-    var queues = new fakeQueues();
-    var list = new DLList(...queues.fns);
+    const queues = new fakeQueues();
+    const list = new DLList(...queues.fns);
     list.push(10);
-    c.mustEqual(list.length, 1);
+    expect(list.length).toStrictEqual(1);
     list.push("11");
-    c.mustEqual(list.length, 2);
+    expect(list.length).toStrictEqual(2);
     list.push(12);
-    c.mustEqual(list.length, 3);
-    c.mustEqual(queues._length, 3);
+    expect(list.length).toStrictEqual(3);
+    expect(queues._length).toStrictEqual(3);
 
-    c.mustEqual(list.shift(), 10);
-    c.mustEqual(list.length, 2);
-    c.mustEqual(list.shift(), "11");
-    c.mustEqual(list.length, 1);
+    expect(list.shift()).toStrictEqual(10);
+    expect(list.length).toStrictEqual(2);
+    expect(list.shift()).toStrictEqual("11");
+    expect(list.length).toStrictEqual(1);
 
     list.push(true);
-    c.mustEqual(list.length, 2);
+    expect(list.length).toStrictEqual(2);
 
-    var arr = list.getArray();
-    c.mustEqual(arr[0], 12);
-    c.mustEqual(arr[1], true);
-    c.mustEqual(arr.length, 2);
-    c.mustEqual(queues._length, 2);
+    const arr = list.getArray();
+    expect(arr[0]).toStrictEqual(12);
+    expect(arr[1]).toStrictEqual(true);
+    expect(arr.length).toStrictEqual(2);
+    expect(queues._length).toStrictEqual(2);
   });
 
   it("Should return the first value without shifting", function () {
-    var queues = new fakeQueues();
-    var list = new DLList(...queues.fns);
-    c.mustEqual(list.first(), undefined);
-    c.mustEqual(list.first(), undefined);
+    const queues = new fakeQueues();
+    const list = new DLList(...queues.fns);
+    expect(list.first()).toStrictEqual();
+    expect(list.first()).toStrictEqual();
 
     list.push(1);
-    c.mustEqual(list.first(), 1);
-    c.mustEqual(list.first(), 1);
+    expect(list.first()).toStrictEqual(1);
+    expect(list.first()).toStrictEqual(1);
 
     list.push(2);
-    c.mustEqual(list.first(), 1);
-    c.mustEqual(list.first(), 1);
+    expect(list.first()).toStrictEqual(1);
+    expect(list.first()).toStrictEqual(1);
 
-    c.mustEqual(list.shift(), 1);
-    c.mustEqual(list.first(), 2);
-    c.mustEqual(list.first(), 2);
+    expect(list.shift()).toStrictEqual(1);
+    expect(list.first()).toStrictEqual(2);
+    expect(list.first()).toStrictEqual(2);
 
-    c.mustEqual(list.shift(), 2);
-    c.mustEqual(list.first(), undefined);
-    c.mustEqual(list.first(), undefined);
+    expect(list.shift()).toStrictEqual(2);
+    expect(list.first()).toStrictEqual();
+    expect(list.first()).toStrictEqual();
 
-    c.mustEqual(list.first(), undefined);
-    c.mustEqual(list.shift(), undefined);
-    c.mustEqual(list.first(), undefined);
+    expect(list.first()).toStrictEqual();
+    expect(list.shift()).toStrictEqual();
+    expect(list.first()).toStrictEqual();
   });
 });

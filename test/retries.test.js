@@ -1,32 +1,45 @@
-const { describe, it, afterEach } = require("mocha");
-var makeTest = require("./context");
+import { describe, it, expect, afterEach } from "vitest";
+const makeLimiter = require("./helpers/limiter");
+
+const badJob = function () {
+  return Promise.reject(new Error("boom"));
+};
 
 describe("Retries", function () {
-  var c;
+  let limiter;
 
   afterEach(function () {
-    return c.limiter.disconnect(false);
+    return limiter.disconnect(false);
   });
 
-  it("Should retry when requested by the user (sync)", async function () {
-    c = makeTest({ trackDoneStatus: true });
-    var failedEvents = 0;
-    var retryEvents = 0;
+  const assertBackoffs = function (attemptTimes, backoffMs) {
+    for (let i = 1; i < attemptTimes.length; i++) {
+      const delta = attemptTimes[i] - attemptTimes[i - 1];
+      expect(delta).toBeGreaterThanOrEqual(backoffMs - 5);
+    }
+  };
 
-    c.limiter.on("failed", function (error, info) {
-      c.mustEqual(c.limiter.counts().EXECUTING, 1);
-      c.mustEqual(info.retryCount, failedEvents);
+  it("Should retry when requested by the user (sync)", async function () {
+    limiter = makeLimiter({ trackDoneStatus: true });
+    let failedEvents = 0;
+    let retryEvents = 0;
+    const attemptTimes = [];
+
+    limiter.on("failed", function (error, info) {
+      expect(limiter.counts().EXECUTING).toStrictEqual(1);
+      expect(info.retryCount).toStrictEqual(failedEvents);
       failedEvents++;
       return 50;
     });
 
-    c.limiter.on("retry", function (_error, _info) {
-      c.mustEqual(c.limiter.counts().EXECUTING, 1);
+    limiter.on("retry", function (_error, _info) {
+      expect(limiter.counts().EXECUTING).toStrictEqual(1);
       retryEvents++;
     });
 
-    var times = 0;
+    let times = 0;
     const job = function () {
+      attemptTimes.push(Date.now());
       times++;
       if (times <= 2) {
         return Promise.reject(new Error("boom"));
@@ -34,35 +47,36 @@ describe("Retries", function () {
       return Promise.resolve("Success!");
     };
 
-    c.mustEqual(await c.limiter.schedule(job), "Success!");
-    const results = await c.results();
-    c.mustGt(results.elapsed, 90);
-    c.mustLt(results.elapsed, 130);
-    c.mustEqual(failedEvents, 2);
-    c.mustEqual(retryEvents, 2);
-    c.mustEqual(c.limiter.counts().EXECUTING, 0);
-    c.mustEqual(c.limiter.counts().DONE, 1);
+    expect(await limiter.schedule(job)).toStrictEqual("Success!");
+    expect(failedEvents).toStrictEqual(2);
+    expect(retryEvents).toStrictEqual(2);
+    expect(attemptTimes.length).toStrictEqual(3);
+    assertBackoffs(attemptTimes, 50);
+    expect(limiter.counts().EXECUTING).toStrictEqual(0);
+    expect(limiter.counts().DONE).toStrictEqual(1);
   });
 
   it("Should retry when requested by the user (async)", async function () {
-    c = makeTest({ trackDoneStatus: true });
-    var failedEvents = 0;
-    var retryEvents = 0;
+    limiter = makeLimiter({ trackDoneStatus: true });
+    let failedEvents = 0;
+    let retryEvents = 0;
+    const attemptTimes = [];
 
-    c.limiter.on("failed", function (error, info) {
-      c.mustEqual(c.limiter.counts().EXECUTING, 1);
-      c.mustEqual(info.retryCount, failedEvents);
+    limiter.on("failed", function (error, info) {
+      expect(limiter.counts().EXECUTING).toStrictEqual(1);
+      expect(info.retryCount).toStrictEqual(failedEvents);
       failedEvents++;
       return Promise.resolve(50);
     });
 
-    c.limiter.on("retry", function (_error, _info) {
-      c.mustEqual(c.limiter.counts().EXECUTING, 1);
+    limiter.on("retry", function (_error, _info) {
+      expect(limiter.counts().EXECUTING).toStrictEqual(1);
       retryEvents++;
     });
 
-    var times = 0;
+    let times = 0;
     const job = function () {
+      attemptTimes.push(Date.now());
       times++;
       if (times <= 2) {
         return Promise.reject(new Error("boom"));
@@ -70,167 +84,150 @@ describe("Retries", function () {
       return Promise.resolve("Success!");
     };
 
-    c.mustEqual(await c.limiter.schedule(job), "Success!");
-    const results = await c.results();
-    c.mustGt(results.elapsed, 90);
-    c.mustLt(results.elapsed, 130);
-    c.mustEqual(failedEvents, 2);
-    c.mustEqual(retryEvents, 2);
-    c.mustEqual(c.limiter.counts().EXECUTING, 0);
-    c.mustEqual(c.limiter.counts().DONE, 1);
+    expect(await limiter.schedule(job)).toStrictEqual("Success!");
+    expect(failedEvents).toStrictEqual(2);
+    expect(retryEvents).toStrictEqual(2);
+    expect(attemptTimes.length).toStrictEqual(3);
+    assertBackoffs(attemptTimes, 50);
+    expect(limiter.counts().EXECUTING).toStrictEqual(0);
+    expect(limiter.counts().DONE).toStrictEqual(1);
   });
 
   it("Should not retry when user returns an error (sync)", async function () {
-    c = makeTest({ errorEventsExpected: true, trackDoneStatus: true });
-    var failedEvents = 0;
-    var retryEvents = 0;
-    var errorEvents = 0;
-    var caught = false;
+    limiter = makeLimiter({ trackDoneStatus: true }, { expectErrors: true });
+    let failedEvents = 0;
+    let retryEvents = 0;
+    let errorEvents = 0;
+    let caught = false;
 
-    c.limiter.on("failed", function (error, info) {
-      c.mustEqual(c.limiter.counts().EXECUTING, 1);
-      c.mustEqual(info.retryCount, failedEvents);
+    limiter.on("failed", function (error, info) {
+      expect(limiter.counts().EXECUTING).toStrictEqual(1);
+      expect(info.retryCount).toStrictEqual(failedEvents);
       failedEvents++;
       throw new Error("Nope");
     });
 
-    c.limiter.on("retry", function (_error, _info) {
+    limiter.on("retry", function (_error, _info) {
       retryEvents++;
     });
 
-    c.limiter.on("error", function (error, _info) {
-      c.mustEqual(error.message, "Nope");
+    limiter.on("error", function (error, _info) {
+      expect(error.message).toStrictEqual("Nope");
       errorEvents++;
     });
 
-    const job = function () {
-      return Promise.reject(new Error("boom"));
-    };
-
     try {
-      await c.limiter.schedule(job);
+      await limiter.schedule(badJob);
       throw new Error("Should not reach");
     } catch (error) {
-      c.mustEqual(error.message, "boom");
+      expect(error.message).toStrictEqual("boom");
       caught = true;
     }
-    c.mustEqual(failedEvents, 1);
-    c.mustEqual(retryEvents, 0);
-    c.mustEqual(errorEvents, 1);
-    c.mustEqual(caught, true);
-    c.mustEqual(c.limiter.counts().EXECUTING, 0);
-    c.mustEqual(c.limiter.counts().DONE, 1);
+    expect(failedEvents).toStrictEqual(1);
+    expect(retryEvents).toStrictEqual(0);
+    expect(errorEvents).toStrictEqual(1);
+    expect(caught).toStrictEqual(true);
+    expect(limiter.counts().EXECUTING).toStrictEqual(0);
+    expect(limiter.counts().DONE).toStrictEqual(1);
   });
 
   it("Should not retry when user returns an error (async)", async function () {
-    c = makeTest({ errorEventsExpected: true, trackDoneStatus: true });
-    var failedEvents = 0;
-    var retryEvents = 0;
-    var errorEvents = 0;
-    var caught = false;
+    limiter = makeLimiter({ trackDoneStatus: true }, { expectErrors: true });
+    let failedEvents = 0;
+    let retryEvents = 0;
+    let errorEvents = 0;
+    let caught = false;
 
-    c.limiter.on("failed", function (error, info) {
-      c.mustEqual(c.limiter.counts().EXECUTING, 1);
-      c.mustEqual(info.retryCount, failedEvents);
+    limiter.on("failed", function (error, info) {
+      expect(limiter.counts().EXECUTING).toStrictEqual(1);
+      expect(info.retryCount).toStrictEqual(failedEvents);
       failedEvents++;
       return Promise.reject(new Error("Nope"));
     });
 
-    c.limiter.on("retry", function (_error, _info) {
+    limiter.on("retry", function (_error, _info) {
       retryEvents++;
     });
 
-    c.limiter.on("error", function (error, _info) {
-      c.mustEqual(error.message, "Nope");
+    limiter.on("error", function (error, _info) {
+      expect(error.message).toStrictEqual("Nope");
       errorEvents++;
     });
 
-    const job = function () {
-      return Promise.reject(new Error("boom"));
-    };
-
     try {
-      await c.limiter.schedule(job);
+      await limiter.schedule(badJob);
       throw new Error("Should not reach");
     } catch (error) {
-      c.mustEqual(error.message, "boom");
+      expect(error.message).toStrictEqual("boom");
       caught = true;
     }
-    c.mustEqual(failedEvents, 1);
-    c.mustEqual(retryEvents, 0);
-    c.mustEqual(errorEvents, 1);
-    c.mustEqual(caught, true);
-    c.mustEqual(c.limiter.counts().EXECUTING, 0);
-    c.mustEqual(c.limiter.counts().DONE, 1);
+    expect(failedEvents).toStrictEqual(1);
+    expect(retryEvents).toStrictEqual(0);
+    expect(errorEvents).toStrictEqual(1);
+    expect(caught).toStrictEqual(true);
+    expect(limiter.counts().EXECUTING).toStrictEqual(0);
+    expect(limiter.counts().DONE).toStrictEqual(1);
   });
 
   it("Should not retry when user returns null (sync)", async function () {
-    c = makeTest({ trackDoneStatus: true });
-    var failedEvents = 0;
-    var retryEvents = 0;
-    var caught = false;
+    limiter = makeLimiter({ trackDoneStatus: true });
+    let failedEvents = 0;
+    let retryEvents = 0;
+    let caught = false;
 
-    c.limiter.on("failed", function (error, info) {
-      c.mustEqual(c.limiter.counts().EXECUTING, 1);
-      c.mustEqual(info.retryCount, failedEvents);
+    limiter.on("failed", function (error, info) {
+      expect(limiter.counts().EXECUTING).toStrictEqual(1);
+      expect(info.retryCount).toStrictEqual(failedEvents);
       failedEvents++;
       return null;
     });
 
-    c.limiter.on("retry", function (_error, _info) {
+    limiter.on("retry", function (_error, _info) {
       retryEvents++;
     });
 
-    const job = function () {
-      return Promise.reject(new Error("boom"));
-    };
-
     try {
-      await c.limiter.schedule(job);
+      await limiter.schedule(badJob);
       throw new Error("Should not reach");
     } catch (error) {
-      c.mustEqual(error.message, "boom");
+      expect(error.message).toStrictEqual("boom");
       caught = true;
     }
-    c.mustEqual(failedEvents, 1);
-    c.mustEqual(retryEvents, 0);
-    c.mustEqual(caught, true);
-    c.mustEqual(c.limiter.counts().EXECUTING, 0);
-    c.mustEqual(c.limiter.counts().DONE, 1);
+    expect(failedEvents).toStrictEqual(1);
+    expect(retryEvents).toStrictEqual(0);
+    expect(caught).toStrictEqual(true);
+    expect(limiter.counts().EXECUTING).toStrictEqual(0);
+    expect(limiter.counts().DONE).toStrictEqual(1);
   });
 
   it("Should not retry when user returns null (async)", async function () {
-    c = makeTest({ trackDoneStatus: true });
-    var failedEvents = 0;
-    var retryEvents = 0;
-    var caught = false;
+    limiter = makeLimiter({ trackDoneStatus: true });
+    let failedEvents = 0;
+    let retryEvents = 0;
+    let caught = false;
 
-    c.limiter.on("failed", function (error, info) {
-      c.mustEqual(c.limiter.counts().EXECUTING, 1);
-      c.mustEqual(info.retryCount, failedEvents);
+    limiter.on("failed", function (error, info) {
+      expect(limiter.counts().EXECUTING).toStrictEqual(1);
+      expect(info.retryCount).toStrictEqual(failedEvents);
       failedEvents++;
       return Promise.resolve(null);
     });
 
-    c.limiter.on("retry", function (_error, _info) {
+    limiter.on("retry", function (_error, _info) {
       retryEvents++;
     });
 
-    const job = function () {
-      return Promise.reject(new Error("boom"));
-    };
-
     try {
-      await c.limiter.schedule(job);
+      await limiter.schedule(badJob);
       throw new Error("Should not reach");
     } catch (error) {
-      c.mustEqual(error.message, "boom");
+      expect(error.message).toStrictEqual("boom");
       caught = true;
     }
-    c.mustEqual(failedEvents, 1);
-    c.mustEqual(retryEvents, 0);
-    c.mustEqual(caught, true);
-    c.mustEqual(c.limiter.counts().EXECUTING, 0);
-    c.mustEqual(c.limiter.counts().DONE, 1);
+    expect(failedEvents).toStrictEqual(1);
+    expect(retryEvents).toStrictEqual(0);
+    expect(caught).toStrictEqual(true);
+    expect(limiter.counts().EXECUTING).toStrictEqual(0);
+    expect(limiter.counts().DONE).toStrictEqual(1);
   });
 });

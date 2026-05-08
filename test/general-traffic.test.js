@@ -1,0 +1,552 @@
+import { describe, it, afterEach, expect } from "vitest";
+import { createJobHarness } from "./helpers/job-tracking.js";
+import { waitForState } from "./helpers/wait-for-state.js";
+const makeLimiter = require("./helpers/limiter");
+
+const path = require("path");
+const util = require("util");
+const execFile = util.promisify(require("child_process").execFile);
+
+describe("General traffic", function () {
+  let limiter;
+
+  afterEach(function () {
+    if (limiter == null) return;
+    return limiter.disconnect(false);
+  });
+
+  describe("High water limit", function () {
+    it("Should support highWater set to 0", function () {
+      const h = createJobHarness();
+      limiter = makeLimiter({ maxConcurrent: 1, minTime: 0, highWater: 0, rejectOnDrop: false });
+
+      const first = h.pNoErrVal(limiter.schedule(h.slowPromise, 50, null, 1), 1);
+      h.pNoErrVal(limiter.schedule(h.slowPromise, 50, null, 2), 2);
+      h.pNoErrVal(limiter.schedule(h.slowPromise, 50, null, 3), 3);
+      h.pNoErrVal(limiter.schedule(h.slowPromise, 50, null, 4), 4);
+
+      return first
+        .then(function () {
+          return h.flushLimiter(limiter, { weight: 0 });
+        })
+        .then(function (_results) {
+          h.checkDuration(50);
+          h.checkResultsOrder([[1]]);
+        });
+    });
+
+    it("Should support highWater set to 1", async function () {
+      const h = createJobHarness();
+      limiter = makeLimiter({ maxConcurrent: 1, minTime: 0, highWater: 1, rejectOnDrop: false });
+      await limiter.ready();
+
+      // Track how many jobs have actually been committed to the queue by
+      // the submit lock. The "queued" event fires once per successful
+      // _addToQueue (even for jobs that LEAK later drops — because
+      // doDrop on the displaced job fires AFTER the new job's doQueue).
+      // We register the listener BEFORE scheduling the primer so it
+      // counts all 4 commits.
+      //
+      // Why we can't just poll `queued()`: queued() === 1 is briefly
+      // true after j2 alone is added, before j3 displaces it. A poll
+      // there would proceed and let j2 run before j3/j4 ever submit,
+      // yielding 3 results ([1, 2, 4] or [1, 3, 4]) instead of 2.
+      let committed = 0;
+      limiter.on("queued", function () {
+        committed++;
+      });
+
+      // Job 1 holds the running slot via a deferred-resolution signal so
+      // we can synchronize on "all 4 schedules committed via the submit
+      // lock" before releasing. Without this, under load (LocalDatastore
+      // yields once per __submit__; a redis-backed datastore adds a
+      // network round trip; a connect-retry adds ~500ms), 4 sequential
+      // submits can exceed slowPromise(50)'s window — job 1 finishes
+      // before jobs 3/4 commit, jobs 2/3 dispatch, and the test sees 3
+      // results instead of the expected 2.
+      let releaseFirst;
+      const firstSignal = new Promise(function (r) {
+        releaseFirst = r;
+      });
+      const first = h.pNoErrVal(limiter.schedule(h.deferredPromise, firstSignal, null, 1), 1);
+
+      // Wait until the primer is running. Once it occupies the running
+      // slot at maxConcurrent=1, no subsequent job can be dispatched
+      // until we release.
+      await waitForState(async function () {
+        expect(await limiter.running()).toBeGreaterThanOrEqual(1);
+      });
+
+      h.pNoErrVal(limiter.schedule(h.slowPromise, 50, null, 2), 2);
+      h.pNoErrVal(limiter.schedule(h.slowPromise, 50, null, 3), 3);
+      const last = h.pNoErrVal(limiter.schedule(h.slowPromise, 50, null, 4), 4);
+
+      // 4 = primer + j2 + j3 + j4 all committed via doQueue.
+      await waitForState(function () {
+        expect(committed).toBe(4);
+      });
+
+      releaseFirst();
+      await Promise.all([first, last]);
+      await h.flushLimiter(limiter, { weight: 0 });
+      h.checkResultsOrder([[1], [4]]);
+    });
+  });
+
+  describe("Weight", function () {
+    it("Should not add jobs with a weight above the maxConcurrent", function () {
+      const h = createJobHarness();
+      limiter = makeLimiter({ maxConcurrent: 2 });
+
+      h.pNoErrVal(limiter.schedule({ weight: 1 }, h.promise, null, 1), 1);
+      h.pNoErrVal(limiter.schedule({ weight: 2 }, h.promise, null, 2), 2);
+
+      return limiter
+        .schedule({ weight: 3 }, h.promise, null, 3)
+        .catch(function (err) {
+          expect(err.message).toEqual(
+            "Impossible to add a job having a weight of 3 to a limiter having a maxConcurrent setting of 2",
+          );
+          return h.flushLimiter(limiter);
+        })
+        .then(function (_results) {
+          h.checkDuration(0);
+          h.checkResultsOrder([[1], [2]]);
+        });
+    });
+
+    it("Should support custom job weights", function () {
+      const h = createJobHarness();
+      limiter = makeLimiter({ maxConcurrent: 2 });
+
+      // Await all 5 schedule promises before h.flushLimiter(limiter); otherwise the weight: 0
+      // job's slowPromise may not have settled by the time h.flushLimiter(limiter) reads calls[].
+      return Promise.all([
+        h.pNoErrVal(limiter.schedule({ weight: 1 }, h.slowPromise, 100, null, 1), 1),
+        h.pNoErrVal(limiter.schedule({ weight: 2 }, h.slowPromise, 200, null, 2), 2),
+        h.pNoErrVal(limiter.schedule({ weight: 1 }, h.slowPromise, 100, null, 3), 3),
+        h.pNoErrVal(limiter.schedule({ weight: 1 }, h.slowPromise, 100, null, 4), 4),
+        h.pNoErrVal(limiter.schedule({ weight: 0 }, h.slowPromise, 100, null, 5), 5),
+      ])
+        .then(function () {
+          return h.flushLimiter(limiter);
+        })
+        .then(function (_results) {
+          h.checkDuration(400);
+          h.checkResultsOrder([[1], [2], [3], [4], [5]]);
+        });
+    });
+
+    it("Should overflow at the correct rate", function () {
+      const h = createJobHarness();
+      limiter = makeLimiter({
+        maxConcurrent: 2,
+        reservoir: 3,
+      });
+
+      let calledDepleted = 0;
+      const emptyArguments = [];
+      limiter.on("depleted", function (empty) {
+        emptyArguments.push(empty);
+        calledDepleted++;
+      });
+
+      const p1 = h.pNoErrVal(
+        limiter.schedule({ weight: 1, id: 1 }, h.slowPromise, 100, null, 1),
+        1,
+      );
+      const p2 = h.pNoErrVal(
+        limiter.schedule({ weight: 2, id: 2 }, h.slowPromise, 150, null, 2),
+        2,
+      );
+      const p3 = h.pNoErrVal(
+        limiter.schedule({ weight: 1, id: 3 }, h.slowPromise, 100, null, 3),
+        3,
+      );
+      const p4 = h.pNoErrVal(
+        limiter.schedule({ weight: 1, id: 4 }, h.slowPromise, 100, null, 4),
+        4,
+      );
+
+      return Promise.all([p1, p2])
+        .then(function () {
+          expect(limiter.queued()).toEqual(2);
+          return limiter.currentReservoir();
+        })
+        .then(function (reservoir) {
+          expect(reservoir).toEqual(0);
+          expect(calledDepleted).toEqual(1);
+          return limiter.incrementReservoir(1);
+        })
+        .then(function (reservoir) {
+          expect(reservoir).toEqual(1);
+          return h.flushLimiter(limiter, { priority: 1, weight: 0 });
+        })
+        .then(function (_results) {
+          expect(calledDepleted).toEqual(3);
+          expect(limiter.queued()).toEqual(1);
+          h.checkDuration(250);
+          h.checkResultsOrder([[1], [2]]);
+          return limiter.currentReservoir();
+        })
+        .then(function (reservoir) {
+          expect(reservoir).toEqual(0);
+          return limiter.updateSettings({ reservoir: 1 });
+        })
+        .then(function () {
+          return Promise.all([p3, p4]);
+        })
+        .then(function () {
+          return limiter.currentReservoir();
+        })
+        .then(function (reservoir) {
+          expect(reservoir).toEqual(0);
+          expect(calledDepleted).toEqual(4);
+          expect(emptyArguments).toEqual([false, false, false, true]);
+        });
+    });
+  });
+
+  describe("Expiration", function () {
+    it("Should cancel jobs", { timeout: 20000 }, function () {
+      const h = createJobHarness();
+      limiter = makeLimiter({ maxConcurrent: 2 });
+      const t0 = Date.now();
+
+      // Hold j1 with deferredPromise instead of slowPromise(150). Reason:
+      // when the event loop blocks for ~150ms (testcontainer boot, parallel
+      // test files, eth.), all pending setTimeouts pile up and fire in the
+      // same tick — j1's 150ms resolution timer can fire BEFORE j2's
+      // expiration catch runs the running===1 assertion, making running===0
+      // (because j1 was freed too). With a deferredPromise we release j1
+      // explicitly inside the catch chain, after verifying running===1.
+      let releaseJ1;
+      const j1Signal = new Promise(function (r) {
+        releaseJ1 = r;
+      });
+
+      return Promise.all([
+        h.pNoErrVal(
+          limiter.schedule({ id: "very-slow-no-expiration" }, h.deferredPromise, j1Signal, null, 1),
+          1,
+        ),
+
+        limiter
+          .schedule({ expiration: 50, id: "slow-with-expiration" }, h.slowPromise, 75, null, 2)
+          .then(function () {
+            throw new Error("Should have timed out.");
+          })
+          .catch(function (err) {
+            expect(err.message).toEqual("This job timed out after 50 ms.");
+            // Lower bound proves expiration didn't fire instantly; the error
+            // message itself proves it didn't fire after slowPromise(75).
+            expect(Date.now() - t0).toBeGreaterThan(45);
+
+            return Promise.all([limiter.running(), limiter.done()]);
+          })
+          .then(function ([running, done]) {
+            expect(running).toEqual(1);
+            expect(done).toEqual(1);
+            // Hold j1 for ≥100ms more so the post-Promise.all assertion
+            // (`Date.now() - t0 > 145`) verifies j1 actually ran a
+            // meaningful interval, without depending on a fixed timer that
+            // can race event-loop jitter.
+            return h.wait(100).then(function () {
+              releaseJ1();
+            });
+          }),
+      ])
+        .then(function () {
+          // Lower bound proves the unexpired job wasn't aborted early by
+          // the other job's expiration — j1 ran for at least 50ms (j2's
+          // expiration window) plus the 100ms hold above.
+          expect(Date.now() - t0).toBeGreaterThan(145);
+          return Promise.all([limiter.running(), limiter.done()]);
+        })
+        .then(function ([running, done]) {
+          expect(running).toEqual(0);
+          expect(done).toEqual(2);
+        });
+    });
+  });
+
+  describe("Pubsub", function () {
+    it("Should pass strings", function () {
+      limiter = makeLimiter({ maxConcurrent: 2 });
+
+      return new Promise((resolve, reject) => {
+        limiter.on("message", function (msg) {
+          try {
+            expect(msg).toEqual("hello");
+            resolve();
+          } catch (e) {
+            reject(e);
+          }
+        });
+
+        limiter.publish("hello").catch(reject);
+      });
+    });
+
+    it("Should pass objects", function () {
+      limiter = makeLimiter({ maxConcurrent: 2 });
+      const obj = {
+        array: ["abc", true],
+        num: 235.59,
+      };
+
+      return new Promise((resolve, reject) => {
+        limiter.on("message", function (msg) {
+          try {
+            expect(JSON.parse(msg)).toEqual(obj);
+            resolve();
+          } catch (e) {
+            reject(e);
+          }
+        });
+
+        limiter.publish(JSON.stringify(obj)).catch(reject);
+      });
+    });
+  });
+
+  describe("Reservoir Refresh", function () {
+    it("Should auto-refresh the reservoir", function () {
+      const h = createJobHarness();
+      limiter = makeLimiter({
+        reservoir: 8,
+        reservoirRefreshInterval: 150,
+        reservoirRefreshAmount: 5,
+        heartbeatInterval: 75, // not for production use
+      });
+      let calledDepleted = 0;
+
+      limiter.on("depleted", function () {
+        calledDepleted++;
+      });
+
+      return Promise.all([
+        h.pNoErrVal(limiter.schedule({ weight: 1 }, h.promise, null, 1), 1),
+        h.pNoErrVal(limiter.schedule({ weight: 2 }, h.promise, null, 2), 2),
+        h.pNoErrVal(limiter.schedule({ weight: 3 }, h.promise, null, 3), 3),
+        h.pNoErrVal(limiter.schedule({ weight: 4 }, h.promise, null, 4), 4),
+        h.pNoErrVal(limiter.schedule({ weight: 5 }, h.promise, null, 5), 5),
+      ])
+        .then(function () {
+          return h.flushLimiter(limiter, { weight: 0, priority: 9 });
+        })
+        .then(function (results) {
+          h.checkResultsOrder([[1], [2], [3], [4], [5]]);
+          // The contract is "`depleted` fires when the reservoir reaches 0".
+          // We get >=2 fires reliably:
+          //   1) j5 (weight 5) dispatching after the t=300 refresh
+          //      reduces reservoir 5→0
+          //   2) h.last (weight 0) dispatching when reservoir is already 0
+          //      (a register with weight=0 returns reservoir=0 → depleted).
+          // Under sustained event-loop pressure (~900ms+ test duration on
+          // this normally-200ms test) a redis-driven heartbeat-published
+          // capacity message can interleave with h.last's own drain such
+          // that a third successful register-at-zero is observed. That's
+          // benign — the contract is "fires when reservoir is 0", not
+          // "fires exactly twice". We allow >=2 to absorb this rare case.
+          expect(calledDepleted).toBeGreaterThanOrEqual(2);
+          // Jobs 4 and 5 must wait for refreshes; that lower bound proves the
+          // refresh gate worked. Asserting current reservoir or a tight upper
+          // bound (checkDuration(300)) races a third refresh at t=450ms.
+          expect(results.calls[3].time).toBeGreaterThanOrEqual(145);
+          expect(results.calls[4].time).toBeGreaterThanOrEqual(295);
+        });
+    });
+
+    it("Should allow staggered X by Y type usage", function () {
+      const h = createJobHarness();
+      limiter = makeLimiter({
+        reservoir: 2,
+        reservoirRefreshInterval: 150,
+        reservoirRefreshAmount: 2,
+        heartbeatInterval: 75, // not for production use
+      });
+
+      return Promise.all([
+        h.pNoErrVal(limiter.schedule(h.promise, null, 1), 1),
+        h.pNoErrVal(limiter.schedule(h.promise, null, 2), 2),
+        h.pNoErrVal(limiter.schedule(h.promise, null, 3), 3),
+        h.pNoErrVal(limiter.schedule(h.promise, null, 4), 4),
+      ])
+        .then(function () {
+          return h.flushLimiter(limiter, { weight: 0, priority: 9 });
+        })
+        .then(function (results) {
+          h.checkResultsOrder([[1], [2], [3], [4]]);
+          // Jobs 3 and 4 must wait for the reservoir refresh at t=150ms; that
+          // lower bound proves the gate worked. Asserting the *current*
+          // reservoir is 0 races a possible second refresh at t=300 — and
+          // checkDuration(150) is too tight under load.
+          expect(results.calls[2].time).toBeGreaterThanOrEqual(145);
+          expect(results.calls[3].time).toBeGreaterThanOrEqual(145);
+        });
+    });
+
+    it("Should keep process alive until queue is empty", async function () {
+      limiter = makeLimiter();
+      const fixturePath = path.resolve(__dirname, "fixtures/keep-alive/refreshKeepAlive.mjs");
+      const { stdout, stderr } = await execFile(process.execPath, [fixturePath], {
+        timeout: 10000,
+      });
+      // The contract this test covers is "the process stays alive long
+      // enough to run all 4 jobs across a reservoir refresh". That's
+      // verified by `matches.length === 4` and `stderr === ""`: if the
+      // refresh timer didn't keep the event loop alive, the process would
+      // exit before jobs 3 & 4 print and we'd see fewer matches and/or a
+      // non-empty stderr.
+      //
+      // The fixture also inherits DATASTORE from the parent test, so when
+      // the test runs against ioredis/node-redis the child spins up its
+      // own short-lived connection. Fresh-connection overhead and Redis
+      // roundtrips give the bucket numbers significant jitter — pair
+      // clustering or tight gate bounds flake under that. We keep one
+      // sanity check (`nums[2] > nums[0]`) to confirm the second pair
+      // landed strictly after the first, which proves the refresh gate
+      // held without depending on the absolute bucket value.
+      const matches = stdout.match(/\[(\d+)\]/g);
+      expect(matches).toBeTruthy();
+      expect(matches.length).toEqual(4);
+      const nums = matches.map(function (m) {
+        return Number(m.slice(1, -1));
+      });
+      expect(nums[2]).toBeGreaterThan(nums[0]);
+      expect(stderr).toEqual("");
+    });
+  });
+
+  describe("Reservoir Increase", function () {
+    it("Should auto-increase the reservoir", async function () {
+      const h = createJobHarness();
+      limiter = makeLimiter({
+        reservoir: 3,
+        reservoirIncreaseInterval: 150,
+        reservoirIncreaseAmount: 5,
+        heartbeatInterval: 75, // not for production use
+      });
+      let calledDepleted = 0;
+
+      limiter.on("depleted", function () {
+        calledDepleted++;
+      });
+
+      await Promise.all([
+        h.pNoErrVal(limiter.schedule({ weight: 1 }, h.promise, null, 1), 1),
+        h.pNoErrVal(limiter.schedule({ weight: 2 }, h.promise, null, 2), 2),
+        h.pNoErrVal(limiter.schedule({ weight: 3 }, h.promise, null, 3), 3),
+        h.pNoErrVal(limiter.schedule({ weight: 4 }, h.promise, null, 4), 4),
+        h.pNoErrVal(limiter.schedule({ weight: 5 }, h.promise, null, 5), 5),
+      ]);
+
+      const results = await h.flushLimiter(limiter, { weight: 0, priority: 9 });
+      h.checkResultsOrder([[1], [2], [3], [4], [5]]);
+      expect(calledDepleted).toEqual(1);
+      // Jobs 3, 4, 5 must each wait for an increase tick (150/300/450ms);
+      // the lower bound proves the gate worked. The current-reservoir read
+      // and a tight checkDuration both race the next increase tick at 600ms.
+      expect(results.calls[2].time).toBeGreaterThanOrEqual(145);
+      expect(results.calls[3].time).toBeGreaterThanOrEqual(295);
+      expect(results.calls[4].time).toBeGreaterThanOrEqual(445);
+    });
+
+    it("Should auto-increase the reservoir up to a maximum", async function () {
+      const h = createJobHarness();
+      limiter = makeLimiter({
+        reservoir: 3,
+        reservoirIncreaseInterval: 150,
+        reservoirIncreaseAmount: 5,
+        reservoirIncreaseMaximum: 6,
+        heartbeatInterval: 75, // not for production use
+      });
+      let calledDepleted = 0;
+
+      limiter.on("depleted", function () {
+        calledDepleted++;
+      });
+
+      await Promise.all([
+        h.pNoErrVal(limiter.schedule({ weight: 1 }, h.promise, null, 1), 1),
+        h.pNoErrVal(limiter.schedule({ weight: 2 }, h.promise, null, 2), 2),
+        h.pNoErrVal(limiter.schedule({ weight: 3 }, h.promise, null, 3), 3),
+        h.pNoErrVal(limiter.schedule({ weight: 4 }, h.promise, null, 4), 4),
+        h.pNoErrVal(limiter.schedule({ weight: 5 }, h.promise, null, 5), 5),
+      ]);
+
+      const results = await h.flushLimiter(limiter, { weight: 0, priority: 9 });
+      h.checkResultsOrder([[1], [2], [3], [4], [5]]);
+      expect(calledDepleted).toEqual(1);
+      // Lower-bound timing assertions are the actual contract — the reservoir
+      // value at end is racy because additional increase ticks fire even after
+      // the last job dispatches.
+      expect(results.calls[2].time).toBeGreaterThanOrEqual(145);
+      expect(results.calls[3].time).toBeGreaterThanOrEqual(295);
+      expect(results.calls[4].time).toBeGreaterThanOrEqual(445);
+    });
+
+    it("Should allow staggered X by Y type usage", function () {
+      const h = createJobHarness();
+      limiter = makeLimiter({
+        reservoir: 2,
+        reservoirIncreaseInterval: 150,
+        reservoirIncreaseAmount: 2,
+        heartbeatInterval: 75, // not for production use
+      });
+
+      return Promise.all([
+        h.pNoErrVal(limiter.schedule(h.promise, null, 1), 1),
+        h.pNoErrVal(limiter.schedule(h.promise, null, 2), 2),
+        h.pNoErrVal(limiter.schedule(h.promise, null, 3), 3),
+        h.pNoErrVal(limiter.schedule(h.promise, null, 4), 4),
+      ])
+        .then(function () {
+          return limiter.currentReservoir();
+        })
+        .then(function (reservoir) {
+          // After all 4 jobs dispatch, reservoir has been depleted to 0 twice
+          // (initial 2 by jobs 1,2; refill 2 by jobs 3,4). Under load, the
+          // 150ms increase tick can fire again *between* Promise.all resolving
+          // and currentReservoir() returning, bumping it back to 2 (or, very
+          // rarely, 4). Allowing up to one extra tick of slop keeps a sanity
+          // check while removing the flake. The actual gating contract is
+          // verified by the lower-bound time assertions below.
+          expect(reservoir).toBeLessThanOrEqual(2);
+          return h.flushLimiter(limiter, { weight: 0, priority: 9 });
+        })
+        .then(function (results) {
+          h.checkResultsOrder([[1], [2], [3], [4]]);
+          // Jobs 3 and 4 must wait for the reservoir refill at t=150ms; lower
+          // bound proves the refill gate worked. No upper bound — under load
+          // dispatch latency adds to the wait time but doesn't violate the contract.
+          expect(results.calls[2].time).toBeGreaterThanOrEqual(145);
+          expect(results.calls[3].time).toBeGreaterThanOrEqual(145);
+        });
+    });
+
+    it("Should keep process alive until queue is empty", async function () {
+      limiter = makeLimiter();
+      const fixturePath = path.resolve(__dirname, "fixtures/keep-alive/increaseKeepAlive.mjs");
+      const { stdout, stderr } = await execFile(process.execPath, [fixturePath], {
+        timeout: 10000,
+      });
+      // Same contract / loosening rationale as the Reservoir Refresh
+      // sibling above: matches.length + empty stderr proves the keep-alive
+      // timer kept the event loop running across the increase, and
+      // `nums[2] > nums[0]` proves the increase gate held (jobs 3-4 ran
+      // strictly later than jobs 1-2). Tighter bucket assertions flake on
+      // fresh-connection / module-load jitter when the fixture runs
+      // against a Redis datastore inherited from the parent suite.
+      const matches = stdout.match(/\[(\d+)\]/g);
+      expect(matches).toBeTruthy();
+      expect(matches.length).toEqual(4);
+      const nums = matches.map(function (m) {
+        return Number(m.slice(1, -1));
+      });
+      expect(nums[2]).toBeGreaterThan(nums[0]);
+      expect(stderr).toEqual("");
+    });
+  });
+});

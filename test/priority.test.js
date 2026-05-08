@@ -1,35 +1,39 @@
-var makeTest = require("./context");
-var Bottleneck = require("./bottleneck");
-var assert = require("assert");
-const { describe, it, afterEach } = require("mocha");
+import { describe, it, afterEach, expect } from "vitest";
+import { createJobHarness } from "./helpers/job-tracking.js";
+import { waitForState } from "./helpers/wait-for-state.js";
+const makeLimiter = require("./helpers/limiter");
+const Bottleneck = require("./bottleneck");
+
 describe("Priority", function () {
-  var c;
+  let limiter;
 
   afterEach(function () {
-    return c.limiter.disconnect(false);
+    return limiter.disconnect(false);
   });
 
   it("Should do basic ordering", function () {
-    c = makeTest({ maxConcurrent: 1, minTime: 100, rejectOnDrop: false });
+    const h = createJobHarness();
+    limiter = makeLimiter({ maxConcurrent: 1, minTime: 100, rejectOnDrop: false });
 
     return Promise.all([
-      c.pNoErrVal(c.limiter.schedule(c.slowPromise, 50, null, 1), 1),
-      c.pNoErrVal(c.limiter.schedule(c.promise, null, 2), 2),
-      c.pNoErrVal(c.limiter.schedule({ priority: 1 }, c.promise, null, 5, 6), 5, 6),
-      c.pNoErrVal(c.limiter.schedule(c.promise, null, 3), 3),
-      c.pNoErrVal(c.limiter.schedule(c.promise, null, 4), 4),
+      h.pNoErrVal(limiter.schedule(h.slowPromise, 50, null, 1), 1),
+      h.pNoErrVal(limiter.schedule(h.promise, null, 2), 2),
+      h.pNoErrVal(limiter.schedule({ priority: 1 }, h.promise, null, 5, 6), 5, 6),
+      h.pNoErrVal(limiter.schedule(h.promise, null, 3), 3),
+      h.pNoErrVal(limiter.schedule(h.promise, null, 4), 4),
     ])
       .then(function () {
-        return c.last();
+        return h.flushLimiter(limiter);
       })
       .then(function (_results) {
-        c.checkResultsOrder([[1], [5, 6], [2], [3], [4]]);
-        c.checkDuration(400);
+        h.checkResultsOrder([[1], [5, 6], [2], [3], [4]]);
+        h.checkDuration(400);
       });
   });
 
-  it("Should support LEAK", function () {
-    c = makeTest({
+  it("Should support LEAK", async function () {
+    const h = createJobHarness();
+    limiter = makeLimiter({
       maxConcurrent: 1,
       minTime: 100,
       highWater: 3,
@@ -37,151 +41,197 @@ describe("Priority", function () {
       rejectOnDrop: false,
     });
 
-    var called = false;
-    c.limiter.on("dropped", function (dropped) {
-      c.mustExist(dropped.task);
-      c.mustExist(dropped.args);
-      c.mustExist(dropped.promise);
+    let called = false;
+    limiter.on("dropped", function (dropped) {
+      expect(dropped.task).toBeTruthy();
+      expect(dropped.args).toBeTruthy();
+      expect(dropped.promise).toBeTruthy();
       called = true;
     });
 
-    c.limiter.submit(c.slowJob, 50, null, 1, c.noErrVal(1));
-    c.limiter.submit(c.job, null, 2, c.noErrVal(2));
-    c.limiter.submit(c.job, null, 3, c.noErrVal(3));
-    c.limiter.submit(c.job, null, 4, c.noErrVal(4));
-    c.limiter.submit({ priority: 2 }, c.job, null, 5, c.noErrVal(5));
-    c.limiter.submit({ priority: 1 }, c.job, null, 6, c.noErrVal(6));
-    c.limiter.submit({ priority: 9 }, c.job, null, 7, c.noErrVal(7));
+    let releaseFirst;
+    const firstSignal = new Promise(function (r) {
+      releaseFirst = r;
+    });
 
-    return c.last({ weight: 0 }).then(function (_results) {
-      c.checkDuration(200);
-      c.checkResultsOrder([[1], [6], [5]]);
-      c.mustEqual(called, true);
+    const subs = [
+      limiter.submit(h.deferredJob, firstSignal, null, 1, h.noErrVal(1)),
+      limiter.submit(h.job, null, 2, h.noErrVal(2)),
+      limiter.submit(h.job, null, 3, h.noErrVal(3)),
+      limiter.submit(h.job, null, 4, h.noErrVal(4)),
+      limiter.submit({ priority: 2 }, h.job, null, 5, h.noErrVal(5)),
+      limiter.submit({ priority: 1 }, h.job, null, 6, h.noErrVal(6)),
+      limiter.submit({ priority: 9 }, h.job, null, 7, h.noErrVal(7)),
+    ];
+    await Promise.all(subs);
+    releaseFirst();
+
+    return h.flushLimiter(limiter, { weight: 0 }).then(function (_results) {
+      h.checkResultsOrder([[1], [6], [5]]);
+      expect(called).toEqual(true);
     });
   });
 
-  it("Should support OVERFLOW", function () {
-    c = makeTest({
+  it("Should support OVERFLOW", async function () {
+    const h = createJobHarness();
+    limiter = makeLimiter({
       maxConcurrent: 1,
       minTime: 100,
       highWater: 2,
       strategy: Bottleneck.strategy.OVERFLOW,
       rejectOnDrop: false,
     });
-    var called = false;
-    c.limiter.on("dropped", function (dropped) {
-      c.mustExist(dropped.task);
-      c.mustExist(dropped.args);
-      c.mustExist(dropped.promise);
+    let called = false;
+    limiter.on("dropped", function (dropped) {
+      expect(dropped.task).toBeTruthy();
+      expect(dropped.args).toBeTruthy();
+      expect(dropped.promise).toBeTruthy();
       called = true;
     });
 
-    c.limiter.submit(c.slowJob, 50, null, 1, c.noErrVal(1));
-    c.limiter.submit(c.job, null, 2, c.noErrVal(2));
-    c.limiter.submit(c.job, null, 3, c.noErrVal(3));
-    c.limiter.submit(c.job, null, 4, c.noErrVal(4));
-    c.limiter.submit({ priority: 2 }, c.job, null, 5, c.noErrVal(5));
-    c.limiter.submit({ priority: 1 }, c.job, null, 6, c.noErrVal(6));
+    let releaseFirst;
+    const firstSignal = new Promise(function (r) {
+      releaseFirst = r;
+    });
 
-    return c.limiter
-      .submit({ priority: 9 }, c.job, null, 7, c.noErrVal(7))
+    const subs = [
+      limiter.submit(h.deferredJob, firstSignal, null, 1, h.noErrVal(1)),
+      limiter.submit(h.job, null, 2, h.noErrVal(2)),
+      limiter.submit(h.job, null, 3, h.noErrVal(3)),
+      limiter.submit(h.job, null, 4, h.noErrVal(4)),
+      limiter.submit({ priority: 2 }, h.job, null, 5, h.noErrVal(5)),
+      limiter.submit({ priority: 1 }, h.job, null, 6, h.noErrVal(6)),
+      limiter.submit({ priority: 9 }, h.job, null, 7, h.noErrVal(7)),
+    ];
+    await Promise.all(subs);
+    releaseFirst();
+
+    return limiter
+      .updateSettings({ highWater: null })
       .then(function () {
-        return c.limiter.updateSettings({ highWater: null });
+        return h.flushLimiter(limiter);
       })
-      .then(c.last)
       .then(function (_results) {
-        c.checkDuration(200);
-        c.checkResultsOrder([[1], [2], [3]]);
-        c.mustEqual(called, true);
+        h.checkResultsOrder([[1], [2], [3]]);
+        expect(called).toEqual(true);
       });
   });
 
-  it("Should support OVERFLOW_PRIORITY", function () {
-    c = makeTest({
+  it("Should support OVERFLOW_PRIORITY", async function () {
+    const h = createJobHarness();
+    limiter = makeLimiter({
       maxConcurrent: 1,
       minTime: 100,
       highWater: 2,
       strategy: Bottleneck.strategy.OVERFLOW_PRIORITY,
       rejectOnDrop: false,
     });
-    var called = false;
-    c.limiter.on("dropped", function (dropped) {
-      c.mustExist(dropped.task);
-      c.mustExist(dropped.args);
-      c.mustExist(dropped.promise);
+    let called = false;
+    limiter.on("dropped", function (dropped) {
+      expect(dropped.task).toBeTruthy();
+      expect(dropped.args).toBeTruthy();
+      expect(dropped.promise).toBeTruthy();
       called = true;
     });
 
-    c.limiter.submit(c.slowJob, 50, null, 1, c.noErrVal(1));
-    c.limiter.submit(c.job, null, 2, c.noErrVal(2));
-    c.limiter.submit(c.job, null, 3, c.noErrVal(3));
-    c.limiter.submit(c.job, null, 4, c.noErrVal(4));
-    c.limiter.submit({ priority: 2 }, c.job, null, 5, c.noErrVal(5));
-    c.limiter.submit({ priority: 2 }, c.job, null, 6, c.noErrVal(6));
+    let releaseFirst;
+    const firstSignal = new Promise(function (r) {
+      releaseFirst = r;
+    });
 
-    return c.limiter
-      .submit({ priority: 2 }, c.job, null, 7, c.noErrVal(7))
+    const subs = [
+      limiter.submit(h.deferredJob, firstSignal, null, 1, h.noErrVal(1)),
+      limiter.submit(h.job, null, 2, h.noErrVal(2)),
+      limiter.submit(h.job, null, 3, h.noErrVal(3)),
+      limiter.submit(h.job, null, 4, h.noErrVal(4)),
+      limiter.submit({ priority: 2 }, h.job, null, 5, h.noErrVal(5)),
+      limiter.submit({ priority: 2 }, h.job, null, 6, h.noErrVal(6)),
+      limiter.submit({ priority: 2 }, h.job, null, 7, h.noErrVal(7)),
+    ];
+    await Promise.all(subs);
+    releaseFirst();
+
+    return limiter
+      .updateSettings({ highWater: null })
       .then(function () {
-        return c.limiter.updateSettings({ highWater: null });
+        return h.flushLimiter(limiter);
       })
-      .then(c.last)
       .then(function (_results) {
-        c.checkDuration(200);
-        c.checkResultsOrder([[1], [5], [6]]);
-        c.mustEqual(called, true);
+        h.checkResultsOrder([[1], [5], [6]]);
+        expect(called).toEqual(true);
       });
   });
 
-  it("Should support BLOCK", function (done) {
-    c = makeTest({
+  it("Should support BLOCK", function () {
+    expect.hasAssertions();
+    const h = createJobHarness();
+    limiter = makeLimiter({
       maxConcurrent: 1,
       minTime: 100,
       highWater: 2,
       trackDoneStatus: true,
       strategy: Bottleneck.strategy.BLOCK,
     });
-    var called = 0;
+    let called = 0;
 
-    c.limiter.on("dropped", function (dropped) {
-      c.mustExist(dropped.task);
-      c.mustExist(dropped.args);
-      c.mustExist(dropped.promise);
-      called++;
-      if (called === 3) {
-        c.limiter
-          .updateSettings({ highWater: null })
-          .then(function () {
-            return c.limiter.schedule(c.job, null, 8);
-          })
-          .catch(function (err) {
-            assert(
-              err instanceof Bottleneck.BottleneckError,
-              "Expected err to be a BottleneckError",
-            );
-            c.mustEqual(err.message, "This job has been dropped by Bottleneck");
-            c.limiter.removeAllListeners("error");
-            done();
-          });
-      }
+    return new Promise(function (resolve) {
+      let releaseFirst;
+      const firstSignal = new Promise(function (r) {
+        releaseFirst = r;
+      });
+
+      limiter.on("dropped", function (dropped) {
+        expect(dropped.task).toBeTruthy();
+        expect(dropped.args).toBeTruthy();
+        expect(dropped.promise).toBeTruthy();
+        called++;
+        if (called === 3) {
+          limiter
+            .updateSettings({ highWater: null })
+            .then(function () {
+              return limiter.schedule(h.job, null, 8);
+            })
+            .catch(function (err) {
+              expect(err).toBeInstanceOf(Bottleneck.BottleneckError);
+              expect(err.message).toEqual("This job has been dropped by Bottleneck");
+              limiter.removeAllListeners("error");
+              releaseFirst();
+              resolve();
+            });
+        }
+      });
+
+      limiter.submit(h.deferredJob, firstSignal, null, 1, h.noErrVal(1));
+      limiter.submit(h.slowJob, 20, null, 2, (err) => expect(err).toBeTruthy());
+      limiter.submit(h.slowJob, 20, null, 3, (err) => expect(err).toBeTruthy());
+      limiter.submit(h.slowJob, 20, null, 4, (err) => expect(err).toBeTruthy());
     });
-
-    c.limiter.submit(c.slowJob, 20, null, 1, c.noErrVal(1));
-    c.limiter.submit(c.slowJob, 20, null, 2, (err) => c.mustExist(err));
-    c.limiter.submit(c.slowJob, 20, null, 3, (err) => c.mustExist(err));
-    c.limiter.submit(c.slowJob, 20, null, 4, (err) => c.mustExist(err));
   });
 
-  it("Should have the right priority", function () {
-    c = makeTest({ maxConcurrent: 1, minTime: 100 });
+  it("Should have the right priority", async function () {
+    const h = createJobHarness();
+    limiter = makeLimiter({ maxConcurrent: 1, minTime: 100 });
 
-    c.pNoErrVal(c.limiter.schedule({ priority: 6 }, c.slowPromise, 50, null, 1), 1);
-    c.pNoErrVal(c.limiter.schedule({ priority: 5 }, c.promise, null, 2), 2);
-    c.pNoErrVal(c.limiter.schedule({ priority: 4 }, c.promise, null, 3), 3);
-    c.pNoErrVal(c.limiter.schedule({ priority: 3 }, c.promise, null, 4), 4);
+    let committed = 0;
+    limiter.on("queued", function () {
+      committed++;
+    });
+    let releaseFirst;
+    const firstSignal = new Promise(function (r) {
+      releaseFirst = r;
+    });
+    h.pNoErrVal(limiter.schedule({ priority: 6 }, h.deferredPromise, firstSignal, null, 1), 1);
+    h.pNoErrVal(limiter.schedule({ priority: 5 }, h.promise, null, 2), 2);
+    h.pNoErrVal(limiter.schedule({ priority: 4 }, h.promise, null, 3), 3);
+    h.pNoErrVal(limiter.schedule({ priority: 3 }, h.promise, null, 4), 4);
+    await waitForState(() => {
+      expect(committed).toBe(4);
+    });
+    releaseFirst();
 
-    return c.last().then(function (_results) {
-      c.checkDuration(300);
-      c.checkResultsOrder([[1], [4], [3], [2]]);
+    return h.flushLimiter(limiter).then(function (_results) {
+      expect(h.results().elapsed).toBeGreaterThanOrEqual(295);
+      h.checkResultsOrder([[1], [4], [3], [2]]);
     });
   });
 });

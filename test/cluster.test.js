@@ -1,555 +1,650 @@
-var makeTest = require("./context");
-var Bottleneck = require("./bottleneck");
-var Scripts = require("../src/cluster/Scripts.js");
-var assert = require("assert");
-const { describe, it, afterEach } = require("mocha");
+import { describe, it, afterEach, expect } from "vitest";
+import { createJobHarness } from "./helpers/job-tracking.js";
+import { waitForState } from "./helpers/wait-for-state.js";
+const makeLimiter = require("./helpers/limiter");
+const Bottleneck = require("./bottleneck");
+const Scripts = require("../src/cluster/Scripts.js");
+const assert = require("assert");
 
-if (process.env.DATASTORE === "redis" || process.env.DATASTORE === "ioredis") {
-  var limiterKeys = function (limiter) {
-    return Scripts.allKeys(limiter._store.originalId);
-  };
-  var countKeys = function (limiter) {
-    return runCommand(limiter, "exists", limiterKeys(limiter));
-  };
-  var deleteKeys = function (limiter) {
-    return runCommand(limiter, "del", limiterKeys(limiter));
-  };
-  var runCommand = function (limiter, command, args) {
-    return limiter._store.connection.__runCommand__([command, ...args]);
-  };
+const limiterKeys = function (limiter) {
+  return Scripts.allKeys(limiter._store.originalId);
+};
+const runCommand = function (limiter, command, args) {
+  return limiter._store.connection.__runCommand__([command, ...args]);
+};
+const sumWeights = function (weights) {
+  return Object.keys(weights).reduce((acc, x) => {
+    return acc + ~~weights[x];
+  }, 0);
+};
 
-  describe("Cluster-only", function () {
-    var c;
+describe("Cluster-only", function () {
+  if (process.env.DATASTORE !== "redis" && process.env.DATASTORE !== "ioredis") {
+    throw new Error("DATASTORE must be redis or ioredis");
+  }
+  let rootLimiter;
 
-    afterEach(function () {
-      return c.limiter.disconnect(false);
+  afterEach(function () {
+    return rootLimiter.disconnect(false);
+  });
+
+  it("Should return a promise for ready()", function () {
+    rootLimiter = makeLimiter({ maxConcurrent: 2 });
+
+    const ready = rootLimiter.ready();
+    expect(ready).toBeInstanceOf(Promise);
+    return ready;
+  });
+
+  it("Should return clients", function () {
+    rootLimiter = makeLimiter({ maxConcurrent: 2 });
+
+    return rootLimiter.ready().then(function (clients) {
+      expect(Object.keys(clients)).toEqual(["client", "subscriber"]);
+      expect(Object.keys(rootLimiter.clients())).toEqual(["client", "subscriber"]);
+    });
+  });
+
+  it("Should return a promise when disconnecting", function () {
+    rootLimiter = makeLimiter({ maxConcurrent: 2 });
+
+    const disconnected = rootLimiter.disconnect();
+    expect(disconnected).toBeInstanceOf(Promise);
+    return disconnected.then(function () {
+      // do nothing
+    });
+  });
+
+  it("Should allow passing a limiter's connection to a new limiter", function () {
+    const h = createJobHarness();
+    rootLimiter = makeLimiter();
+    rootLimiter.connection.id = "some-id";
+    const limiter = new Bottleneck({
+      minTime: 50,
+      connection: rootLimiter.connection,
     });
 
-    it("Should return a promise for ready()", function () {
-      c = makeTest({ maxConcurrent: 2 });
-
-      return c.limiter.ready();
-    });
-
-    it("Should return clients", function () {
-      c = makeTest({ maxConcurrent: 2 });
-
-      return c.limiter.ready().then(function (clients) {
-        c.mustEqual(Object.keys(clients), ["client", "subscriber"]);
-        c.mustEqual(Object.keys(c.limiter.clients()), ["client", "subscriber"]);
-      });
-    });
-
-    it("Should return a promise when disconnecting", function () {
-      c = makeTest({ maxConcurrent: 2 });
-
-      return c.limiter.disconnect().then(function () {
-        // do nothing
-      });
-    });
-
-    it("Should allow passing a limiter's connection to a new limiter", function () {
-      c = makeTest();
-      c.limiter.connection.id = "some-id";
-      var limiter = new Bottleneck({
-        minTime: 50,
-        connection: c.limiter.connection,
-      });
-
-      return Promise.all([c.limiter.ready(), limiter.ready()])
-        .then(function () {
-          c.mustEqual(limiter.connection.id, "some-id");
-          c.mustEqual(limiter.datastore, process.env.DATASTORE);
-
-          return Promise.all([
-            c.pNoErrVal(c.limiter.schedule(c.promise, null, 1), 1),
-            c.pNoErrVal(limiter.schedule(c.promise, null, 2), 2),
-          ]);
-        })
-        .then(c.last)
-        .then(function (_results) {
-          c.checkResultsOrder([[1], [2]]);
-          c.checkDuration(0);
-        });
-    });
-
-    it("Should allow passing a limiter's connection to a new Group", function () {
-      c = makeTest();
-      c.limiter.connection.id = "some-id";
-      var group = new Bottleneck.Group({
-        minTime: 50,
-        connection: c.limiter.connection,
-      });
-      var limiter1 = group.key("A");
-      var limiter2 = group.key("B");
-
-      return Promise.all([c.limiter.ready(), limiter1.ready(), limiter2.ready()])
-        .then(function () {
-          c.mustEqual(limiter1.connection.id, "some-id");
-          c.mustEqual(limiter2.connection.id, "some-id");
-          c.mustEqual(limiter1.datastore, process.env.DATASTORE);
-          c.mustEqual(limiter2.datastore, process.env.DATASTORE);
-
-          return Promise.all([
-            c.pNoErrVal(c.limiter.schedule(c.promise, null, 1), 1),
-            c.pNoErrVal(limiter1.schedule(c.promise, null, 2), 2),
-            c.pNoErrVal(limiter2.schedule(c.promise, null, 3), 3),
-          ]);
-        })
-        .then(c.last)
-        .then(function (_results) {
-          c.checkResultsOrder([[1], [2], [3]]);
-          c.checkDuration(0);
-        });
-    });
-
-    it("Should allow passing a Group's connection to a new limiter", function () {
-      c = makeTest();
-      var group = new Bottleneck.Group({
-        minTime: 50,
-        datastore: process.env.DATASTORE,
-        clearDatastore: true,
-      });
-      group.connection.id = "some-id";
-
-      var limiter1 = group.key("A");
-      var limiter2 = new Bottleneck({
-        minTime: 50,
-        connection: group.connection,
-      });
-
-      return Promise.all([limiter1.ready(), limiter2.ready()])
-        .then(function () {
-          c.mustEqual(limiter1.connection.id, "some-id");
-          c.mustEqual(limiter2.connection.id, "some-id");
-          c.mustEqual(limiter1.datastore, process.env.DATASTORE);
-          c.mustEqual(limiter2.datastore, process.env.DATASTORE);
-
-          return Promise.all([
-            c.pNoErrVal(limiter1.schedule(c.promise, null, 1), 1),
-            c.pNoErrVal(limiter2.schedule(c.promise, null, 2), 2),
-          ]);
-        })
-        .then(c.last)
-        .then(function (_results) {
-          c.checkResultsOrder([[1], [2]]);
-          c.checkDuration(0);
-          return group.disconnect();
-        });
-    });
-
-    it("Should allow passing a Group's connection to a new Group", function () {
-      c = makeTest();
-      var group1 = new Bottleneck.Group({
-        minTime: 50,
-        datastore: process.env.DATASTORE,
-        clearDatastore: true,
-      });
-      group1.connection.id = "some-id";
-
-      var group2 = new Bottleneck.Group({
-        minTime: 50,
-        connection: group1.connection,
-        clearDatastore: true,
-      });
-
-      var limiter1 = group1.key("AAA");
-      var limiter2 = group1.key("BBB");
-      var limiter3 = group1.key("CCC");
-      var limiter4 = group1.key("DDD");
-
-      return Promise.all([limiter1.ready(), limiter2.ready(), limiter3.ready(), limiter4.ready()])
-        .then(function () {
-          c.mustEqual(group1.connection.id, "some-id");
-          c.mustEqual(group2.connection.id, "some-id");
-          c.mustEqual(limiter1.connection.id, "some-id");
-          c.mustEqual(limiter2.connection.id, "some-id");
-          c.mustEqual(limiter3.connection.id, "some-id");
-          c.mustEqual(limiter4.connection.id, "some-id");
-          c.mustEqual(limiter1.datastore, process.env.DATASTORE);
-          c.mustEqual(limiter2.datastore, process.env.DATASTORE);
-          c.mustEqual(limiter3.datastore, process.env.DATASTORE);
-          c.mustEqual(limiter4.datastore, process.env.DATASTORE);
-
-          return Promise.all([
-            c.pNoErrVal(limiter1.schedule(c.promise, null, 1), 1),
-            c.pNoErrVal(limiter2.schedule(c.promise, null, 2), 2),
-            c.pNoErrVal(limiter3.schedule(c.promise, null, 3), 3),
-            c.pNoErrVal(limiter4.schedule(c.promise, null, 4), 4),
-          ]);
-        })
-        .then(c.last)
-        .then(function (_results) {
-          c.checkResultsOrder([[1], [2], [3], [4]]);
-          c.checkDuration(0);
-          return group1.disconnect();
-        });
-    });
-
-    it("Should not have a key TTL by default for standalone limiters", function () {
-      c = makeTest();
-
-      return c.limiter
-        .ready()
-        .then(function () {
-          var settings_key = limiterKeys(c.limiter)[0];
-          return runCommand(c.limiter, "ttl", [settings_key]);
-        })
-        .then(function (ttl) {
-          c.mustLt(ttl, 0);
-        });
-    });
-
-    it("Should allow timeout setting for standalone limiters", function () {
-      c = makeTest({ timeout: 5 * 60 * 1000 });
-
-      return c.limiter
-        .ready()
-        .then(function () {
-          var settings_key = limiterKeys(c.limiter)[0];
-          return runCommand(c.limiter, "ttl", [settings_key]);
-        })
-        .then(function (ttl) {
-          c.mustGte(ttl, 290);
-          c.mustLte(ttl, 305);
-        });
-    });
-
-    it("Should set TTL on all keys including client_* keys after register_client", async function () {
-      c = makeTest({ timeout: 5 * 60 * 1000 });
-
-      await c.limiter.ready();
-
-      // Get all 8 keys for this limiter
-      var keys = limiterKeys(c.limiter);
-
-      // Identify the client_* keys
-      var clientKeys = keys.filter((k) => k.includes("_client_"));
-
-      // First verify that client_* keys actually exist (were created by register_client)
-      for (var i = 0; i < clientKeys.length; i++) {
-        var key = clientKeys[i];
-        var exists = await runCommand(c.limiter, "exists", [key]);
-        assert(exists === 1, `Expected ${key} to exist after register_client, but it doesn't`);
-      }
-
-      // Now verify that all keys have TTL set
-      for (i = 0; i < keys.length; i++) {
-        key = keys[i];
-        var ttl = await runCommand(c.limiter, "ttl", [key]);
-
-        if (ttl == -2) continue; // key doesn't exist
-
-        // TTL should be around 300 seconds (5 minutes)
-        // -1 means no TTL (the bug we're fixing), -2 means key doesn't exist
-        assert(
-          ttl >= 290 && ttl <= 305,
-          `Expected TTL between 290-305 for ${key}, got ${ttl}. ` +
-            `(-1 means no TTL set, -2 means key doesn't exist)`,
-        );
-      }
-    });
-
-    it("Should compute reservoir increased based on number of missed intervals", async function () {
-      const settings = {
-        id: "missed-intervals",
-        clearDatastore: false,
-        reservoir: 2,
-        reservoirIncreaseInterval: 100,
-        reservoirIncreaseAmount: 2,
-        timeout: 2000,
-      };
-      c = makeTest({ ...settings });
-      await c.limiter.ready();
-
-      c.mustEqual(await c.limiter.currentReservoir(), 2);
-
-      const settings_key = limiterKeys(c.limiter)[0];
-      await runCommand(c.limiter, "hincrby", [settings_key, "lastReservoirIncrease", -3000]);
-
-      const limiter2 = new Bottleneck({ ...settings, datastore: process.env.DATASTORE });
-      await limiter2.ready();
-
-      c.mustEqual(await c.limiter.currentReservoir(), 62); // 2 + ((3000 / 100) * 2) === 62
-
-      await limiter2.disconnect();
-    });
-
-    it("Should migrate from 2.8.0", function () {
-      c = makeTest({ id: "migrate" });
-      var settings_key = limiterKeys(c.limiter)[0];
-      var limiter2;
-
-      return c.limiter
-        .ready()
-        .then(function () {
-          var settings_key = limiterKeys(c.limiter)[0];
-          return Promise.all([
-            runCommand(c.limiter, "hset", [settings_key, "version", "2.8.0"]),
-            runCommand(c.limiter, "hdel", [
-              settings_key,
-              "done",
-              "capacityPriorityCounter",
-              "clientTimeout",
-            ]),
-            runCommand(c.limiter, "hset", [settings_key, "lastReservoirRefresh", ""]),
-          ]);
-        })
-        .then(function () {
-          limiter2 = new Bottleneck({
-            id: "migrate",
-            datastore: process.env.DATASTORE,
-          });
-          return limiter2.ready();
-        })
-        .then(function () {
-          return runCommand(c.limiter, "hmget", [
-            settings_key,
-            "version",
-            "done",
-            "reservoirRefreshInterval",
-            "reservoirRefreshAmount",
-            "capacityPriorityCounter",
-            "clientTimeout",
-            "reservoirIncreaseAmount",
-            "reservoirIncreaseMaximum",
-            // Add new values here, before these 2 timestamps
-            "lastReservoirRefresh",
-            "lastReservoirIncrease",
-          ]);
-        })
-        .then(function (values) {
-          var timestamps = values.slice(-2);
-          timestamps.forEach((t) => c.mustGt(parseInt(t), Date.now() - 500));
-          c.mustEqual(values.slice(0, -timestamps.length), [
-            "2.18.0",
-            "0",
-            "",
-            "",
-            "0",
-            "10000",
-            "",
-            "",
-          ]);
-        })
-        .then(function () {
-          return limiter2.disconnect(false);
-        });
-    });
-
-    it("Should keep track of each client's queue length", async function () {
-      c = makeTest({
-        id: "queues",
-        maxConcurrent: 1,
-        trackDoneStatus: true,
-      });
-      var limiter2 = new Bottleneck({
-        datastore: process.env.DATASTORE,
-        id: "queues",
-        maxConcurrent: 1,
-        trackDoneStatus: true,
-      });
-      var client_num_queued_key = limiterKeys(c.limiter)[5];
-      var clientId1 = c.limiter._store.clientId;
-      var clientId2 = limiter2._store.clientId;
-
-      await c.limiter.ready();
-      await limiter2.ready();
-
-      var p0 = c.limiter.schedule({ id: 0 }, c.slowPromise, 100, null, 0);
-      await c.limiter._submitLock.schedule(() => Promise.resolve());
-
-      var p1 = c.limiter.schedule({ id: 1 }, c.promise, null, 1);
-      var p2 = c.limiter.schedule({ id: 2 }, c.promise, null, 2);
-      var p3 = limiter2.schedule({ id: 3 }, c.promise, null, 3);
-
-      await Promise.all([
-        c.limiter._submitLock.schedule(() => Promise.resolve()),
-        limiter2._submitLock.schedule(() => Promise.resolve()),
-      ]);
-
-      var queuedA = await runCommand(c.limiter, "hgetall", [client_num_queued_key]);
-      c.mustEqual(c.limiter.counts().QUEUED, 2);
-      c.mustEqual(limiter2.counts().QUEUED, 1);
-      c.mustEqual(~~queuedA[clientId1], 2);
-      c.mustEqual(~~queuedA[clientId2], 1);
-
-      c.mustEqual(await c.limiter.clusterQueued(), 3);
-
-      await Promise.all([p0, p1, p2, p3]);
-      var queuedB = await runCommand(c.limiter, "hgetall", [client_num_queued_key]);
-      c.mustEqual(c.limiter.counts().QUEUED, 0);
-      c.mustEqual(limiter2.counts().QUEUED, 0);
-      c.mustEqual(~~queuedB[clientId1], 0);
-      c.mustEqual(~~queuedB[clientId2], 0);
-      c.mustEqual(c.limiter.counts().DONE, 3);
-      c.mustEqual(limiter2.counts().DONE, 1);
-
-      c.mustEqual(await c.limiter.clusterQueued(), 0);
-
-      return limiter2.disconnect(false);
-    });
-
-    it("Should publish capacity increases", function () {
-      c = makeTest({ maxConcurrent: 2 });
-      var limiter2;
-
-      return c.limiter
-        .ready()
-        .then(function () {
-          limiter2 = new Bottleneck({ datastore: process.env.DATASTORE });
-          return limiter2.ready();
-        })
-        .then(function () {
-          c.limiter.schedule({ id: 1 }, c.slowPromise, 100, null, 1);
-          c.limiter.schedule({ id: 2 }, c.slowPromise, 100, null, 2);
-
-          return c.limiter.schedule({ id: 0, weight: 0 }, c.promise, null, 0);
-        })
-        .then(function () {
-          return limiter2.schedule({ id: 3 }, c.slowPromise, 100, null, 3);
-        })
-        .then(c.last)
-        .then(function (_results) {
-          c.checkResultsOrder([[0], [1], [2], [3]]);
-          c.checkDuration(200);
-
-          return limiter2.disconnect(false);
-        });
-    });
-
-    it("Should publish capacity changes on reservoir changes", function () {
-      c = makeTest({
-        maxConcurrent: 2,
-        reservoir: 2,
-      });
-      var limiter2;
-      var p3;
-
-      return c.limiter
-        .ready()
-        .then(function () {
-          limiter2 = new Bottleneck({
-            datastore: process.env.DATASTORE,
-          });
-          return limiter2.ready();
-        })
-        .then(function () {
-          c.limiter.schedule({ id: 1 }, c.slowPromise, 100, null, 1);
-          c.limiter.schedule({ id: 2 }, c.slowPromise, 100, null, 2);
-
-          return c.limiter.schedule({ id: 0, weight: 0 }, c.promise, null, 0);
-        })
-        .then(function () {
-          p3 = limiter2.schedule({ id: 3, weight: 2 }, c.slowPromise, 100, null, 3);
-          return c.limiter.currentReservoir();
-        })
-        .then(function (reservoir) {
-          c.mustEqual(reservoir, 0);
-          return c.limiter.updateSettings({ reservoir: 1 });
-        })
-        .then(function () {
-          return c.limiter.incrementReservoir(1);
-        })
-        .then(function (reservoir) {
-          c.mustEqual(reservoir, 2);
-          return p3;
-        })
-        .then(function (result) {
-          c.mustEqual(result, [3]);
-          return c.limiter.currentReservoir();
-        })
-        .then(function (reservoir) {
-          c.mustEqual(reservoir, 0);
-          return c.last({ weight: 0 });
-        })
-        .then(function (_results) {
-          c.checkResultsOrder([[0], [1], [2], [3]]);
-          c.checkDuration(210);
-        })
-        .then(function (_data) {
-          return limiter2.disconnect(false);
-        });
-    });
-
-    it("Should remove track job data and remove lost jobs", function () {
-      c = makeTest({
-        id: "lost",
-        errorEventsExpected: true,
-      });
-      var clientId = c.limiter._store.clientId;
-      var limiter1 = new Bottleneck({ datastore: process.env.DATASTORE });
-      var limiter2 = new Bottleneck({
-        id: "lost",
-        datastore: process.env.DATASTORE,
-        heartbeatInterval: 150,
-      });
-      var getData = function (limiter) {
-        c.mustEqual(limiterKeys(limiter).length, 8); // Asserting, to remember to edit this test when keys change
-        var [
-          settings_key,
-          job_weights_key,
-          job_expirations_key,
-          job_clients_key,
-          client_running_key,
-          client_num_queued_key,
-          client_last_registered_key,
-          client_last_seen_key,
-        ] = limiterKeys(limiter);
+    return Promise.all([rootLimiter.ready(), limiter.ready()])
+      .then(function () {
+        expect(limiter.connection.id).toEqual("some-id");
+        expect(limiter.datastore).toEqual(process.env.DATASTORE);
 
         return Promise.all([
-          runCommand(limiter1, "hmget", [settings_key, "running", "done"]),
-          runCommand(limiter1, "hgetall", [job_weights_key]),
-          runCommand(limiter1, "zcard", [job_expirations_key]),
-          runCommand(limiter1, "hvals", [job_clients_key]),
-          runCommand(limiter1, "zrange", [client_running_key, "0", "-1", "withscores"]),
-          runCommand(limiter1, "hvals", [client_num_queued_key]),
-          runCommand(limiter1, "zrange", [client_last_registered_key, "0", "-1", "withscores"]),
-          runCommand(limiter1, "zrange", [client_last_seen_key, "0", "-1", "withscores"]),
+          h.pNoErrVal(rootLimiter.schedule(h.promise, null, 1), 1),
+          h.pNoErrVal(limiter.schedule(h.promise, null, 2), 2),
         ]);
-      };
-      var sumWeights = function (weights) {
-        return Object.keys(weights).reduce((acc, x) => {
-          return acc + ~~weights[x];
-        }, 0);
-      };
-      var numExpirations = 0;
-      var errorHandler = function (err) {
-        if (err.message.indexOf("This job timed out") === 0) {
-          numExpirations++;
-        }
-      };
+      })
+      .then(function () {
+        return h.flushLimiter(rootLimiter);
+      })
+      .then(function (_results) {
+        h.checkResultsOrder([[1], [2]]);
+      });
+  });
 
-      return Promise.all([c.limiter.ready(), limiter1.ready(), limiter2.ready()])
+  it("Should allow passing a limiter's connection to a new Group", function () {
+    const h = createJobHarness();
+    rootLimiter = makeLimiter();
+    rootLimiter.connection.id = "some-id";
+    const group = new Bottleneck.Group({
+      minTime: 50,
+      connection: rootLimiter.connection,
+    });
+    const limiter1 = group.key("A");
+    const limiter2 = group.key("B");
+
+    return Promise.all([rootLimiter.ready(), limiter1.ready(), limiter2.ready()])
+      .then(function () {
+        expect(limiter1.connection.id).toEqual("some-id");
+        expect(limiter2.connection.id).toEqual("some-id");
+        expect(limiter1.datastore).toEqual(process.env.DATASTORE);
+        expect(limiter2.datastore).toEqual(process.env.DATASTORE);
+
+        return Promise.all([
+          h.pNoErrVal(rootLimiter.schedule(h.promise, null, 1), 1),
+          h.pNoErrVal(limiter1.schedule(h.promise, null, 2), 2),
+          h.pNoErrVal(limiter2.schedule(h.promise, null, 3), 3),
+        ]);
+      })
+      .then(function () {
+        return h.flushLimiter(rootLimiter);
+      })
+      .then(function (_results) {
+        h.checkResultsOrder([[1], [2], [3]]);
+      });
+  });
+
+  it("Should allow passing a Group's connection to a new limiter", function () {
+    const h = createJobHarness();
+    rootLimiter = makeLimiter();
+    const group = new Bottleneck.Group({
+      minTime: 50,
+      datastore: process.env.DATASTORE,
+      clearDatastore: true,
+    });
+    group.connection.id = "some-id";
+
+    const limiter1 = group.key("A");
+    const limiter2 = new Bottleneck({
+      minTime: 50,
+      connection: group.connection,
+    });
+
+    return Promise.all([limiter1.ready(), limiter2.ready()])
+      .then(function () {
+        expect(limiter1.connection.id).toEqual("some-id");
+        expect(limiter2.connection.id).toEqual("some-id");
+        expect(limiter1.datastore).toEqual(process.env.DATASTORE);
+        expect(limiter2.datastore).toEqual(process.env.DATASTORE);
+
+        return Promise.all([
+          h.pNoErrVal(limiter1.schedule(h.promise, null, 1), 1),
+          h.pNoErrVal(limiter2.schedule(h.promise, null, 2), 2),
+        ]);
+      })
+      .then(function () {
+        return h.flushLimiter(rootLimiter);
+      })
+      .then(function (_results) {
+        h.checkResultsOrder([[1], [2]]);
+        return group.disconnect();
+      });
+  });
+
+  it("Should allow passing a Group's connection to a new Group", function () {
+    const h = createJobHarness();
+    rootLimiter = makeLimiter();
+    const group1 = new Bottleneck.Group({
+      minTime: 50,
+      datastore: process.env.DATASTORE,
+      clearDatastore: true,
+    });
+    group1.connection.id = "some-id";
+
+    const group2 = new Bottleneck.Group({
+      minTime: 50,
+      connection: group1.connection,
+      clearDatastore: true,
+    });
+
+    const limiter1 = group1.key("AAA");
+    const limiter2 = group1.key("BBB");
+    const limiter3 = group1.key("CCC");
+    const limiter4 = group1.key("DDD");
+
+    return Promise.all([limiter1.ready(), limiter2.ready(), limiter3.ready(), limiter4.ready()])
+      .then(function () {
+        expect(group1.connection.id).toEqual("some-id");
+        expect(group2.connection.id).toEqual("some-id");
+        expect(limiter1.connection.id).toEqual("some-id");
+        expect(limiter2.connection.id).toEqual("some-id");
+        expect(limiter3.connection.id).toEqual("some-id");
+        expect(limiter4.connection.id).toEqual("some-id");
+        expect(limiter1.datastore).toEqual(process.env.DATASTORE);
+        expect(limiter2.datastore).toEqual(process.env.DATASTORE);
+        expect(limiter3.datastore).toEqual(process.env.DATASTORE);
+        expect(limiter4.datastore).toEqual(process.env.DATASTORE);
+
+        return Promise.all([
+          h.pNoErrVal(limiter1.schedule(h.promise, null, 1), 1),
+          h.pNoErrVal(limiter2.schedule(h.promise, null, 2), 2),
+          h.pNoErrVal(limiter3.schedule(h.promise, null, 3), 3),
+          h.pNoErrVal(limiter4.schedule(h.promise, null, 4), 4),
+        ]);
+      })
+      .then(function () {
+        return h.flushLimiter(rootLimiter);
+      })
+      .then(function (_results) {
+        h.checkResultsOrder([[1], [2], [3], [4]]);
+        return group1.disconnect();
+      });
+  });
+
+  it("Should not have a key TTL by default for standalone limiters", function () {
+    rootLimiter = makeLimiter();
+
+    return rootLimiter
+      .ready()
+      .then(function () {
+        const settings_key = limiterKeys(rootLimiter)[0];
+        return runCommand(rootLimiter, "ttl", [settings_key]);
+      })
+      .then(function (ttl) {
+        expect(ttl).toBeLessThan(0);
+      });
+  });
+
+  it("Should allow timeout setting for standalone limiters", function () {
+    rootLimiter = makeLimiter({ timeout: 5 * 60 * 1000 });
+
+    return rootLimiter
+      .ready()
+      .then(function () {
+        const settings_key = limiterKeys(rootLimiter)[0];
+        return runCommand(rootLimiter, "ttl", [settings_key]);
+      })
+      .then(function (ttl) {
+        expect(ttl).toBeGreaterThanOrEqual(290);
+        expect(ttl).toBeLessThanOrEqual(305);
+      });
+  });
+
+  it("Should set TTL on all keys including client_* keys after register_client", async function () {
+    rootLimiter = makeLimiter({ timeout: 5 * 60 * 1000 });
+
+    await rootLimiter.ready();
+
+    // Get all 8 keys for this limiter
+    const keys = limiterKeys(rootLimiter);
+
+    // Identify the client_* keys
+    const clientKeys = keys.filter((k) => k.includes("_client_"));
+
+    // First verify that client_* keys actually exist (were created by register_client)
+    for (let i = 0; i < clientKeys.length; i++) {
+      const key = clientKeys[i];
+      const exists = await runCommand(rootLimiter, "exists", [key]);
+      assert(exists === 1, `Expected ${key} to exist after register_client, but it doesn't`);
+    }
+
+    // Now verify that all keys have TTL set
+    for (let i = 0; i < keys.length; i++) {
+      const key = keys[i];
+      const ttl = await runCommand(rootLimiter, "ttl", [key]);
+
+      if (ttl == -2) continue; // key doesn't exist
+
+      // TTL should be around 300 seconds (5 minutes)
+      // -1 means no TTL (the bug we're fixing), -2 means key doesn't exist
+      assert(
+        ttl >= 290 && ttl <= 305,
+        `Expected TTL between 290-305 for ${key}, got ${ttl}. ` +
+          `(-1 means no TTL set, -2 means key doesn't exist)`,
+      );
+    }
+  });
+
+  it("Should compute reservoir increased based on number of missed intervals", async function () {
+    const settings = {
+      id: "missed-intervals",
+      clearDatastore: false,
+      reservoir: 2,
+      reservoirIncreaseInterval: 100,
+      reservoirIncreaseAmount: 2,
+      timeout: 2000,
+    };
+    rootLimiter = makeLimiter({ ...settings });
+    await rootLimiter.ready();
+
+    expect(await rootLimiter.currentReservoir()).toEqual(2);
+
+    const settings_key = limiterKeys(rootLimiter)[0];
+
+    // Boot limiter2 BEFORE shifting lastReservoirIncrease. limiter2's
+    // init.lua calls process_tick which runs the catch-up logic, and any
+    // wall-clock time spent during limiter2.ready() (a connect-retry can
+    // add ~500ms) gets folded into "missed intervals" — which previously
+    // shifted the result from the expected 62 to 64+ depending on boot
+    // duration. By doing the hset and the read back-to-back as the very
+    // last steps, the only Δ between shift-time and read-time is one hset
+    // round trip (typically <10ms, well under the 100ms interval).
+    const limiter2 = new Bottleneck({ ...settings, datastore: process.env.DATASTORE });
+    await limiter2.ready();
+
+    // process_tick uses Date.now() from JS (see RedisDatastore.runScript),
+    // not Redis TIME, so we can anchor lastReservoirIncrease to a JS
+    // timestamp and the math is deterministic. Reset reservoir to 2
+    // because limiter2's init may have already bumped it via process_tick.
+    const t = Date.now();
+    await runCommand(rootLimiter, "hmset", [
+      settings_key,
+      "lastReservoirIncrease",
+      String(t - 3000),
+      "reservoir",
+      "2",
+    ]);
+
+    // 2 + ((3000 / 100) * 2) === 62 by construction. Allow up to 1 extra
+    // missed interval (+2 reservoir) of slop in case the hset round trip
+    // crosses the 100ms boundary.
+    const reservoir = await rootLimiter.currentReservoir();
+    expect(reservoir).toBeGreaterThanOrEqual(62);
+    expect(reservoir).toBeLessThanOrEqual(64);
+
+    await limiter2.disconnect();
+  });
+
+  it("Should migrate from 2.8.0", function () {
+    // Bound the expected timestamps to the test window — not a wall-clock-from-now
+    // window that depends on test runtime under load. lastReservoirIncrease is
+    // preserved from rootLimiter's init (hsetnx), so the bound must precede that too.
+    const testStart = Date.now();
+    rootLimiter = makeLimiter({ id: "migrate" });
+    const settings_key = limiterKeys(rootLimiter)[0];
+    let limiter2;
+
+    return rootLimiter
+      .ready()
+      .then(function () {
+        return Promise.all([
+          runCommand(rootLimiter, "hset", [settings_key, "version", "2.8.0"]),
+          runCommand(rootLimiter, "hdel", [
+            settings_key,
+            "done",
+            "capacityPriorityCounter",
+            "clientTimeout",
+          ]),
+          runCommand(rootLimiter, "hset", [settings_key, "lastReservoirRefresh", ""]),
+        ]);
+      })
+      .then(function () {
+        limiter2 = new Bottleneck({
+          id: "migrate",
+          datastore: process.env.DATASTORE,
+        });
+        return limiter2.ready();
+      })
+      .then(function () {
+        return runCommand(rootLimiter, "hmget", [
+          settings_key,
+          "version",
+          "done",
+          "reservoirRefreshInterval",
+          "reservoirRefreshAmount",
+          "capacityPriorityCounter",
+          "clientTimeout",
+          "reservoirIncreaseAmount",
+          "reservoirIncreaseMaximum",
+          // Add new values here, before these 2 timestamps
+          "lastReservoirRefresh",
+          "lastReservoirIncrease",
+        ]);
+      })
+      .then(function (values) {
+        const timestamps = values.slice(-2);
+        timestamps.forEach(function (t) {
+          const num = parseInt(t);
+          expect(num).toBeGreaterThanOrEqual(testStart); // timestamp written during this test
+          expect(num).toBeLessThanOrEqual(Date.now()); // not somehow in the future
+        });
+        expect(values.slice(0, -timestamps.length)).toEqual([
+          "2.18.0",
+          "0",
+          "",
+          "",
+          "0",
+          "10000",
+          "",
+          "",
+        ]);
+      })
+      .then(function () {
+        return limiter2.disconnect(false);
+      });
+  });
+
+  it("Should keep track of each client's queue length", async function () {
+    const h = createJobHarness();
+    rootLimiter = makeLimiter({
+      id: "queues",
+      maxConcurrent: 1,
+      trackDoneStatus: true,
+    });
+    const limiter2 = new Bottleneck({
+      datastore: process.env.DATASTORE,
+      id: "queues",
+      maxConcurrent: 1,
+      trackDoneStatus: true,
+    });
+    const client_num_queued_key = limiterKeys(rootLimiter)[5];
+    const clientId1 = rootLimiter._store.clientId;
+    const clientId2 = limiter2._store.clientId;
+
+    await rootLimiter.ready();
+    await limiter2.ready();
+
+    const p0 = rootLimiter.schedule({ id: 0 }, h.slowPromise, 100, null, 0);
+    await rootLimiter._submitLock.schedule(() => Promise.resolve());
+
+    const p1 = rootLimiter.schedule({ id: 1 }, h.promise, null, 1);
+    const p2 = rootLimiter.schedule({ id: 2 }, h.promise, null, 2);
+    const p3 = limiter2.schedule({ id: 3 }, h.promise, null, 3);
+
+    await Promise.all([
+      rootLimiter._submitLock.schedule(() => Promise.resolve()),
+      limiter2._submitLock.schedule(() => Promise.resolve()),
+    ]);
+
+    const queuedA = await runCommand(rootLimiter, "hgetall", [client_num_queued_key]);
+    expect(rootLimiter.counts().QUEUED).toEqual(2);
+    expect(limiter2.counts().QUEUED).toEqual(1);
+    expect(~~queuedA[clientId1]).toEqual(2);
+    expect(~~queuedA[clientId2]).toEqual(1);
+
+    expect(await rootLimiter.clusterQueued()).toEqual(3);
+
+    await Promise.all([p0, p1, p2, p3]);
+    const queuedB = await runCommand(rootLimiter, "hgetall", [client_num_queued_key]);
+    expect(rootLimiter.counts().QUEUED).toEqual(0);
+    expect(limiter2.counts().QUEUED).toEqual(0);
+    expect(~~queuedB[clientId1]).toEqual(0);
+    expect(~~queuedB[clientId2]).toEqual(0);
+    expect(rootLimiter.counts().DONE).toEqual(3);
+    expect(limiter2.counts().DONE).toEqual(1);
+
+    expect(await rootLimiter.clusterQueued()).toEqual(0);
+
+    return limiter2.disconnect(false);
+  });
+
+  it("Should publish capacity increases", function () {
+    const h = createJobHarness();
+    rootLimiter = makeLimiter({ maxConcurrent: 2 });
+    let limiter2;
+
+    return rootLimiter
+      .ready()
+      .then(function () {
+        limiter2 = new Bottleneck({ datastore: process.env.DATASTORE });
+        return limiter2.ready();
+      })
+      .then(function () {
+        // Use deferredPromise instead of slowPromise(100) for jobs 1 and 2.
+        // With slowPromise, the 100ms setTimeout starts at *dispatch* time.
+        // Under load, queueing job 0 (and waiting for its dispatch+resolve)
+        // can take >100ms — by which point job 1's setTimeout has already
+        // fired and pushed [1] before job 0 could push [0]. The expected
+        // [[0],[1],[2],[3]] order then flips to [[1],...]. With
+        // deferredPromise we hold jobs 1/2 explicitly until job 0 has run,
+        // then release them (after a fixed wait that preserves the
+        // original ~200ms total duration so capacity-published-to-limiter2
+        // semantics are still exercised end-to-end).
+        let releaseJobs;
+        const jobsSignal = new Promise(function (r) {
+          releaseJobs = r;
+        });
+        rootLimiter.schedule({ id: 1 }, h.deferredPromise, jobsSignal, null, 1);
+        rootLimiter.schedule({ id: 2 }, h.deferredPromise, jobsSignal, null, 2);
+
+        return rootLimiter
+          .schedule({ id: 0, weight: 0 }, h.promise, null, 0)
+          .then(function () {
+            return h.wait(100);
+          })
+          .then(function () {
+            releaseJobs();
+          });
+      })
+      .then(function () {
+        return limiter2.schedule({ id: 3 }, h.slowPromise, 100, null, 3);
+      })
+      .then(function () {
+        return h.flushLimiter(rootLimiter);
+      })
+      .then(function (_results) {
+        h.checkResultsOrder([[0], [1], [2], [3]]);
+        // Lower bound ~200ms is the contract: job 0 (instant) + ~100ms
+        // hold for jobs 1/2 + ~100ms for job 3 to dispatch on limiter2
+        // after capacity opens. We don't tightly upper-bound here — under
+        // load, redis round trips + capacity pubsub can stretch this past
+        // the original implicit 1200ms cap.
+        expect(h.results().elapsed).toBeGreaterThanOrEqual(195);
+
+        return limiter2.disconnect(false);
+      });
+  });
+
+  it("Should publish capacity changes on reservoir changes", function () {
+    const h = createJobHarness();
+    rootLimiter = makeLimiter({
+      maxConcurrent: 2,
+      reservoir: 2,
+    });
+    let limiter2;
+    let p3;
+
+    return rootLimiter
+      .ready()
+      .then(function () {
+        limiter2 = new Bottleneck({
+          datastore: process.env.DATASTORE,
+        });
+        return limiter2.ready();
+      })
+      .then(function () {
+        rootLimiter.schedule({ id: 1 }, h.slowPromise, 100, null, 1);
+        rootLimiter.schedule({ id: 2 }, h.slowPromise, 100, null, 2);
+
+        return rootLimiter.schedule({ id: 0, weight: 0 }, h.promise, null, 0);
+      })
+      .then(function () {
+        p3 = limiter2.schedule({ id: 3, weight: 2 }, h.slowPromise, 100, null, 3);
+        return rootLimiter.currentReservoir();
+      })
+      .then(function (reservoir) {
+        expect(reservoir).toEqual(0);
+        return rootLimiter.updateSettings({ reservoir: 1 });
+      })
+      .then(function () {
+        return rootLimiter.incrementReservoir(1);
+      })
+      .then(function (reservoir) {
+        expect(reservoir).toEqual(2);
+        return p3;
+      })
+      .then(function (result) {
+        expect(result).toEqual([3]);
+        return rootLimiter.currentReservoir();
+      })
+      .then(function (reservoir) {
+        expect(reservoir).toEqual(0);
+        return h.flushLimiter(rootLimiter, { weight: 0 });
+      })
+      .then(function (_results) {
+        h.checkResultsOrder([[0], [1], [2], [3]]);
+        // Upper bound is generous: a dropped node-redis connection retries
+        // in-flight commands after reconnect; with connectTimeout=500ms and
+        // one retry cycle the delay can reach ~1500ms on a loaded testcontainer.
+        // The ordering assertion above is the real semantic check; checkDuration
+        // just guards against a completely silent pub/sub channel (>5s delay).
+        h.checkDuration(210, 10, 2000);
+      })
+      .then(function (_data) {
+        return limiter2.disconnect(false);
+      });
+  });
+
+  it("Should remove track job data and remove lost jobs", function () {
+    // Capture before any limiter is constructed; redis-side timestamps may be
+    // assigned during rootLimiter's init via hsetnx (see init.lua).
+    const testStart = Date.now();
+    const h = createJobHarness();
+    rootLimiter = makeLimiter({ id: "lost" }, { expectErrors: true });
+    const clientId = rootLimiter._store.clientId;
+    const limiter1 = new Bottleneck({ datastore: process.env.DATASTORE });
+    const limiter2 = new Bottleneck({
+      id: "lost",
+      datastore: process.env.DATASTORE,
+      heartbeatInterval: 150,
+    });
+    const getData = function (limiter) {
+      expect(limiterKeys(limiter).length).toEqual(8); // Asserting, to remember to edit this test when keys change
+      const [
+        settings_key,
+        job_weights_key,
+        job_expirations_key,
+        job_clients_key,
+        client_running_key,
+        client_num_queued_key,
+        client_last_registered_key,
+        client_last_seen_key,
+      ] = limiterKeys(limiter);
+
+      return Promise.all([
+        runCommand(limiter1, "hmget", [settings_key, "running", "done"]),
+        runCommand(limiter1, "hgetall", [job_weights_key]),
+        runCommand(limiter1, "zcard", [job_expirations_key]),
+        runCommand(limiter1, "hvals", [job_clients_key]),
+        runCommand(limiter1, "zrange", [client_running_key, "0", "-1", "withscores"]),
+        runCommand(limiter1, "hvals", [client_num_queued_key]),
+        runCommand(limiter1, "zrange", [client_last_registered_key, "0", "-1", "withscores"]),
+        runCommand(limiter1, "zrange", [client_last_seen_key, "0", "-1", "withscores"]),
+      ]);
+    };
+    let numExpirations = 0;
+    const errorHandler = function (err) {
+      if (err.message.indexOf("This job timed out") === 0) {
+        numExpirations++;
+      }
+    };
+
+    return (
+      Promise.all([rootLimiter.ready(), limiter1.ready(), limiter2.ready()])
         .then(function () {
           // No expiration, it should not be removed
           // oxlint-disable-next-line no-unused-expressions
-          (c.pNoErrVal(c.limiter.schedule({ weight: 1 }, c.slowPromise, 150, null, 1), 1),
+          (h.pNoErrVal(rootLimiter.schedule({ weight: 1 }, h.slowPromise, 150, null, 1), 1),
             // Expiration present, these jobs should be removed automatically
-            c.limiter
-              .schedule({ expiration: 50, weight: 2 }, c.slowPromise, 75, null, 2)
+            rootLimiter
+              .schedule({ expiration: 50, weight: 2 }, h.slowPromise, 75, null, 2)
               .catch(errorHandler));
-          c.limiter
-            .schedule({ expiration: 50, weight: 3 }, c.slowPromise, 75, null, 3)
+          rootLimiter
+            .schedule({ expiration: 50, weight: 3 }, h.slowPromise, 75, null, 3)
             .catch(errorHandler);
-          c.limiter
-            .schedule({ expiration: 50, weight: 4 }, c.slowPromise, 75, null, 4)
+          rootLimiter
+            .schedule({ expiration: 50, weight: 4 }, h.slowPromise, 75, null, 4)
             .catch(errorHandler);
-          c.limiter
-            .schedule({ expiration: 50, weight: 5 }, c.slowPromise, 75, null, 5)
+          rootLimiter
+            .schedule({ expiration: 50, weight: 5 }, h.slowPromise, 75, null, 5)
             .catch(errorHandler);
 
-          return c.limiter._submitLock.schedule(() => Promise.resolve(true));
+          return rootLimiter._submitLock.schedule(() => Promise.resolve(true));
         })
         .then(function () {
-          return c.limiter._drainAll();
+          return rootLimiter._drainAll();
         })
         .then(function () {
-          return c.limiter.disconnect(false);
+          return rootLimiter.disconnect(false);
         })
-        .then(function () {})
+        // Poll for the post-cleanup state instead of asserting an intermediate
+        // snapshot in the narrow window between dispatch and the 50ms expiration
+        // timers firing — under event-loop stress that window can effectively
+        // vanish, with expirations firing before the snapshot read completes.
         .then(function () {
-          return getData(c.limiter);
+          return waitForState(async function () {
+            const [s, je] = await Promise.all([
+              runCommand(limiter1, "hmget", [limiterKeys(rootLimiter)[0], "running", "done"]),
+              runCommand(limiter1, "zcard", [limiterKeys(rootLimiter)[2]]),
+            ]);
+            expect(s[0]).toBe("1");
+            expect(s[1]).toBe("14");
+            expect(je).toBe(0);
+            expect(numExpirations).toBe(4);
+          });
+        })
+        .then(function () {
+          return getData(rootLimiter);
         })
         .then(function ([
           settings,
@@ -561,1076 +656,305 @@ if (process.env.DATASTORE === "redis" || process.env.DATASTORE === "ioredis") {
           client_last_registered,
           client_last_seen,
         ]) {
-          c.mustEqual(settings, ["15", "0"]);
-          c.mustEqual(sumWeights(job_weights), 15);
-          c.mustEqual(job_expirations, 4);
-          c.mustEqual(job_clients.length, 5);
-          job_clients.forEach((id) => c.mustEqual(id, clientId));
-          c.mustEqual(sumWeights(client_running), 15);
-          c.mustEqual(client_num_queued, ["0", "0"]);
-          c.mustEqual(client_last_registered[1], "0");
-          c.mustGt(client_last_seen[1], Date.now() - 1000);
-          var passed = Date.now() - parseFloat(client_last_registered[3]);
-          c.mustGt(passed, 0);
-          c.mustLt(passed, 20);
+          expect(settings).toEqual(["1", "14"]);
+          expect(sumWeights(job_weights)).toEqual(1);
+          expect(job_expirations).toEqual(0);
+          expect(job_clients.length).toEqual(1);
+          job_clients.forEach((id) => expect(id).toEqual(clientId));
+          expect(sumWeights(client_running)).toEqual(1);
+          expect(client_num_queued).toEqual(["0", "0"]);
+          expect(client_last_registered[1]).toEqual("0");
+          expect(parseFloat(client_last_seen[1])).toBeGreaterThanOrEqual(testStart);
+          expect(parseFloat(client_last_seen[1])).toBeLessThanOrEqual(Date.now());
+          // Limiter2's registration timestamp falls within the test window.
+          expect(parseFloat(client_last_registered[3])).toBeGreaterThanOrEqual(testStart);
+          expect(parseFloat(client_last_registered[3])).toBeLessThanOrEqual(Date.now());
 
-          return c.wait(170);
-        })
-        .then(function () {
-          return getData(c.limiter);
-        })
-        .then(function ([
-          settings,
-          job_weights,
-          job_expirations,
-          job_clients,
-          client_running,
-          client_num_queued,
-          client_last_registered,
-          client_last_seen,
-        ]) {
-          c.mustEqual(settings, ["1", "14"]);
-          c.mustEqual(sumWeights(job_weights), 1);
-          c.mustEqual(job_expirations, 0);
-          c.mustEqual(job_clients.length, 1);
-          job_clients.forEach((id) => c.mustEqual(id, clientId));
-          c.mustEqual(sumWeights(client_running), 1);
-          c.mustEqual(client_num_queued, ["0", "0"]);
-          c.mustEqual(client_last_registered[1], "0");
-          c.mustGt(client_last_seen[1], Date.now() - 1000);
-          var passed = Date.now() - parseFloat(client_last_registered[3]);
-          c.mustGt(passed, 170);
-          c.mustLt(passed, 200);
-
-          c.mustEqual(numExpirations, 4);
+          expect(numExpirations).toEqual(4);
         })
         .then(function () {
           return Promise.all([limiter1.disconnect(false), limiter2.disconnect(false)]);
-        });
+        })
+    );
+  });
+
+  it("Should clear unresponsive clients", async function () {
+    rootLimiter = makeLimiter({
+      id: "unresponsive",
+      maxConcurrent: 1,
+      timeout: 1000,
+      // 500ms gives 10x margin over a typical cleanup cycle while still
+      // being well within the 5s waitFor window. The original 100ms was
+      // too tight for a loaded shared testcontainer and caused rare (~3%)
+      // timeouts when Redis command round-trips briefly delayed the
+      // process_tick clock.
+      clientTimeout: 500,
+      heartbeatInterval: 50,
     });
-
-    it("Should clear unresponsive clients", async function () {
-      c = makeTest({
-        id: "unresponsive",
-        maxConcurrent: 1,
-        timeout: 1000,
-        clientTimeout: 100,
-        heartbeat: 50,
-      });
-      const limiter2 = new Bottleneck({
-        id: "unresponsive",
-        datastore: process.env.DATASTORE,
-      });
-
-      await Promise.all([c.limiter.running(), limiter2.running()]);
-
-      const client_running_key = limiterKeys(limiter2)[4];
-      const client_num_queued_key = limiterKeys(limiter2)[5];
-      const client_last_registered_key = limiterKeys(limiter2)[6];
-      const client_last_seen_key = limiterKeys(limiter2)[7];
-      const numClients = () =>
-        Promise.all([
-          runCommand(c.limiter, "zcard", [client_running_key]),
-          runCommand(c.limiter, "hlen", [client_num_queued_key]),
-          runCommand(c.limiter, "zcard", [client_last_registered_key]),
-          runCommand(c.limiter, "zcard", [client_last_seen_key]),
-        ]);
-
-      c.mustEqual(await numClients(), [2, 2, 2, 2]);
-
-      await limiter2.disconnect(false);
-      await c.wait(150);
-
-      await c.limiter.running();
-
-      c.mustEqual(await numClients(), [1, 1, 1, 1]);
+    // rootLimiter must finish init.lua first so shared settings adopt its
+    // clientTimeout/heartbeatInterval. If limiter2 wins the race with
+    // default options, clientTimeout=10000 and process_tick can't clean
+    // up within the 5s test window.
+    await rootLimiter.ready();
+    const limiter2 = new Bottleneck({
+      id: "unresponsive",
+      datastore: process.env.DATASTORE,
     });
+    await limiter2.ready();
+    await Promise.all([rootLimiter.running(), limiter2.running()]);
 
-    it("Should not clear unresponsive clients with unexpired running jobs", async function () {
-      c = makeTest({
-        id: "unresponsive-unexpired",
-        maxConcurrent: 1,
-        timeout: 1000,
-        clientTimeout: 200,
-        heartbeat: 2000,
-      });
-      const limiter2 = new Bottleneck({
-        id: "unresponsive-unexpired",
-        datastore: process.env.DATASTORE,
-      });
+    const client_running_key = limiterKeys(limiter2)[4];
+    const client_num_queued_key = limiterKeys(limiter2)[5];
+    const client_last_registered_key = limiterKeys(limiter2)[6];
+    const client_last_seen_key = limiterKeys(limiter2)[7];
+    const numClients = () =>
+      Promise.all([
+        runCommand(rootLimiter, "zcard", [client_running_key]),
+        runCommand(rootLimiter, "hlen", [client_num_queued_key]),
+        runCommand(rootLimiter, "zcard", [client_last_registered_key]),
+        runCommand(rootLimiter, "zcard", [client_last_seen_key]),
+      ]);
 
-      await c.limiter.ready();
-      await limiter2.ready();
+    expect(await numClients()).toEqual([2, 2, 2, 2]);
 
-      const client_running_key = limiterKeys(limiter2)[4];
-      const client_num_queued_key = limiterKeys(limiter2)[5];
-      const client_last_registered_key = limiterKeys(limiter2)[6];
-      const client_last_seen_key = limiterKeys(limiter2)[7];
-      const numClients = () =>
-        Promise.all([
-          runCommand(limiter2, "zcard", [client_running_key]),
-          runCommand(limiter2, "hlen", [client_num_queued_key]),
-          runCommand(limiter2, "zcard", [client_last_registered_key]),
-          runCommand(limiter2, "zcard", [client_last_seen_key]),
-        ]);
+    await limiter2.disconnect(false);
 
-      const job = c.limiter.schedule(c.slowPromise, 500, null, 1);
+    // Poll for cleanup. Cleanup happens in process_tick.lua, triggered by
+    // limiter operations. Each poll calls running() which fires process_tick.
+    await waitForState(
+      async function () {
+        await rootLimiter.running();
+        const counts = await numClients();
+        expect(counts[0]).toBe(1);
+        expect(counts[1]).toBe(1);
+        expect(counts[2]).toBe(1);
+        expect(counts[3]).toBe(1);
+      },
+      { timeout: 5000 },
+    );
 
-      await c.wait(300);
+    expect(await numClients()).toEqual([1, 1, 1, 1]);
+  });
 
-      // running() triggers process_tick and that will attempt to remove client 1
-      // but it shouldn't do it because it has a running job
-      c.mustEqual(await limiter2.running(), 1);
+  it("Should not clear unresponsive clients with unexpired running jobs", async function () {
+    const h = createJobHarness();
+    rootLimiter = makeLimiter({
+      id: "unresponsive-unexpired",
+      maxConcurrent: 1,
+      timeout: 1000,
+      clientTimeout: 200,
+      heartbeatInterval: 2000,
+    });
+    // Sequence init so rootLimiter's clientTimeout/heartbeatInterval win over
+    // limiter2's defaults. Constructing limiter2 up-front races init.lua and
+    // settings can adopt the wrong values.
+    await rootLimiter.ready();
+    const limiter2 = new Bottleneck({
+      id: "unresponsive-unexpired",
+      datastore: process.env.DATASTORE,
+    });
+    await limiter2.ready();
 
-      c.mustEqual(await numClients(), [2, 2, 2, 2]);
+    const client_running_key = limiterKeys(limiter2)[4];
+    const client_num_queued_key = limiterKeys(limiter2)[5];
+    const client_last_registered_key = limiterKeys(limiter2)[6];
+    const client_last_seen_key = limiterKeys(limiter2)[7];
+    const numClients = () =>
+      Promise.all([
+        runCommand(limiter2, "zcard", [client_running_key]),
+        runCommand(limiter2, "hlen", [client_num_queued_key]),
+        runCommand(limiter2, "zcard", [client_last_registered_key]),
+        runCommand(limiter2, "zcard", [client_last_seen_key]),
+      ]);
 
+    const job = rootLimiter.schedule(h.slowPromise, 500, null, 1);
+
+    await h.wait(300);
+
+    // running() triggers process_tick and that will attempt to remove client 1
+    // but it shouldn't do it because it has a running job
+    expect(await limiter2.running()).toEqual(1);
+
+    expect(await numClients()).toEqual([2, 2, 2, 2]);
+
+    await job;
+
+    expect(await limiter2.running()).toEqual(0);
+
+    await limiter2.disconnect(false);
+  });
+
+  it("Should clear unresponsive clients after last jobs are expired", async function () {
+    const h = createJobHarness();
+    rootLimiter = makeLimiter({
+      id: "unresponsive-expired",
+      maxConcurrent: 1,
+      timeout: 1000,
+      clientTimeout: 200,
+      heartbeatInterval: 2000,
+    });
+    // Sequence init so rootLimiter's clientTimeout/heartbeatInterval win over
+    // limiter2's defaults.
+    await rootLimiter.ready();
+    const limiter2 = new Bottleneck({
+      id: "unresponsive-expired",
+      datastore: process.env.DATASTORE,
+    });
+    await limiter2.ready();
+
+    const client_running_key = limiterKeys(limiter2)[4];
+    const client_num_queued_key = limiterKeys(limiter2)[5];
+    const client_last_registered_key = limiterKeys(limiter2)[6];
+    const client_last_seen_key = limiterKeys(limiter2)[7];
+    const numClients = () =>
+      Promise.all([
+        runCommand(limiter2, "zcard", [client_running_key]),
+        runCommand(limiter2, "hlen", [client_num_queued_key]),
+        runCommand(limiter2, "zcard", [client_last_registered_key]),
+        runCommand(limiter2, "zcard", [client_last_seen_key]),
+      ]);
+
+    const job = rootLimiter.schedule({ expiration: 250 }, h.slowPromise, 300, null, 1);
+    await h.wait(100); // wait for it to register
+
+    expect(await rootLimiter.running()).toEqual(1);
+    expect(await numClients()).toEqual([2, 2, 2, 2]);
+
+    let dropped = false;
+    try {
       await job;
-
-      c.mustEqual(await limiter2.running(), 0);
-
-      await limiter2.disconnect(false);
-    });
-
-    it("Should clear unresponsive clients after last jobs are expired", async function () {
-      c = makeTest({
-        id: "unresponsive-expired",
-        maxConcurrent: 1,
-        timeout: 1000,
-        clientTimeout: 200,
-        heartbeat: 2000,
-      });
-      const limiter2 = new Bottleneck({
-        id: "unresponsive-expired",
-        datastore: process.env.DATASTORE,
-      });
-
-      await c.limiter.ready();
-      await limiter2.ready();
-
-      const client_running_key = limiterKeys(limiter2)[4];
-      const client_num_queued_key = limiterKeys(limiter2)[5];
-      const client_last_registered_key = limiterKeys(limiter2)[6];
-      const client_last_seen_key = limiterKeys(limiter2)[7];
-      const numClients = () =>
-        Promise.all([
-          runCommand(limiter2, "zcard", [client_running_key]),
-          runCommand(limiter2, "hlen", [client_num_queued_key]),
-          runCommand(limiter2, "zcard", [client_last_registered_key]),
-          runCommand(limiter2, "zcard", [client_last_seen_key]),
-        ]);
-
-      const job = c.limiter.schedule({ expiration: 250 }, c.slowPromise, 300, null, 1);
-      await c.wait(100); // wait for it to register
-
-      c.mustEqual(await c.limiter.running(), 1);
-      c.mustEqual(await numClients(), [2, 2, 2, 2]);
-
-      let dropped = false;
-      try {
-        await job;
-      } catch (e) {
-        if (e.message === "This job timed out after 250 ms.") {
-          dropped = true;
-        } else {
-          throw e;
-        }
+    } catch (e) {
+      if (e.message === "This job timed out after 250 ms.") {
+        dropped = true;
+      } else {
+        throw e;
       }
-      assert(dropped, "Expected dropped to be true");
+    }
+    assert(dropped, "Expected dropped to be true");
 
-      await c.wait(200);
+    // Cleanup happens in process_tick.lua, triggered by limiter operations.
+    // Poll instead of relying on a fixed wait — under load the cleanup might
+    // need more than 200ms wall-clock, and a fixed wait either fails (too short)
+    // or wastes time (too long). Each poll calls running() which fires process_tick.
+    await waitForState(
+      async function () {
+        await limiter2.running();
+        const counts = await numClients();
+        expect(counts[0]).toBe(1);
+        expect(counts[1]).toBe(1);
+        expect(counts[2]).toBe(1);
+        expect(counts[3]).toBe(1);
+      },
+      { timeout: 5000 },
+    );
 
-      c.mustEqual(await limiter2.running(), 0);
-      c.mustEqual(await numClients(), [1, 1, 1, 1]);
+    expect(await limiter2.running()).toEqual(0);
+    expect(await numClients()).toEqual([1, 1, 1, 1]);
 
-      await limiter2.disconnect(false);
-    });
+    await limiter2.disconnect(false);
+  });
 
-    it("Should use shared settings", function () {
-      c = makeTest({ maxConcurrent: 2 });
-      var limiter2 = new Bottleneck({ maxConcurrent: 1, datastore: process.env.DATASTORE });
+  it("Should use shared settings", function () {
+    const h = createJobHarness();
+    rootLimiter = makeLimiter({ maxConcurrent: 2 });
+    let limiter2;
+    const settings_key = limiterKeys(rootLimiter)[0];
 
-      return Promise.all([
-        limiter2.schedule(c.slowPromise, 100, null, 1),
-        limiter2.schedule(c.slowPromise, 100, null, 2),
-      ])
-        .then(function () {
-          return limiter2.disconnect(false);
-        })
-        .then(function () {
-          return c.last();
-        })
-        .then(function (_results) {
-          c.checkResultsOrder([[1], [2]]);
-          c.checkDuration(100);
-        });
-    });
-
-    it("Should clear previous settings", function () {
-      c = makeTest({ maxConcurrent: 2 });
-      var limiter2;
-
-      return c.limiter
-        .ready()
-        .then(function () {
-          limiter2 = new Bottleneck({
-            maxConcurrent: 1,
-            datastore: process.env.DATASTORE,
-            clearDatastore: true,
-          });
-          return limiter2.ready();
-        })
-        .then(function () {
-          return Promise.all([
-            c.limiter.schedule(c.slowPromise, 100, null, 1),
-            c.limiter.schedule(c.slowPromise, 100, null, 2),
-          ]);
-        })
-        .then(function () {
-          return limiter2.disconnect(false);
-        })
-        .then(function () {
-          return c.last();
-        })
-        .then(function (_results) {
-          c.checkResultsOrder([[1], [2]]);
-          c.checkDuration(200);
-        });
-    });
-
-    it("Should safely handle connection failures", function () {
-      // node-redis v4+ uses a nested socket option shape; ioredis stays flat.
-      var failingOptions =
-        process.env.DATASTORE === "redis"
-          ? { socket: { port: 1, reconnectStrategy: () => false } }
-          : { port: 1 };
-      c = makeTest({
-        clientOptions: failingOptions,
-        errorEventsExpected: true,
-      });
-
-      return new Promise(function (resolve, reject) {
-        c.limiter.on("error", function (err) {
-          c.mustExist(err);
-          resolve();
-        });
-
-        c.limiter
-          .ready()
-          .then(function () {
-            reject(new Error("Should not have connected"));
-          })
-          .catch(function (err) {
-            reject(err);
-          });
-      });
-    });
-
-    it("Should chain local and distributed limiters (total concurrency)", function () {
-      c = makeTest({ id: "limiter1", maxConcurrent: 3 });
-      var limiter2 = new Bottleneck({ id: "limiter2", maxConcurrent: 1 });
-      var limiter3 = new Bottleneck({ id: "limiter3", maxConcurrent: 2 });
-
-      limiter2.on("error", (err) => console.log(err));
-
-      limiter2.chain(c.limiter);
-      limiter3.chain(c.limiter);
-
-      return Promise.all([
-        limiter2.schedule(c.slowPromise, 100, null, 1),
-        limiter2.schedule(c.slowPromise, 100, null, 2),
-        limiter2.schedule(c.slowPromise, 100, null, 3),
-        limiter3.schedule(c.slowPromise, 100, null, 4),
-        limiter3.schedule(c.slowPromise, 100, null, 5),
-        limiter3.schedule(c.slowPromise, 100, null, 6),
-      ])
-        .then(c.last)
-        .then(function (results) {
-          c.checkDuration(300);
-          c.checkResultsOrder([[1], [4], [5], [2], [6], [3]]);
-
-          c.mustGte(results.calls[0].time, 100);
-          c.mustLt(results.calls[0].time, 200);
-          c.mustGte(results.calls[1].time, 100);
-          c.mustLt(results.calls[1].time, 200);
-          c.mustGte(results.calls[2].time, 100);
-          c.mustLt(results.calls[2].time, 200);
-
-          c.mustGte(results.calls[3].time, 200);
-          c.mustLt(results.calls[3].time, 300);
-          c.mustGte(results.calls[4].time, 200);
-          c.mustLt(results.calls[4].time, 300);
-
-          c.mustGte(results.calls[5].time, 300);
-          c.mustLt(results.calls[5].time, 400);
-        });
-    });
-
-    it("Should chain local and distributed limiters (partial concurrency)", function () {
-      c = makeTest({ maxConcurrent: 2 });
-      var limiter2 = new Bottleneck({ maxConcurrent: 1 });
-      var limiter3 = new Bottleneck({ maxConcurrent: 2 });
-
-      limiter2.chain(c.limiter);
-      limiter3.chain(c.limiter);
-
-      return Promise.all([
-        limiter2.schedule(c.slowPromise, 100, null, 1),
-        limiter2.schedule(c.slowPromise, 100, null, 2),
-        limiter2.schedule(c.slowPromise, 100, null, 3),
-        limiter3.schedule(c.slowPromise, 100, null, 4),
-        limiter3.schedule(c.slowPromise, 100, null, 5),
-        limiter3.schedule(c.slowPromise, 100, null, 6),
-      ])
-        .then(c.last)
-        .then(function (results) {
-          c.checkDuration(300);
-          c.checkResultsOrder([[1], [4], [5], [2], [6], [3]]);
-
-          c.mustGte(results.calls[0].time, 100);
-          c.mustLt(results.calls[0].time, 200);
-          c.mustGte(results.calls[1].time, 100);
-          c.mustLt(results.calls[1].time, 200);
-
-          c.mustGte(results.calls[2].time, 200);
-          c.mustLt(results.calls[2].time, 300);
-          c.mustGte(results.calls[3].time, 200);
-          c.mustLt(results.calls[3].time, 300);
-
-          c.mustGte(results.calls[4].time, 300);
-          c.mustLt(results.calls[4].time, 400);
-          c.mustGte(results.calls[5].time, 300);
-          c.mustLt(results.calls[5].time, 400);
-        });
-    });
-
-    it("Should use the limiter ID to build Redis keys", function () {
-      c = makeTest();
-      var randomId = c.limiter._randomIndex();
-      var limiter = new Bottleneck({
-        id: randomId,
-        datastore: process.env.DATASTORE,
-        clearDatastore: true,
-      });
-
-      return limiter
-        .ready()
-        .then(function () {
-          var keys = limiterKeys(limiter);
-          keys.forEach((key) => c.mustGt(key.indexOf(randomId), 0));
-          return deleteKeys(limiter);
-        })
-        .then(function (deleted) {
-          c.mustEqual(deleted, 5);
-          return limiter.disconnect(false);
-        });
-    });
-
-    it("Should not fail when Redis data is missing", function () {
-      c = makeTest();
-      var limiter = new Bottleneck({ datastore: process.env.DATASTORE, clearDatastore: true });
-
-      return limiter
-        .running()
-        .then(function (running) {
-          c.mustEqual(running, 0);
-          return deleteKeys(limiter);
-        })
-        .then(function (deleted) {
-          c.mustEqual(deleted, 5);
-          return countKeys(limiter);
-        })
-        .then(function (count) {
-          c.mustEqual(count, 0);
-          return limiter.running();
-        })
-        .then(function (running) {
-          c.mustEqual(running, 0);
-          return countKeys(limiter);
-        })
-        .then(function (count) {
-          c.mustGt(count, 0);
-          return limiter.disconnect(false);
-        });
-    });
-
-    it("Should drop all jobs in the Cluster when entering blocked mode", function () {
-      c = makeTest();
-      var limiter1 = new Bottleneck({
-        id: "blocked",
-        trackDoneStatus: true,
-        datastore: process.env.DATASTORE,
-        clearDatastore: true,
-
-        maxConcurrent: 1,
-        minTime: 50,
-        highWater: 2,
-        strategy: Bottleneck.strategy.BLOCK,
-      });
-      var limiter2;
-      var client_num_queued_key = limiterKeys(limiter1)[5];
-
-      return limiter1
-        .ready()
-        .then(function () {
-          limiter2 = new Bottleneck({
-            id: "blocked",
-            trackDoneStatus: true,
-            datastore: process.env.DATASTORE,
-            clearDatastore: false,
-          });
-          return limiter2.ready();
-        })
-        .then(function () {
-          return Promise.all([
-            limiter1.submit(c.slowJob, 100, null, 1, c.noErrVal(1)),
-            limiter1.submit(c.slowJob, 100, null, 2, (err) => c.mustExist(err)),
-          ]);
-        })
-        .then(function () {
-          return Promise.all([
-            limiter2.submit(c.slowJob, 100, null, 3, (err) => c.mustExist(err)),
-            limiter2.submit(c.slowJob, 100, null, 4, (err) => c.mustExist(err)),
-            limiter2.submit(c.slowJob, 100, null, 5, (err) => c.mustExist(err)),
-          ]);
-        })
-        .then(function () {
-          return runCommand(limiter1, "hvals", [client_num_queued_key]);
-        })
-        .then(function (queues) {
-          c.mustEqual(queues, ["0", "0"]);
-
-          return Promise.all([c.limiter.clusterQueued(), limiter2.clusterQueued()]);
-        })
-        .then(function (queues) {
-          c.mustEqual(queues, [0, 0]);
-
-          return c.wait(100);
-        })
-        .then(function () {
-          var counts1 = limiter1.counts();
-          c.mustEqual(counts1.RECEIVED, 0);
-          c.mustEqual(counts1.QUEUED, 0);
-          c.mustEqual(counts1.RUNNING, 0);
-          c.mustEqual(counts1.EXECUTING, 0);
-          c.mustEqual(counts1.DONE, 1);
-
-          var counts2 = limiter2.counts();
-          c.mustEqual(counts2.RECEIVED, 0);
-          c.mustEqual(counts2.QUEUED, 0);
-          c.mustEqual(counts2.RUNNING, 0);
-          c.mustEqual(counts2.EXECUTING, 0);
-          c.mustEqual(counts2.DONE, 0);
-
-          return c.last();
-        })
-        .then(function (_results) {
-          c.checkResultsOrder([[1]]);
-          c.checkDuration(100);
-
-          return Promise.all([limiter1.disconnect(false), limiter2.disconnect(false)]);
-        });
-    });
-
-    it("Should pass messages to all limiters in Cluster", function (done) {
-      c = makeTest({
-        maxConcurrent: 1,
-        minTime: 100,
-        id: "super-duper",
-      });
-      var limiter1 = new Bottleneck({
-        maxConcurrent: 1,
-        minTime: 100,
-        id: "super-duper",
-        datastore: process.env.DATASTORE,
-      });
-      var limiter2 = new Bottleneck({
-        maxConcurrent: 1,
-        minTime: 100,
-        id: "nope",
-        datastore: process.env.DATASTORE,
-      });
-      var received = [];
-
-      c.limiter.on("message", (msg) => {
-        received.push(1, msg);
-      });
-      limiter1.on("message", (msg) => {
-        received.push(2, msg);
-      });
-      limiter2.on("message", (msg) => {
-        received.push(3, msg);
-      });
-
-      Promise.all([c.limiter.ready(), limiter2.ready()]).then(function () {
-        limiter1.publish(555);
-      });
-
-      setTimeout(function () {
-        limiter1.disconnect();
-        limiter2.disconnect();
-        c.mustEqual(received.sort(), [1, 2, "555", "555"]);
-        done();
-      }, 150);
-    });
-
-    it("Should pass messages to correct limiter after Group re-instantiations", function () {
-      c = makeTest();
-      var group = new Bottleneck.Group({
-        maxConcurrent: 1,
-        minTime: 100,
-        datastore: process.env.DATASTORE,
-      });
-      var received = [];
-
-      return new Promise(function (resolve, _reject) {
-        var limiter = group.key("A");
-
-        limiter.on("message", function (msg) {
-          received.push("1", msg);
-          return resolve();
-        });
-        limiter.publish("Bonjour!");
+    // rootLimiter must finish init.lua first so it owns the initial settings;
+    // limiter2 then attaches without `clearDatastore`, so its constructor
+    // values must be ignored in favor of the shared settings. Constructing
+    // both up-front and using Promise.all races init.lua executions and
+    // produces flaky reads.
+    return rootLimiter
+      .ready()
+      .then(function () {
+        limiter2 = new Bottleneck({ maxConcurrent: 1, datastore: process.env.DATASTORE });
+        return limiter2.ready();
       })
-        .then(function () {
-          return new Promise(function (resolve, _reject) {
-            var limiter = group.key("B");
+      .then(function () {
+        return runCommand(rootLimiter, "hget", [settings_key, "maxConcurrent"]);
+      })
+      .then(function (maxConcurrent) {
+        expect(maxConcurrent).toEqual("2");
+        return Promise.all([
+          limiter2.schedule(h.slowPromise, 100, null, 1),
+          limiter2.schedule(h.slowPromise, 100, null, 2),
+        ]);
+      })
+      .then(function () {
+        return limiter2.disconnect(false);
+      })
+      .then(function () {
+        return h.flushLimiter(rootLimiter);
+      })
+      .then(function (_results) {
+        h.checkResultsOrder([[1], [2]]);
+      });
+  });
 
-            limiter.on("message", function (msg) {
-              received.push("2", msg);
-              return resolve();
-            });
-            limiter.publish("Comment allez-vous?");
-          });
-        })
-        .then(function () {
-          return group.deleteKey("A");
-        })
-        .then(function () {
-          return new Promise(function (resolve, _reject) {
-            var limiter = group.key("A");
+  it("Should clear previous settings", function () {
+    const h = createJobHarness();
+    rootLimiter = makeLimiter({ maxConcurrent: 2 });
+    let limiter2;
+    const settings_key = limiterKeys(rootLimiter)[0];
 
-            limiter.on("message", function (msg) {
-              received.push("3", msg);
-              return resolve();
-            });
-            limiter.publish("Au revoir!");
-          });
-        })
-        .then(function () {
-          c.mustEqual(received, ["1", "Bonjour!", "2", "Comment allez-vous?", "3", "Au revoir!"]);
-          group.disconnect();
+    return rootLimiter
+      .ready()
+      .then(function () {
+        limiter2 = new Bottleneck({
+          maxConcurrent: 1,
+          datastore: process.env.DATASTORE,
+          clearDatastore: true,
         });
-    });
+        return limiter2.ready();
+      })
+      .then(function () {
+        // Verify the actual cleared setting in redis directly — this is the
+        // contract being tested. Avoids dependence on slowPromise wall-clock
+        // timing which can slip under load (event-loop delay, GC, redis stalls).
+        return runCommand(rootLimiter, "hget", [settings_key, "maxConcurrent"]);
+      })
+      .then(function (maxConcurrent) {
+        expect(maxConcurrent).toEqual("1");
+        return Promise.all([
+          rootLimiter.schedule(h.slowPromise, 100, null, 1),
+          rootLimiter.schedule(h.slowPromise, 100, null, 2),
+        ]);
+      })
+      .then(function () {
+        return limiter2.disconnect(false);
+      })
+      .then(function () {
+        return h.flushLimiter(rootLimiter);
+      })
+      .then(function (_results) {
+        h.checkResultsOrder([[1], [2]]);
+      });
+  });
 
-    it("Should have a default key TTL when using Groups", function () {
-      c = makeTest();
-      var group = new Bottleneck.Group({
-        datastore: process.env.DATASTORE,
+  it("Should safely handle connection failures", function () {
+    expect.hasAssertions();
+    // node-redis v4+ uses a nested socket option shape; ioredis stays flat.
+    const failingOptions =
+      process.env.DATASTORE === "redis"
+        ? { socket: { port: 1, reconnectStrategy: () => false } }
+        : { port: 1 };
+    rootLimiter = makeLimiter({ clientOptions: failingOptions }, { expectErrors: true });
+
+    return new Promise(function (resolve, reject) {
+      rootLimiter.on("error", function (err) {
+        expect(err).toBeTruthy();
+        resolve();
       });
 
-      return group
-        .key("one")
-        .ready()
-        .then(function () {
-          var limiter = group.key("one");
-          var settings_key = limiterKeys(limiter)[0];
-          return runCommand(limiter, "ttl", [settings_key]);
-        })
-        .then(function (ttl) {
-          c.mustGte(ttl, 290);
-          c.mustLte(ttl, 305);
-        })
-        .then(function () {
-          return group.disconnect(false);
-        });
-    });
-
-    it("Should support Groups and expire Redis keys", function () {
-      c = makeTest();
-      var group = new Bottleneck.Group({
-        datastore: process.env.DATASTORE,
-        clearDatastore: true,
-        minTime: 50,
-        timeout: 200,
-      });
-      var limiter1;
-      var limiter2;
-      var limiter3;
-
-      var t0 = Date.now();
-      var results = {};
-      var job = function (x) {
-        results[x] = Date.now() - t0;
-        return Promise.resolve();
-      };
-
-      return c.limiter
-        .ready()
-        .then(function () {
-          limiter1 = group.key("one");
-          limiter2 = group.key("two");
-          limiter3 = group.key("three");
-
-          return Promise.all([limiter1.ready(), limiter2.ready(), limiter3.ready()]);
-        })
-        .then(function () {
-          return Promise.all([countKeys(limiter1), countKeys(limiter2), countKeys(limiter3)]);
-        })
-        .then(function (counts) {
-          c.mustEqual(counts, [5, 5, 5]);
-          return Promise.all([
-            limiter1.schedule(job, "a"),
-            limiter1.schedule(job, "b"),
-            limiter1.schedule(job, "c"),
-            limiter2.schedule(job, "d"),
-            limiter2.schedule(job, "e"),
-            limiter3.schedule(job, "f"),
-          ]);
-        })
-        .then(function () {
-          c.mustEqual(Object.keys(results).length, 6);
-          c.mustLt(results.a, results.b);
-          c.mustLt(results.b, results.c);
-          c.mustGte(results.b - results.a, 40);
-          c.mustGte(results.c - results.b, 40);
-
-          c.mustLt(results.d, results.e);
-          c.mustGte(results.e - results.d, 40);
-
-          c.mustLte(Math.abs(results.a - results.d), 10);
-          c.mustLte(Math.abs(results.d - results.f), 10);
-          c.mustLte(Math.abs(results.b - results.e), 10);
-
-          return c.wait(400);
-        })
-        .then(function () {
-          return Promise.all([countKeys(limiter1), countKeys(limiter2), countKeys(limiter3)]);
-        })
-        .then(function (counts) {
-          c.mustEqual(counts, [0, 0, 0]);
-          c.mustEqual(group.keys().length, 0);
-          c.mustEqual(Object.keys(group.connection.limiters).length, 0);
-          return group.disconnect(false);
-        });
-    });
-
-    it("Should not recreate a key when running heartbeat", function () {
-      c = makeTest();
-      var group = new Bottleneck.Group({
-        datastore: process.env.DATASTORE,
-        clearDatastore: true,
-        maxConcurrent: 50,
-        minTime: 50,
-        timeout: 300,
-        heartbeatInterval: 5,
-      });
-      var key = "heartbeat";
-
-      var limiter = group.key(key);
-      return c
-        .pNoErrVal(limiter.schedule(c.promise, null, 1), 1)
-        .then(function () {
-          return limiter.done();
-        })
-        .then(function (done) {
-          c.mustEqual(done, 1);
-          return c.wait(400);
-        })
-        .then(function () {
-          return countKeys(limiter);
-        })
-        .then(function (count) {
-          c.mustEqual(count, 0);
-          return group.disconnect(false);
-        });
-    });
-
-    it("Should delete Redis key when manually deleting a group key", function () {
-      c = makeTest();
-      var group1 = new Bottleneck.Group({
-        datastore: process.env.DATASTORE,
-        clearDatastore: true,
-        maxConcurrent: 50,
-        minTime: 50,
-        timeout: 300,
-      });
-      var group2 = new Bottleneck.Group({
-        datastore: process.env.DATASTORE,
-        clearDatastore: true,
-        maxConcurrent: 50,
-        minTime: 50,
-        timeout: 300,
-      });
-      var key = "deleted";
-      var limiter = group1.key(key); // only for countKeys() use
-
-      return c
-        .pNoErrVal(group1.key(key).schedule(c.promise, null, 1), 1)
-        .then(function () {
-          return c.pNoErrVal(group2.key(key).schedule(c.promise, null, 2), 2);
-        })
-        .then(function () {
-          c.mustEqual(group1.keys().length, 1);
-          c.mustEqual(group2.keys().length, 1);
-          return group1.deleteKey(key);
-        })
-        .then(function (deleted) {
-          c.mustEqual(deleted, true);
-          return countKeys(limiter);
-        })
-        .then(function (count) {
-          c.mustEqual(count, 0);
-          c.mustEqual(group1.keys().length, 0);
-          c.mustEqual(group2.keys().length, 1);
-          return c.wait(200);
-        })
-        .then(function () {
-          c.mustEqual(group1.keys().length, 0);
-          c.mustEqual(group2.keys().length, 0);
-          return Promise.all([group1.disconnect(false), group2.disconnect(false)]);
-        });
-    });
-
-    it("Should delete Redis keys from a group even when the local limiter is not present", function () {
-      c = makeTest();
-      var group1 = new Bottleneck.Group({
-        datastore: process.env.DATASTORE,
-        clearDatastore: true,
-        maxConcurrent: 50,
-        minTime: 50,
-        timeout: 300,
-      });
-      var group2 = new Bottleneck.Group({
-        datastore: process.env.DATASTORE,
-        clearDatastore: true,
-        maxConcurrent: 50,
-        minTime: 50,
-        timeout: 300,
-      });
-      var key = "deleted-cluster-wide";
-      var limiter = group1.key(key); // only for countKeys() use
-
-      return c
-        .pNoErrVal(group1.key(key).schedule(c.promise, null, 1), 1)
-        .then(function () {
-          c.mustEqual(group1.keys().length, 1);
-          c.mustEqual(group2.keys().length, 0);
-          return group2.deleteKey(key);
-        })
-        .then(function (deleted) {
-          c.mustEqual(deleted, true);
-          return countKeys(limiter);
-        })
-        .then(function (count) {
-          c.mustEqual(count, 0);
-          c.mustEqual(group1.keys().length, 1);
-          c.mustEqual(group2.keys().length, 0);
-          return c.wait(200);
-        })
-        .then(function () {
-          c.mustEqual(group1.keys().length, 0);
-          c.mustEqual(group2.keys().length, 0);
-          return Promise.all([group1.disconnect(false), group2.disconnect(false)]);
-        });
-    });
-
-    it("Should returns all Group keys in the cluster", async function () {
-      c = makeTest();
-      var group1 = new Bottleneck.Group({
-        datastore: process.env.DATASTORE,
-        clearDatastore: true,
-        id: "same",
-        timeout: 3000,
-      });
-      var group2 = new Bottleneck.Group({
-        datastore: process.env.DATASTORE,
-        clearDatastore: true,
-        id: "same",
-        timeout: 3000,
-      });
-      var keys1 = ["lorem", "ipsum", "dolor", "sit", "amet", "consectetur"];
-      var keys2 = ["adipiscing", "elit"];
-      var both = keys1.concat(keys2);
-
-      await Promise.all(keys1.map((k) => group1.key(k).ready()));
-      await Promise.all(keys2.map((k) => group2.key(k).ready()));
-
-      c.mustEqual(group1.keys().sort(), keys1.sort());
-      c.mustEqual(group2.keys().sort(), keys2.sort());
-      c.mustEqual((await group1.clusterKeys()).sort(), both.sort());
-      c.mustEqual((await group1.clusterKeys()).sort(), both.sort());
-
-      var group3 = new Bottleneck.Group({ datastore: "local" });
-      c.mustEqual(await group3.clusterKeys(), []);
-
-      await group1.disconnect(false);
-      await group2.disconnect(false);
-    });
-
-    it("Should queue up the least busy limiter", async function () {
-      c = makeTest();
-      var limiter1 = new Bottleneck({
-        datastore: process.env.DATASTORE,
-        clearDatastore: true,
-        id: "busy",
-        timeout: 3000,
-        maxConcurrent: 3,
-        trackDoneStatus: true,
-      });
-      var limiter2 = new Bottleneck({
-        datastore: process.env.DATASTORE,
-        clearDatastore: true,
-        id: "busy",
-        timeout: 3000,
-        maxConcurrent: 3,
-        trackDoneStatus: true,
-      });
-      var limiter3 = new Bottleneck({
-        datastore: process.env.DATASTORE,
-        clearDatastore: true,
-        id: "busy",
-        timeout: 3000,
-        maxConcurrent: 3,
-        trackDoneStatus: true,
-      });
-      var limiter4 = new Bottleneck({
-        datastore: process.env.DATASTORE,
-        clearDatastore: true,
-        id: "busy",
-        timeout: 3000,
-        maxConcurrent: 3,
-        trackDoneStatus: true,
-      });
-      var runningOrExecuting = function (limiter) {
-        var counts = limiter.counts();
-        return counts.RUNNING + counts.EXECUTING;
-      };
-
-      var resolve1, resolve2, resolve3, resolve4, resolve5, resolve6, resolve7;
-      var p1 = new Promise(function (resolve, _reject) {
-        resolve1 = function (_err, n) {
-          resolve(n);
-        };
-      });
-      var p2 = new Promise(function (resolve, _reject) {
-        resolve2 = function (_err, n) {
-          resolve(n);
-        };
-      });
-      var p3 = new Promise(function (resolve, _reject) {
-        resolve3 = function (_err, n) {
-          resolve(n);
-        };
-      });
-      var p4 = new Promise(function (resolve, _reject) {
-        resolve4 = function (_err, n) {
-          resolve(n);
-        };
-      });
-      var p5 = new Promise(function (resolve, _reject) {
-        resolve5 = function (_err, n) {
-          resolve(n);
-        };
-      });
-      var p6 = new Promise(function (resolve, _reject) {
-        resolve6 = function (_err, n) {
-          resolve(n);
-        };
-      });
-      var p7 = new Promise(function (resolve, _reject) {
-        resolve7 = function (_err, n) {
-          resolve(n);
-        };
-      });
-
-      await limiter1.schedule({ id: "1" }, c.promise, null, "A");
-      await limiter2.schedule({ id: "2" }, c.promise, null, "B");
-      await limiter3.schedule({ id: "3" }, c.promise, null, "C");
-      await limiter4.schedule({ id: "4" }, c.promise, null, "D");
-
-      await limiter1.submit({ id: "A" }, c.slowJob, 50, null, 1, resolve1);
-      await limiter1.submit({ id: "B" }, c.slowJob, 500, null, 2, resolve2);
-      await limiter2.submit({ id: "C" }, c.slowJob, 550, null, 3, resolve3);
-
-      c.mustEqual(runningOrExecuting(limiter1), 2);
-      c.mustEqual(runningOrExecuting(limiter2), 1);
-
-      await limiter3.submit({ id: "D" }, c.slowJob, 50, null, 4, resolve4);
-      await limiter4.submit({ id: "E" }, c.slowJob, 50, null, 5, resolve5);
-      await limiter3.submit({ id: "F" }, c.slowJob, 50, null, 6, resolve6);
-      await limiter4.submit({ id: "G" }, c.slowJob, 50, null, 7, resolve7);
-
-      c.mustEqual(limiter3.counts().QUEUED, 2);
-      c.mustEqual(limiter4.counts().QUEUED, 2);
-
-      await Promise.all([p1, p2, p3, p4, p5, p6, p7]);
-
-      c.checkResultsOrder([["A"], ["B"], ["C"], ["D"], [1], [4], [5], [6], [7], [2], [3]]);
-
-      await limiter1.disconnect(false);
-      await limiter2.disconnect(false);
-      await limiter3.disconnect(false);
-      await limiter4.disconnect(false);
-    });
-
-    it("Should pass the remaining capacity to other limiters", async function () {
-      c = makeTest();
-      var limiter1 = new Bottleneck({
-        datastore: process.env.DATASTORE,
-        clearDatastore: true,
-        id: "busy",
-        timeout: 3000,
-        maxConcurrent: 3,
-        trackDoneStatus: true,
-      });
-      var limiter2 = new Bottleneck({
-        datastore: process.env.DATASTORE,
-        clearDatastore: true,
-        id: "busy",
-        timeout: 3000,
-        maxConcurrent: 3,
-        trackDoneStatus: true,
-      });
-      var limiter3 = new Bottleneck({
-        datastore: process.env.DATASTORE,
-        clearDatastore: true,
-        id: "busy",
-        timeout: 3000,
-        maxConcurrent: 3,
-        trackDoneStatus: true,
-      });
-      var limiter4 = new Bottleneck({
-        datastore: process.env.DATASTORE,
-        clearDatastore: true,
-        id: "busy",
-        timeout: 3000,
-        maxConcurrent: 3,
-        trackDoneStatus: true,
-      });
-      var runningOrExecuting = function (limiter) {
-        var counts = limiter.counts();
-        return counts.RUNNING + counts.EXECUTING;
-      };
-      var t3, t4;
-
-      var resolve1, resolve2, resolve3, resolve4, resolve5;
-      var p1 = new Promise(function (resolve, _reject) {
-        resolve1 = function (_err, n) {
-          resolve(n);
-        };
-      });
-      var p2 = new Promise(function (resolve, _reject) {
-        resolve2 = function (_err, n) {
-          resolve(n);
-        };
-      });
-      var p3 = new Promise(function (resolve, _reject) {
-        resolve3 = function (_err, n) {
-          t3 = Date.now();
-          resolve(n);
-        };
-      });
-      var p4 = new Promise(function (resolve, _reject) {
-        resolve4 = function (_err, n) {
-          t4 = Date.now();
-          resolve(n);
-        };
-      });
-      var p5 = new Promise(function (resolve, _reject) {
-        resolve5 = function (_err, n) {
-          resolve(n);
-        };
-      });
-
-      await limiter1.schedule({ id: "1" }, c.promise, null, "A");
-      await limiter2.schedule({ id: "2" }, c.promise, null, "B");
-      await limiter3.schedule({ id: "3" }, c.promise, null, "C");
-      await limiter4.schedule({ id: "4" }, c.promise, null, "D");
-
-      await limiter1.submit({ id: "A", weight: 2 }, c.slowJob, 50, null, 1, resolve1);
-      await limiter2.submit({ id: "C" }, c.slowJob, 550, null, 2, resolve2);
-
-      c.mustEqual(runningOrExecuting(limiter1), 1);
-      c.mustEqual(runningOrExecuting(limiter2), 1);
-
-      await limiter3.submit({ id: "D" }, c.slowJob, 50, null, 3, resolve3);
-      await limiter4.submit({ id: "E" }, c.slowJob, 50, null, 4, resolve4);
-      await limiter4.submit({ id: "G" }, c.slowJob, 50, null, 5, resolve5);
-
-      c.mustEqual(limiter3.counts().QUEUED, 1);
-      c.mustEqual(limiter4.counts().QUEUED, 2);
-
-      await Promise.all([p1, p2, p3, p4, p5]);
-
-      c.checkResultsOrder([["A"], ["B"], ["C"], ["D"], [1], [3], [4], [5], [2]]);
-
-      c.mustLt(Math.abs(t3 - t4), 15);
-
-      await limiter1.disconnect(false);
-      await limiter2.disconnect(false);
-      await limiter3.disconnect(false);
-      await limiter4.disconnect(false);
-    });
-
-    it("Should take the capacity and blacklist if the priority limiter is not responding", async function () {
-      c = makeTest();
-      var limiter1 = new Bottleneck({
-        datastore: process.env.DATASTORE,
-        clearDatastore: true,
-        id: "crash",
-        timeout: 3000,
-        maxConcurrent: 1,
-        trackDoneStatus: true,
-      });
-      var limiter2 = new Bottleneck({
-        datastore: process.env.DATASTORE,
-        clearDatastore: true,
-        id: "crash",
-        timeout: 3000,
-        maxConcurrent: 1,
-        trackDoneStatus: true,
-      });
-      var limiter3 = new Bottleneck({
-        datastore: process.env.DATASTORE,
-        clearDatastore: true,
-        id: "crash",
-        timeout: 3000,
-        maxConcurrent: 1,
-        trackDoneStatus: true,
-      });
-
-      await limiter1.schedule({ id: "1" }, c.promise, null, "A");
-      await limiter2.schedule({ id: "2" }, c.promise, null, "B");
-      await limiter3.schedule({ id: "3" }, c.promise, null, "C");
-
-      var resolve1, resolve2, resolve3;
-      var p1 = new Promise(function (resolve, _reject) {
-        resolve1 = function (_err, n) {
-          resolve(n);
-        };
-      });
-      new Promise(function (resolve, _reject) {
-        resolve2 = function (_err, n) {
-          resolve(n);
-        };
-      });
-      var p3 = new Promise(function (resolve, _reject) {
-        resolve3 = function (_err, n) {
-          resolve(n);
-        };
-      });
-
-      await limiter1.submit({ id: "4" }, c.slowJob, 100, null, 4, resolve1);
-      await limiter2.submit({ id: "5" }, c.slowJob, 100, null, 5, resolve2);
-      await limiter3.submit({ id: "6" }, c.slowJob, 100, null, 6, resolve3);
-      await limiter2.disconnect(false);
-
-      await Promise.all([p1, p3]);
-      c.checkResultsOrder([["A"], ["B"], ["C"], [4], [6]]);
-
-      await limiter1.disconnect(false);
-      await limiter2.disconnect(false);
-      await limiter3.disconnect(false);
+      rootLimiter.ready().then(
+        function () {
+          reject(new Error("Should not have connected"));
+        },
+        function () {
+          /* node-redis/ioredis may reject ready(); the limiter "error" event is authoritative */
+        },
+      );
     });
   });
-}
+});

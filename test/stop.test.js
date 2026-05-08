@@ -1,209 +1,189 @@
-const { describe, it, afterEach } = require("mocha");
-const makeTest = require("./context");
+import { describe, it, afterEach, expect } from "vitest";
+import { createJobHarness } from "./helpers/job-tracking.js";
+import { waitForState } from "./helpers/wait-for-state.js";
+const makeLimiter = require("./helpers/limiter");
 
 describe("Stop", function () {
-  var c;
+  let limiter;
 
   afterEach(function () {
-    return c.limiter.disconnect(false);
+    if (limiter == null) return;
+    return limiter.disconnect(false);
   });
 
-  it("Should stop and drop the queue", function (done) {
-    c = makeTest({
+  it("Should stop and drop the queue", async function () {
+    const h = createJobHarness();
+    limiter = makeLimiter({
       maxConcurrent: 2,
       minTime: 100,
       trackDoneStatus: true,
     });
-    var submitFailed = false;
-    var queuedDropped = false;
-    var scheduledDropped = false;
-    var dropped = 0;
+    let dropped = 0;
 
-    c.limiter.on("dropped", function () {
+    limiter.on("dropped", function () {
       dropped++;
     });
 
-    c.pNoErrVal(c.limiter.schedule({ id: "0" }, c.promise, null, 0), 0);
+    h.pNoErrVal(limiter.schedule({ id: "0" }, h.promise, null, 0), 0);
 
-    c.pNoErrVal(c.limiter.schedule({ id: "1" }, c.slowPromise, 100, null, 1), 1);
+    h.pNoErrVal(limiter.schedule({ id: "1" }, h.slowPromise, 500, null, 1), 1);
 
-    c.limiter.schedule({ id: "2" }, c.promise, null, 2).catch(function (err) {
-      c.mustEqual(err.message, "Dropped!");
-      scheduledDropped = true;
+    const scheduledDroppedJob = limiter.schedule({ id: "2" }, h.promise, null, 2);
+    const queuedDroppedJob = limiter.schedule({ id: "3" }, h.promise, null, 3);
+
+    await waitForState(() => {
+      const counts = limiter.counts();
+      expect(counts.RECEIVED).toBe(0);
+      expect(counts.QUEUED).toBe(1);
+      expect(counts.RUNNING).toBe(1);
+      expect(counts.EXECUTING).toBe(1);
+      expect(counts.DONE).toBe(1);
     });
 
-    c.limiter.schedule({ id: "3" }, c.promise, null, 3).catch(function (err) {
-      c.mustEqual(err.message, "Dropped!");
-      queuedDropped = true;
+    const stopPromise = limiter.stop({
+      enqueueErrorMessage: "Stopped!",
+      dropErrorMessage: "Dropped!",
     });
+    const submitFailedJob = limiter.schedule(() => Promise.resolve(true));
 
-    setTimeout(function () {
-      var counts = c.limiter.counts();
-      c.mustEqual(counts.RECEIVED, 0);
-      c.mustEqual(counts.QUEUED, 1);
-      c.mustEqual(counts.RUNNING, 1);
-      c.mustEqual(counts.EXECUTING, 1);
-      c.mustEqual(counts.DONE, 1);
+    await Promise.all([
+      stopPromise,
+      expect(scheduledDroppedJob).rejects.toThrow("Dropped!"),
+      expect(queuedDroppedJob).rejects.toThrow("Dropped!"),
+      expect(submitFailedJob).rejects.toThrow("Stopped!"),
+    ]);
 
-      c.limiter
-        .stop({
-          enqueueErrorMessage: "Stopped!",
-          dropErrorMessage: "Dropped!",
-        })
-        .then(function () {
-          counts = c.limiter.counts();
-          c.mustEqual(submitFailed, true);
-          c.mustEqual(scheduledDropped, true);
-          c.mustEqual(queuedDropped, true);
-          c.mustEqual(dropped, 2);
-          c.mustEqual(counts.RECEIVED, 0);
-          c.mustEqual(counts.QUEUED, 0);
-          c.mustEqual(counts.RUNNING, 0);
-          c.mustEqual(counts.EXECUTING, 0);
-          c.mustEqual(counts.DONE, 2);
+    const counts = limiter.counts();
+    expect(dropped).toEqual(2);
+    expect(counts.RECEIVED).toEqual(0);
+    expect(counts.QUEUED).toEqual(0);
+    expect(counts.RUNNING).toEqual(0);
+    expect(counts.EXECUTING).toEqual(0);
+    expect(counts.DONE).toEqual(2);
 
-          c.checkResultsOrder([[0], [1]]);
-          done();
-        });
-
-      c.limiter
-        .schedule(() => Promise.resolve(true))
-        .catch(function (err) {
-          c.mustEqual(err.message, "Stopped!");
-          submitFailed = true;
-        });
-    }, 125);
+    h.checkResultsOrder([[0], [1]]);
   });
 
-  it("Should stop and let the queue finish", function (done) {
-    c = makeTest({
+  it("Should stop and let the queue finish", async function () {
+    const h = createJobHarness();
+    limiter = makeLimiter({
       maxConcurrent: 1,
       minTime: 100,
       trackDoneStatus: true,
     });
-    var submitFailed = false;
-    var dropped = 0;
+    let dropped = 0;
 
-    c.limiter.on("dropped", function () {
+    limiter.on("dropped", function () {
       dropped++;
     });
 
-    c.pNoErrVal(c.limiter.schedule({ id: "1" }, c.promise, null, 1), 1);
-    c.pNoErrVal(c.limiter.schedule({ id: "2" }, c.promise, null, 2), 2);
-    c.pNoErrVal(c.limiter.schedule({ id: "3" }, c.slowPromise, 100, null, 3), 3);
+    h.pNoErrVal(limiter.schedule({ id: "1" }, h.promise, null, 1), 1);
+    h.pNoErrVal(limiter.schedule({ id: "2" }, h.promise, null, 2), 2);
+    h.pNoErrVal(limiter.schedule({ id: "3" }, h.slowPromise, 100, null, 3), 3);
 
-    setTimeout(function () {
-      var counts = c.limiter.counts();
-      c.mustEqual(counts.RECEIVED, 0);
-      c.mustEqual(counts.QUEUED, 1);
-      c.mustEqual(counts.RUNNING, 1);
-      c.mustEqual(counts.EXECUTING, 0);
-      c.mustEqual(counts.DONE, 1);
+    await waitForState(() => {
+      const counts = limiter.counts();
+      expect(counts.RECEIVED).toBe(0);
+      expect(counts.QUEUED).toBe(1);
+      expect(counts.RUNNING).toBe(1);
+      expect(counts.EXECUTING).toBe(0);
+      expect(counts.DONE).toBe(1);
+    });
 
-      c.limiter
-        .stop({
-          enqueueErrorMessage: "Stopped!",
-          dropWaitingJobs: false,
-        })
-        .then(function () {
-          counts = c.limiter.counts();
-          c.mustEqual(submitFailed, true);
-          c.mustEqual(dropped, 0);
-          c.mustEqual(counts.RECEIVED, 0);
-          c.mustEqual(counts.QUEUED, 0);
-          c.mustEqual(counts.RUNNING, 0);
-          c.mustEqual(counts.EXECUTING, 0);
-          c.mustEqual(counts.DONE, 4);
+    const stopPromise = limiter.stop({
+      enqueueErrorMessage: "Stopped!",
+      dropWaitingJobs: false,
+    });
+    const submitFailedJob = limiter.schedule(() => Promise.resolve(true));
 
-          c.checkResultsOrder([[1], [2], [3]]);
-          done();
-        });
+    await Promise.all([stopPromise, expect(submitFailedJob).rejects.toThrow("Stopped!")]);
+    const counts = limiter.counts();
+    expect(dropped).toEqual(0);
+    expect(counts.RECEIVED).toEqual(0);
+    expect(counts.QUEUED).toEqual(0);
+    expect(counts.RUNNING).toEqual(0);
+    expect(counts.EXECUTING).toEqual(0);
+    expect(counts.DONE).toEqual(4);
 
-      c.limiter
-        .schedule(() => Promise.resolve(true))
-        .catch(function (err) {
-          c.mustEqual(err.message, "Stopped!");
-          submitFailed = true;
-        });
-    }, 75);
+    h.checkResultsOrder([[1], [2], [3]]);
   });
 
-  it("Should still resolve when rejectOnDrop is false", function (done) {
-    c = makeTest({
+  it("Should still resolve when rejectOnDrop is false", function () {
+    const h = createJobHarness();
+    limiter = makeLimiter({
       maxConcurrent: 1,
       minTime: 100,
       rejectOnDrop: false,
     });
 
-    c.pNoErrVal(c.limiter.schedule({ id: "1" }, c.promise, null, 1), 1);
-    c.pNoErrVal(c.limiter.schedule({ id: "2" }, c.promise, null, 2), 2);
-    c.pNoErrVal(c.limiter.schedule({ id: "3" }, c.slowPromise, 100, null, 3), 3);
+    h.pNoErrVal(limiter.schedule({ id: "1" }, h.promise, null, 1), 1);
+    h.pNoErrVal(limiter.schedule({ id: "2" }, h.promise, null, 2), 2);
+    h.pNoErrVal(limiter.schedule({ id: "3" }, h.slowPromise, 100, null, 3), 3);
 
-    c.limiter
+    return limiter
       .stop()
       .then(function () {
-        return c.limiter.stop();
+        return limiter.stop();
       })
       .then(function () {
-        done(new Error("Should not be here"));
+        throw new Error("Should not be here");
       })
       .catch(function (err) {
-        c.mustEqual(err.message, "stop() has already been called");
-        done();
+        expect(err.message).toEqual("stop() has already been called");
       });
   });
 
-  it("Should not allow calling stop() twice when dropWaitingJobs=true", function (done) {
-    c = makeTest({
+  it("Should not allow calling stop() twice when dropWaitingJobs=true", function () {
+    const h = createJobHarness();
+    limiter = makeLimiter({
       maxConcurrent: 1,
       minTime: 100,
     });
-    var failed = 0;
-    var handler = function (err) {
-      c.mustEqual(err.message, "This limiter has been stopped.");
+    let failed = 0;
+    const handler = function (err) {
+      expect(err.message).toEqual("This limiter has been stopped.");
       failed++;
     };
 
-    c.pNoErrVal(c.limiter.schedule({ id: "1" }, c.promise, null, 1), 1).catch(handler);
-    c.pNoErrVal(c.limiter.schedule({ id: "2" }, c.promise, null, 2), 2).catch(handler);
-    c.pNoErrVal(c.limiter.schedule({ id: "3" }, c.slowPromise, 100, null, 3), 3).catch(handler);
+    h.pNoErrVal(limiter.schedule({ id: "1" }, h.promise, null, 1), 1).catch(handler);
+    h.pNoErrVal(limiter.schedule({ id: "2" }, h.promise, null, 2), 2).catch(handler);
+    h.pNoErrVal(limiter.schedule({ id: "3" }, h.slowPromise, 100, null, 3), 3).catch(handler);
 
-    c.limiter
+    return limiter
       .stop({ dropWaitingJobs: true })
       .then(function () {
-        return c.limiter.stop({ dropWaitingJobs: true });
+        return limiter.stop({ dropWaitingJobs: true });
       })
       .then(function () {
-        done(new Error("Should not be here"));
+        throw new Error("Should not be here");
       })
       .catch(function (err) {
-        c.mustEqual(err.message, "stop() has already been called");
-        c.mustEqual(failed, 3);
-        done();
+        expect(err.message).toEqual("stop() has already been called");
+        expect(failed).toEqual(3);
       });
   });
 
-  it("Should not allow calling stop() twice when dropWaitingJobs=false", function (done) {
-    c = makeTest({
+  it("Should not allow calling stop() twice when dropWaitingJobs=false", function () {
+    const h = createJobHarness();
+    limiter = makeLimiter({
       maxConcurrent: 1,
       minTime: 100,
     });
 
-    c.pNoErrVal(c.limiter.schedule({ id: "1" }, c.promise, null, 1), 1);
-    c.pNoErrVal(c.limiter.schedule({ id: "2" }, c.promise, null, 2), 2);
-    c.pNoErrVal(c.limiter.schedule({ id: "3" }, c.slowPromise, 100, null, 3), 3);
+    h.pNoErrVal(limiter.schedule({ id: "1" }, h.promise, null, 1), 1);
+    h.pNoErrVal(limiter.schedule({ id: "2" }, h.promise, null, 2), 2);
+    h.pNoErrVal(limiter.schedule({ id: "3" }, h.slowPromise, 100, null, 3), 3);
 
-    c.limiter
+    return limiter
       .stop({ dropWaitingJobs: false })
       .then(function () {
-        return c.limiter.stop({ dropWaitingJobs: false });
+        return limiter.stop({ dropWaitingJobs: false });
       })
       .then(function () {
-        done(new Error("Should not be here"));
+        throw new Error("Should not be here");
       })
       .catch(function (err) {
-        c.mustEqual(err.message, "stop() has already been called");
-        done();
+        expect(err.message).toEqual("stop() has already been called");
       });
   });
 });

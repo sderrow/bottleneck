@@ -242,7 +242,7 @@ let counts = limiter.counts();
 console.log(`${counts.EXECUTING + 2}`);
 console.log(limiter.jobStatus("some-id"));
 console.log(limiter.jobs());
-console.log(limiter.jobs(Bottleneck.Status.RUNNING));
+console.log(limiter.jobs("RUNNING"));
 
 group.deleteKey("pizza").then(function (deleted: boolean) {
   console.log(deleted);

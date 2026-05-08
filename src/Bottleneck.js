@@ -204,7 +204,9 @@ class Bottleneck {
         return this.Events.trigger("idle");
       }
     } catch (e) {
-      return this.Events.trigger("error", e);
+      if (!this._store._disconnecting || e?.constructor?.name !== "DisconnectsClientError") {
+        return this.Events.trigger("error", e);
+      }
     }
   }
 
@@ -278,7 +280,9 @@ class Bottleneck {
         return total;
       }
     } catch (e) {
-      this.Events.trigger("error", e);
+      if (!this._store._disconnecting || e?.constructor?.name !== "DisconnectsClientError") {
+        this.Events.trigger("error", e);
+      }
     }
   }
 
