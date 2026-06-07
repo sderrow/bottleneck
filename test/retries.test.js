@@ -5,19 +5,19 @@ const badJob = function () {
   return Promise.reject(new Error("boom"));
 };
 
+const assertBackoffs = function (attemptTimes, backoffMs) {
+  for (let i = 1; i < attemptTimes.length; i++) {
+    const delta = attemptTimes[i] - attemptTimes[i - 1];
+    expect(delta).toBeGreaterThanOrEqual(backoffMs - 5);
+  }
+};
+
 describe("Retries", function () {
   let limiter;
 
   afterEach(function () {
     return limiter.disconnect(false);
   });
-
-  const assertBackoffs = function (attemptTimes, backoffMs) {
-    for (let i = 1; i < attemptTimes.length; i++) {
-      const delta = attemptTimes[i] - attemptTimes[i - 1];
-      expect(delta).toBeGreaterThanOrEqual(backoffMs - 5);
-    }
-  };
 
   it("Should retry when requested by the user (sync)", async function () {
     limiter = makeLimiter({ trackDoneStatus: true });

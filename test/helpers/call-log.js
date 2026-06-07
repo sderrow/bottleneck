@@ -6,6 +6,19 @@ function wait(ms) {
   });
 }
 
+function pNoErrVal(promise, ...expected) {
+  return promise.then(function (actual) {
+    expect(actual).toEqual(expected);
+  });
+}
+
+function noErrVal(...expected) {
+  return function (err, ...actual) {
+    expect(err).toBeNull();
+    expect(actual).toEqual(expected);
+  };
+}
+
 /**
  * Call history + timing + assertions for integration tests.
  * Pair with {@link createTaskFns} from "./job-tasks.js" or use {@link createJobHarness}.
@@ -41,19 +54,6 @@ export function createCallLog() {
     const max = shouldBe + hi;
     expect(results.callsDuration).toBeGreaterThan(min);
     expect(results.callsDuration).toBeLessThan(max);
-  }
-
-  function pNoErrVal(promise, ...expected) {
-    return promise.then(function (actual) {
-      expect(actual).toEqual(expected);
-    });
-  }
-
-  function noErrVal(...expected) {
-    return function (err, ...actual) {
-      expect(err).toBeNull();
-      expect(actual).toEqual(expected);
-    };
   }
 
   return {
