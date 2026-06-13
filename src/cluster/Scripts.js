@@ -71,7 +71,7 @@ const templates = {
   heartbeat: {
     keys: exports.allKeys,
     headers: ["validate_keys", "validate_client", "process_tick"],
-    refresh_expiration: false,
+    refresh_expiration: true,
     code: lua["heartbeat.lua"],
   },
   update_settings: {

@@ -48,7 +48,7 @@ class RedisDatastore {
       .then(() => {
         if (!this._disconnecting) {
           this.heartbeat = setInterval(() => {
-            return this.runScript("heartbeat", []).catch((e) => {
+            return this.runScript("heartbeat", [this.instance.queued()]).catch((e) => {
               if (!this._disconnecting) {
                 this.instance.Events.trigger("error", e);
               }
@@ -135,7 +135,12 @@ class RedisDatastore {
         e.message.match(/^(.*\s)?SETTINGS_KEY_NOT_FOUND$/) !== null
       ) {
         if (name === "heartbeat") {
-          return undefined;
+          if (this.instance.queued() > 0) {
+            await this.runScript("init", this.prepareInitSettings(false));
+            await this.runScript("register_client", [this.instance.queued()]);
+            await this.instance._drainAll();
+          }
+          return;
         }
         await this.runScript("init", this.prepareInitSettings(false));
         return this.runScript(name, args);
