@@ -69,18 +69,18 @@
     "test:smoke": "pnpm exec vitest run --project light-smoke --project lib-smoke"
   },
   "devDependencies": {
-    "@testcontainers/redis": "^12.0.1",
-    "@types/node": "^24.12.3",
+    "@testcontainers/redis": "^12.0.4",
+    "@types/node": "^24.13.3",
     "husky": "^9.1.7",
     "ioredis": "^5.11.1",
-    "lint-staged": "^17.0.7",
-    "oxfmt": "^0.53.0",
-    "oxlint": "^1.68.0",
-    "redis": "^6.0.0",
-    "testcontainers": "^12.0.1",
-    "tsdown": "^0.22.2",
-    "typescript": "^6.0.3",
-    "vitest": "^4.1.8"
+    "lint-staged": "^17.0.8",
+    "oxfmt": "^0.58.0",
+    "oxlint": "^1.73.0",
+    "redis": "^6.1.0",
+    "testcontainers": "^12.0.4",
+    "tsdown": "^0.22.4",
+    "typescript": "^6.0.0",
+    "vitest": "^4.1.10"
   },
   "peerDependencies": {
     "ioredis": "^5",
@@ -97,5 +97,5 @@
   "engines": {
     "node": ">=16"
   },
-  "packageManager": "pnpm@11.5.2+sha512.71c631e382066efc25625d5cf029075de07b61b37f6e27350fbd84b1bda5864c8c1967adc280776b45c30a715c0359a3be08fef42d5bb09e2b99029979692916"
+  "packageManager": "pnpm@11.11.0+sha512.4463f65fd80ed80d69bc1d4bf163ee94f605c7380fc318bb5b2ebe15f8cd12d49c51a4d59e951b401e764d3b6ca751cbf51bc50ed7001a6bcb4935e684c34882"
 }

@@ -230,9 +230,7 @@ limiter.schedule(() => object.doSomething());
 ### Constructor
 
 ```js
-const limiter = new Bottleneck({
-  /* options */
-});
+const limiter = new Bottleneck({/* options */});
 ```
 
 Basic options:
@@ -366,35 +364,14 @@ wrapped()
 
 ```js
 // Submit
-limiter.submit(
-  {
-    /* options */
-  },
-  someAsyncCall,
-  arg1,
-  arg2,
-  callback,
-);
+limiter.submit({/* options */}, someAsyncCall, arg1, arg2, callback);
 
 // Schedule
-limiter.schedule(
-  {
-    /* options */
-  },
-  fn,
-  arg1,
-  arg2,
-);
+limiter.schedule({/* options */}, fn, arg1, arg2);
 
 // Wrap
 const wrapped = limiter.wrap(fn);
-wrapped.withOptions(
-  {
-    /* options */
-  },
-  arg1,
-  arg2,
-);
+wrapped.withOptions({/* options */}, arg1, arg2);
 ```
 
 | Option       | Default            | Description                                                                                                                                                                                                                                                                           |
@@ -934,9 +911,7 @@ This method returns a promise that resolves once the limiter is connected to Red
 As of v2.9.0, it's no longer necessary to wait for `.ready()` to resolve before issuing commands to a limiter. The commands will be queued until the limiter successfully connects. Make sure to listen to the `"error"` event to handle connection errors.
 
 ```js
-const limiter = new Bottleneck({
-  /* options */
-});
+const limiter = new Bottleneck({/* options */});
 
 limiter.on("error", (err) => {
   // handle network errors
@@ -952,9 +927,7 @@ limiter.ready().then(() => {
 This method broadcasts the `message` string to every limiter in the Cluster. It returns a promise.
 
 ```js
-const limiter = new Bottleneck({
-  /* options */
-});
+const limiter = new Bottleneck({/* options */});
 
 limiter.on("message", (msg) => {
   console.log(msg); // prints "this is a string"
@@ -1002,9 +975,7 @@ import Redis from "redis"; // or ioredis: import Redis from "ioredis";
 // Use Bottleneck.IORedisConnection when using ioredis
 const connection = new Bottleneck.RedisConnection({
   Redis,
-  clientOptions: {
-    /* node-redis/ioredis options */
-  },
+  clientOptions: {/* node-redis/ioredis options */},
   // Bottleneck.IORedisConnection also accepts `clusterNodes` here
 });
 
@@ -1030,9 +1001,7 @@ If you already have a node-redis/ioredis client, you can ask Bottleneck to reuse
 
 ```js
 import { createClient } from "redis";
-const client = createClient({
-  /* options */
-});
+const client = createClient({/* options */});
 await client.connect();
 
 const connection = new Bottleneck.RedisConnection({
