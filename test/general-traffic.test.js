@@ -23,9 +23,7 @@ describe("General traffic", () => {
       h.pNoErrVal(limiter.schedule(h.slowPromise, 50, null, 4), 4);
 
       return first
-        .then(() => {
-          return h.flushLimiter(limiter, { weight: 0 });
-        })
+        .then(() => h.flushLimiter(limiter, { weight: 0 }))
         .then((_results) => {
           expect(h).toHaveFinalCallAt(50);
           expect(h.log).toHaveCallOrder([[1]]);
@@ -127,9 +125,7 @@ describe("General traffic", () => {
         h.pNoErrVal(limiter.schedule({ weight: 1 }, h.slowPromise, 100, null, 4), 4),
         h.pNoErrVal(limiter.schedule({ weight: 0 }, h.slowPromise, 100, null, 5), 5),
       ])
-        .then(() => {
-          return h.flushLimiter(limiter);
-        })
+        .then(() => h.flushLimiter(limiter))
         .then((_results) => {
           expect(h).toHaveFinalCallAt(400);
           expect(h.log).toHaveCallOrder([[1], [2], [3], [4], [5]]);
@@ -191,12 +187,8 @@ describe("General traffic", () => {
           expect(reservoir).toEqual(0);
           return limiter.updateSettings({ reservoir: 1 });
         })
-        .then(() => {
-          return Promise.all([p3, p4]);
-        })
-        .then(() => {
-          return limiter.currentReservoir();
-        })
+        .then(() => Promise.all([p3, p4]))
+        .then(() => limiter.currentReservoir())
         .then((reservoir) => {
           expect(reservoir).toEqual(0);
           expect(calledDepleted).toEqual(4);
@@ -331,9 +323,7 @@ describe("General traffic", () => {
         h.pNoErrVal(limiter.schedule({ weight: 4 }, h.promise, null, 4), 4),
         h.pNoErrVal(limiter.schedule({ weight: 5 }, h.promise, null, 5), 5),
       ])
-        .then(() => {
-          return h.flushLimiter(limiter, { weight: 0, priority: 9 });
-        })
+        .then(() => h.flushLimiter(limiter, { weight: 0, priority: 9 }))
         .then((results) => {
           expect(h.log).toHaveCallOrder([[1], [2], [3], [4], [5]]);
           // The contract is "`depleted` fires when the reservoir reaches 0".
@@ -371,9 +361,7 @@ describe("General traffic", () => {
         h.pNoErrVal(limiter.schedule(h.promise, null, 3), 3),
         h.pNoErrVal(limiter.schedule(h.promise, null, 4), 4),
       ])
-        .then(() => {
-          return h.flushLimiter(limiter, { weight: 0, priority: 9 });
-        })
+        .then(() => h.flushLimiter(limiter, { weight: 0, priority: 9 }))
         .then((results) => {
           expect(h.log).toHaveCallOrder([[1], [2], [3], [4]]);
           // Jobs 3 and 4 must wait for the reservoir refresh at t=150ms; that
@@ -410,9 +398,7 @@ describe("General traffic", () => {
       const matches = stdout.match(/\[(\d+)\]/g);
       expect(matches).toBeTruthy();
       expect(matches.length).toEqual(4);
-      const nums = matches.map((m) => {
-        return Number(m.slice(1, -1));
-      });
+      const nums = matches.map((m) => Number(m.slice(1, -1)));
       expect(nums[2]).toBeGreaterThan(nums[0]);
       expect(stderr).toEqual("");
     });
@@ -496,9 +482,7 @@ describe("General traffic", () => {
         h.pNoErrVal(limiter.schedule(h.promise, null, 3), 3),
         h.pNoErrVal(limiter.schedule(h.promise, null, 4), 4),
       ])
-        .then(() => {
-          return limiter.currentReservoir();
-        })
+        .then(() => limiter.currentReservoir())
         .then((reservoir) => {
           // After all 4 jobs dispatch, reservoir has been depleted to 0 twice
           // (initial 2 by jobs 1,2; refill 2 by jobs 3,4). Under load, the
@@ -537,9 +521,7 @@ describe("General traffic", () => {
       const matches = stdout.match(/\[(\d+)\]/g);
       expect(matches).toBeTruthy();
       expect(matches.length).toEqual(4);
-      const nums = matches.map((m) => {
-        return Number(m.slice(1, -1));
-      });
+      const nums = matches.map((m) => Number(m.slice(1, -1)));
       expect(nums[2]).toBeGreaterThan(nums[0]);
       expect(stderr).toEqual("");
     });

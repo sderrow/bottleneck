@@ -15,9 +15,7 @@ describe("Priority", () => {
       h.pNoErrVal(limiter.schedule(h.promise, null, 3), 3),
       h.pNoErrVal(limiter.schedule(h.promise, null, 4), 4),
     ])
-      .then(() => {
-        return h.flushLimiter(limiter);
-      })
+      .then(() => h.flushLimiter(limiter))
       .then((_results) => {
         expect(h.log).toHaveCallOrder([[1], [5, 6], [2], [3], [4]]);
         expect(h).toHaveFinalCallAt(400);
@@ -93,9 +91,7 @@ describe("Priority", () => {
 
     return limiter
       .updateSettings({ highWater: null })
-      .then(() => {
-        return h.flushLimiter(limiter);
-      })
+      .then(() => h.flushLimiter(limiter))
       .then((_results) => {
         expect(h.log).toHaveCallOrder([[1], [2], [3]]);
         expect(called).toEqual(true);
@@ -134,9 +130,7 @@ describe("Priority", () => {
 
     return limiter
       .updateSettings({ highWater: null })
-      .then(() => {
-        return h.flushLimiter(limiter);
-      })
+      .then(() => h.flushLimiter(limiter))
       .then((_results) => {
         expect(h.log).toHaveCallOrder([[1], [5], [6]]);
         expect(called).toEqual(true);
@@ -165,9 +159,7 @@ describe("Priority", () => {
         if (called === 3) {
           limiter
             .updateSettings({ highWater: null })
-            .then(() => {
-              return limiter.schedule(h.job, null, 8);
-            })
+            .then(() => limiter.schedule(h.job, null, 8))
             .catch((err) => {
               expect(err).toBeInstanceOf(Bottleneck.BottleneckError);
               expect(err.message).toEqual("This job has been dropped by Bottleneck");

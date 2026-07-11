@@ -8,17 +8,10 @@ const assert = require("assert");
 // Job duration is never an assertion; use deferredJob/deferredPromise with explicit
 // release. "Must NOT happen" uses bounded sleeps only after positive preconditions.
 
-const limiterKeys = (limiter) => {
-  return Scripts.allKeys(limiter._store.originalId);
-};
-const runCommand = (limiter, command, args) => {
-  return limiter._store.connection.__runCommand__([command, ...args]);
-};
-const sumWeights = (weights) => {
-  return Object.keys(weights).reduce((acc, x) => {
-    return acc + ~~weights[x];
-  }, 0);
-};
+const limiterKeys = (limiter) => Scripts.allKeys(limiter._store.originalId);
+const runCommand = (limiter, command, args) =>
+  limiter._store.connection.__runCommand__([command, ...args]);
+const sumWeights = (weights) => Object.keys(weights).reduce((acc, x) => acc + ~~weights[x], 0);
 
 describe("Cluster-only", () => {
   if (process.env.DATASTORE !== "redis" && process.env.DATASTORE !== "ioredis") {
@@ -76,9 +69,7 @@ describe("Cluster-only", () => {
           h.pNoErrVal(limiter.schedule(h.promise, null, 2), 2),
         ]);
       })
-      .then(() => {
-        return h.flushLimiter(rootLimiter);
-      })
+      .then(() => h.flushLimiter(rootLimiter))
       .then((_results) => {
         expect(h.log).toHaveCallOrder([[1], [2]]);
       });
@@ -113,9 +104,7 @@ describe("Cluster-only", () => {
           h.pNoErrVal(limiter2.schedule(h.promise, null, 3), 3),
         ]);
       })
-      .then(() => {
-        return h.flushLimiter(rootLimiter);
-      })
+      .then(() => h.flushLimiter(rootLimiter))
       .then((_results) => {
         expect(h.log).toHaveCallOrder([[1], [2], [3]]);
       });
@@ -156,9 +145,7 @@ describe("Cluster-only", () => {
           h.pNoErrVal(limiter2.schedule(h.promise, null, 2), 2),
         ]);
       })
-      .then(() => {
-        return h.flushLimiter(rootLimiter);
-      })
+      .then(() => h.flushLimiter(rootLimiter))
       .then((_results) => {
         expect(h.log).toHaveCallOrder([[1], [2]]);
       });
@@ -212,9 +199,7 @@ describe("Cluster-only", () => {
           h.pNoErrVal(limiter4.schedule(h.promise, null, 4), 4),
         ]);
       })
-      .then(() => {
-        return h.flushLimiter(rootLimiter);
-      })
+      .then(() => h.flushLimiter(rootLimiter))
       .then((_results) => {
         expect(h.log).toHaveCallOrder([[1], [2], [3], [4]]);
       });
@@ -348,8 +333,8 @@ describe("Cluster-only", () => {
 
     return rootLimiter
       .ready()
-      .then(() => {
-        return Promise.all([
+      .then(() =>
+        Promise.all([
           runCommand(rootLimiter, "hset", [settings_key, "version", "2.8.0"]),
           runCommand(rootLimiter, "hdel", [
             settings_key,
@@ -358,8 +343,8 @@ describe("Cluster-only", () => {
             "clientTimeout",
           ]),
           runCommand(rootLimiter, "hset", [settings_key, "lastReservoirRefresh", ""]),
-        ]);
-      })
+        ]),
+      )
       .then(() => {
         limiter2 = track(
           new Bottleneck({
@@ -369,8 +354,8 @@ describe("Cluster-only", () => {
         );
         return limiter2.ready();
       })
-      .then(() => {
-        return runCommand(rootLimiter, "hmget", [
+      .then(() =>
+        runCommand(rootLimiter, "hmget", [
           settings_key,
           "version",
           "done",
@@ -383,8 +368,8 @@ describe("Cluster-only", () => {
           // Add new values here, before these 2 timestamps
           "lastReservoirRefresh",
           "lastReservoirIncrease",
-        ]);
-      })
+        ]),
+      )
       .then((values) => {
         const timestamps = values.slice(-2);
         timestamps.forEach((t) => {
@@ -493,9 +478,7 @@ describe("Cluster-only", () => {
 
         return rootLimiter
           .schedule({ id: 0, weight: 0 }, h.promise, null, 0)
-          .then(() => {
-            return rootLimiter._submitLock.schedule(() => Promise.resolve());
-          })
+          .then(() => rootLimiter._submitLock.schedule(() => Promise.resolve()))
           .then(() => {
             expect(rootLimiter.counts().EXECUTING).toEqual(2);
             p3 = limiter2.schedule({ id: 3 }, h.promise, null, 3);
@@ -508,12 +491,8 @@ describe("Cluster-only", () => {
             jobs.release();
           });
       })
-      .then(() => {
-        return p3;
-      })
-      .then(() => {
-        return h.flushLimiter(rootLimiter);
-      })
+      .then(() => p3)
+      .then(() => h.flushLimiter(rootLimiter))
       .then((_results) => {
         expect(h.log).toHaveCallOrder([[0], [1], [2], [3]]);
       });
@@ -548,17 +527,13 @@ describe("Cluster-only", () => {
 
         return rootLimiter
           .schedule({ id: 0, weight: 0 }, h.promise, null, 0)
-          .then(() => {
-            return rootLimiter.currentReservoir();
-          })
+          .then(() => rootLimiter.currentReservoir())
           .then((reservoir) => {
             expect(reservoir).toEqual(0);
             p3 = limiter2.schedule({ id: 3, weight: 2 }, h.promise, null, 3);
             return rootLimiter.updateSettings({ reservoir: 1 });
           })
-          .then(() => {
-            return rootLimiter.incrementReservoir(1);
-          })
+          .then(() => rootLimiter.incrementReservoir(1))
           .then((reservoir) => {
             expect(reservoir).toEqual(2);
             held.release();
@@ -657,12 +632,8 @@ describe("Cluster-only", () => {
 
           return rootLimiter._submitLock.schedule(() => Promise.resolve(true));
         })
-        .then(() => {
-          return rootLimiter._drainAll();
-        })
-        .then(() => {
-          return rootLimiter.disconnect(false);
-        })
+        .then(() => rootLimiter._drainAll())
+        .then(() => rootLimiter.disconnect(false))
         .then(() => {
           job1.release();
           return p1;
@@ -671,8 +642,8 @@ describe("Cluster-only", () => {
         // snapshot in the narrow window between dispatch and the 50ms expiration
         // timers firing — under event-loop stress that window can effectively
         // vanish, with expirations firing before the snapshot read completes.
-        .then(() => {
-          return waitForState(async () => {
+        .then(() =>
+          waitForState(async () => {
             const [s, je] = await Promise.all([
               runCommand(limiter1, "hmget", [limiterKeys(rootLimiter)[0], "running", "done"]),
               runCommand(limiter1, "zcard", [limiterKeys(rootLimiter)[2]]),
@@ -681,11 +652,9 @@ describe("Cluster-only", () => {
             expect(s[1]).toBe("14");
             expect(je).toBe(0);
             expect(numExpirations).toBe(4);
-          });
-        })
-        .then(() => {
-          return getData(rootLimiter);
-        })
+          }),
+        )
+        .then(() => getData(rootLimiter))
         .then(
           ([
             settings,
@@ -925,9 +894,7 @@ describe("Cluster-only", () => {
         limiter2 = track(new Bottleneck({ maxConcurrent: 1, datastore: process.env.DATASTORE }));
         return limiter2.ready();
       })
-      .then(() => {
-        return runCommand(rootLimiter, "hget", [settings_key, "maxConcurrent"]);
-      })
+      .then(() => runCommand(rootLimiter, "hget", [settings_key, "maxConcurrent"]))
       .then((maxConcurrent) => {
         expect(maxConcurrent).toEqual("2");
         return Promise.all([
@@ -935,12 +902,8 @@ describe("Cluster-only", () => {
           limiter2.schedule(h.promise, null, 2),
         ]);
       })
-      .then(() => {
-        return limiter2.disconnect(false);
-      })
-      .then(() => {
-        return h.flushLimiter(rootLimiter);
-      })
+      .then(() => limiter2.disconnect(false))
+      .then(() => h.flushLimiter(rootLimiter))
       .then((_results) => {
         expect(h.log).toHaveCallOrder([[1], [2]]);
       });
@@ -963,12 +926,12 @@ describe("Cluster-only", () => {
         );
         return limiter2.ready();
       })
-      .then(() => {
+      .then(() =>
         // Verify the actual cleared setting in redis directly — this is the
         // contract being tested. Avoids dependence on slowPromise wall-clock
         // timing which can slip under load (event-loop delay, GC, redis stalls).
-        return runCommand(rootLimiter, "hget", [settings_key, "maxConcurrent"]);
-      })
+        runCommand(rootLimiter, "hget", [settings_key, "maxConcurrent"]),
+      )
       .then((maxConcurrent) => {
         expect(maxConcurrent).toEqual("1");
         const job1 = deferred();
@@ -981,12 +944,8 @@ describe("Cluster-only", () => {
           return Promise.all([p1, p2]);
         });
       })
-      .then(() => {
-        return limiter2.disconnect(false);
-      })
-      .then(() => {
-        return h.flushLimiter(rootLimiter);
-      })
+      .then(() => limiter2.disconnect(false))
+      .then(() => h.flushLimiter(rootLimiter))
       .then((_results) => {
         expect(h.log).toHaveCallOrder([[1], [2]]);
       });

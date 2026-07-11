@@ -67,9 +67,7 @@ describe("Promises", () => {
         caught++;
         return Promise.all([p1, p2]);
       })
-      .then(() => {
-        return h.flushLimiter(limiter);
-      })
+      .then(() => h.flushLimiter(limiter))
       .then((_results) => {
         expect(h.log).toHaveCallOrder([[1], [2]]);
         expect(h).toHaveFinalCallAt(100);
@@ -112,9 +110,7 @@ describe("Promises", () => {
     });
 
     test("Should automatically wrap a returned value in a resolved promise", ({ limiter }) => {
-      fn = limiter.wrap(() => {
-        return 7;
-      });
+      fn = limiter.wrap(() => 7);
 
       return fn().then((result) => {
         expect(result).toEqual(7);
@@ -186,9 +182,7 @@ describe("Promises", () => {
       const limiter = makeLimiter({ maxConcurrent: 1, minTime: 50 });
 
       const primer = deferred();
-      limiter.schedule(() => {
-        return primer.signal;
-      });
+      limiter.schedule(() => primer.signal);
 
       const wrapped = limiter.wrap(h.promise);
       h.pNoErrVal(wrapped(null, 1), 1);

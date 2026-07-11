@@ -46,9 +46,7 @@ function createJobHarness() {
 
   function flushLimiter(limiter, scheduleOptions) {
     const opt = scheduleOptions != null ? scheduleOptions : {};
-    return limiter.schedule(opt, () => {
-      return Promise.resolve(getResults());
-    });
+    return limiter.schedule(opt, () => Promise.resolve(getResults()));
   }
 
   return {

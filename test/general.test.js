@@ -561,9 +561,7 @@ describe("General", () => {
             h.pNoErrVal(limiter.schedule({ id: 3 }, h.slowPromise, 50, null, 3), 3),
           ]);
         })
-        .then(() => {
-          return limiter.submit({ id: 4 }, h.slowJob, 50, null, 4, null);
-        })
+        .then(() => limiter.submit({ id: 4 }, h.slowJob, 50, null, 4, null))
         .then(() => {
           expect(h).toHaveFinalCallAt(250);
           expect(h.log).toHaveCallOrder([[1], [2], [3]]);
@@ -655,12 +653,12 @@ describe("General", () => {
             resolve();
           }
         });
-        limiter.on("empty", () => {
-          return h.slowPromise(100, null, 1, 2).then((x) => {
+        limiter.on("empty", () =>
+          h.slowPromise(100, null, 1, 2).then((x) => {
             expect(x).toEqual([1, 2]);
             throw new Error("It broke!");
-          });
-        });
+          }),
+        );
 
         h.pNoErrVal(limiter.schedule(h.promise, null, 1), 1);
       });

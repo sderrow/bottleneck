@@ -3,9 +3,7 @@ import { test, describe, expect } from "./helpers/test-api.js";
 
 useFakeClock();
 
-const badJob = () => {
-  return Promise.reject(new Error("boom"));
-};
+const badJob = () => Promise.reject(new Error("boom"));
 
 const assertBackoffs = (attemptTimes, backoffMs) => {
   for (let i = 1; i < attemptTimes.length; i++) {

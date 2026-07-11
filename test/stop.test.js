@@ -112,9 +112,7 @@ describe("Stop", () => {
 
     return limiter
       .stop()
-      .then(() => {
-        return limiter.stop();
-      })
+      .then(() => limiter.stop())
       .then(() => {
         throw new Error("Should not be here");
       })
@@ -143,9 +141,7 @@ describe("Stop", () => {
 
     return limiter
       .stop({ dropWaitingJobs: true })
-      .then(() => {
-        return limiter.stop({ dropWaitingJobs: true });
-      })
+      .then(() => limiter.stop({ dropWaitingJobs: true }))
       .then(() => {
         throw new Error("Should not be here");
       })
@@ -170,9 +166,7 @@ describe("Stop", () => {
 
     return limiter
       .stop({ dropWaitingJobs: false })
-      .then(() => {
-        return limiter.stop({ dropWaitingJobs: false });
-      })
+      .then(() => limiter.stop({ dropWaitingJobs: false }))
       .then(() => {
         throw new Error("Should not be here");
       })

@@ -6,18 +6,11 @@ const Scripts = require("../src/cluster/Scripts.js");
 // Causality policy (Workstream B): observe product-timer effects via waitForState
 // and state counts — never assert wall-clock bounds around real network time.
 
-const limiterKeys = (limiter) => {
-  return Scripts.allKeys(limiter._store.originalId);
-};
-const countKeys = (limiter) => {
-  return runCommand(limiter, "exists", limiterKeys(limiter));
-};
-const deleteKeys = (limiter) => {
-  return runCommand(limiter, "del", limiterKeys(limiter));
-};
-const runCommand = (limiter, command, args) => {
-  return limiter._store.connection.__runCommand__([command, ...args]);
-};
+const limiterKeys = (limiter) => Scripts.allKeys(limiter._store.originalId);
+const countKeys = (limiter) => runCommand(limiter, "exists", limiterKeys(limiter));
+const deleteKeys = (limiter) => runCommand(limiter, "del", limiterKeys(limiter));
+const runCommand = (limiter, command, args) =>
+  limiter._store.connection.__runCommand__([command, ...args]);
 const runningOrExecuting = (limiter) => {
   const counts = limiter.counts();
   return counts.RUNNING + counts.EXECUTING;
@@ -221,22 +214,20 @@ describe("Cluster coordination", () => {
         );
         return limiter2.ready();
       })
-      .then(() => {
-        return Promise.all([
+      .then(() =>
+        Promise.all([
           limiter1.submit(h.slowJob, 100, null, 1, h.noErrVal(1)),
           limiter1.submit(h.slowJob, 100, null, 2, (err) => expect(err).toBeTruthy()),
-        ]);
-      })
-      .then(() => {
-        return Promise.all([
+        ]),
+      )
+      .then(() =>
+        Promise.all([
           limiter2.submit(h.slowJob, 100, null, 3, (err) => expect(err).toBeTruthy()),
           limiter2.submit(h.slowJob, 100, null, 4, (err) => expect(err).toBeTruthy()),
           limiter2.submit(h.slowJob, 100, null, 5, (err) => expect(err).toBeTruthy()),
-        ]);
-      })
-      .then(() => {
-        return runCommand(limiter1, "hvals", [client_num_queued_key]);
-      })
+        ]),
+      )
+      .then(() => runCommand(limiter1, "hvals", [client_num_queued_key]))
       .then((queues) => {
         expect(queues).toEqual(["0", "0"]);
 
@@ -350,31 +341,31 @@ describe("Cluster coordination", () => {
       });
       limiter.publish("Bonjour!");
     })
-      .then(() => {
-        return new Promise((resolve, _reject) => {
-          const limiter = group.key("B");
+      .then(
+        () =>
+          new Promise((resolve, _reject) => {
+            const limiter = group.key("B");
 
-          limiter.on("message", (msg) => {
-            received.push("2", msg);
-            return resolve();
-          });
-          limiter.publish("Comment allez-vous?");
-        });
-      })
-      .then(() => {
-        return group.deleteKey("A");
-      })
-      .then(() => {
-        return new Promise((resolve, _reject) => {
-          const limiter = group.key("A");
+            limiter.on("message", (msg) => {
+              received.push("2", msg);
+              return resolve();
+            });
+            limiter.publish("Comment allez-vous?");
+          }),
+      )
+      .then(() => group.deleteKey("A"))
+      .then(
+        () =>
+          new Promise((resolve, _reject) => {
+            const limiter = group.key("A");
 
-          limiter.on("message", (msg) => {
-            received.push("3", msg);
-            return resolve();
-          });
-          limiter.publish("Au revoir!");
-        });
-      })
+            limiter.on("message", (msg) => {
+              received.push("3", msg);
+              return resolve();
+            });
+            limiter.publish("Au revoir!");
+          }),
+      )
       .then(() => {
         expect(received).toEqual(["1", "Bonjour!", "2", "Comment allez-vous?", "3", "Au revoir!"]);
         // Semantic, not cleanup: flush=true gracefully drains the un-awaited
@@ -435,9 +426,7 @@ describe("Cluster coordination", () => {
 
         return Promise.all([limiter1.ready(), limiter2.ready(), limiter3.ready()]);
       })
-      .then(() => {
-        return Promise.all([countKeys(limiter1), countKeys(limiter2), countKeys(limiter3)]);
-      })
+      .then(() => Promise.all([countKeys(limiter1), countKeys(limiter2), countKeys(limiter3)]))
       .then((counts) => {
         expect(counts).toEqual([5, 5, 5]);
         return Promise.all([
@@ -485,9 +474,7 @@ describe("Cluster coordination", () => {
           expect(Object.keys(group.connection.limiters).length).toBe(0);
         });
       })
-      .then(() => {
-        return Promise.all([countKeys(limiter1), countKeys(limiter2), countKeys(limiter3)]);
-      })
+      .then(() => Promise.all([countKeys(limiter1), countKeys(limiter2), countKeys(limiter3)]))
       .then((counts) => {
         expect(counts).toEqual([0, 0, 0]);
         expect(group.keys().length).toEqual(0);
@@ -511,16 +498,12 @@ describe("Cluster coordination", () => {
     const limiter = group.key(key);
     return h
       .pNoErrVal(limiter.schedule(h.promise, null, 1), 1)
-      .then(() => {
-        return limiter.done();
-      })
+      .then(() => limiter.done())
       .then((doneCount) => {
         expect(doneCount).toEqual(1);
         return sleep(400);
       })
-      .then(() => {
-        return countKeys(limiter);
-      })
+      .then(() => countKeys(limiter))
       .then((count) => {
         expect(count).toEqual(0);
       });
@@ -555,21 +538,19 @@ describe("Cluster coordination", () => {
 
     return h
       .pNoErrVal(group1.key(key).schedule(h.promise, null, 1), 1)
-      .then(() => {
-        return h.pNoErrVal(group2.key(key).schedule(h.promise, null, 2), 2);
-      })
+      .then(() => h.pNoErrVal(group2.key(key).schedule(h.promise, null, 2), 2))
       .then(() => {
         expect(group1.keys().length).toEqual(1);
         expect(group2.keys().length).toEqual(1);
         return group1.key(key).running();
       })
-      .then(() => {
+      .then(() =>
         // Call deleteKey ONCE and assert its return value — retrying a delete
         // until it returns true would mask a regression where the first call
         // wrongly returns false. group1 holds the local instance, so true is
         // guaranteed structurally (instance != null short-circuits).
-        return group1.deleteKey(key);
-      })
+        group1.deleteKey(key),
+      )
       .then((deleted) => {
         expect(deleted).toEqual(true);
         return countKeys(limiter);
@@ -632,20 +613,20 @@ describe("Cluster coordination", () => {
         expect(group2.keys().length).toEqual(0);
         return group1.key(key).running();
       })
-      .then(() => {
+      .then(() =>
         // The keys were written through group1's connection; poll read-only
         // existence before the cross-group delete so a slow write can't turn
         // this into a false failure...
-        return waitForState(async () => {
+        waitForState(async () => {
           expect(await countKeys(limiter)).toBeGreaterThan(0);
-        });
-      })
-      .then(() => {
+        }),
+      )
+      .then(() =>
         // ...then call deleteKey ONCE and assert its return value. group2 has
         // no local instance, so the value reflects the redis DEL — retrying
         // until true would mask a regression where it wrongly returns false.
-        return group2.deleteKey(key);
-      })
+        group2.deleteKey(key),
+      )
       .then((deleted) => {
         expect(deleted).toEqual(true);
         return countKeys(limiter);
@@ -833,9 +814,7 @@ describe("Cluster coordination", () => {
     // resolved via a Redis-side capacity grant whose order is sensitive to
     // pubsub round-trip latency under load. Strict ordering here was the
     // observed flake (e.g. [..,4,5,7,6,..]).
-    const calls = h.results().calls.map((call) => {
-      return call.result[0];
-    });
+    const calls = h.results().calls.map((call) => call.result[0]);
     expect(calls.length).toEqual(11);
     expect(calls.slice(0, 5)).toEqual(["A", "B", "C", "D", 1]);
     expect(calls.slice(5, 7).sort()).toEqual([4, 5]);

@@ -19,9 +19,7 @@ describe("Group", () => {
     const job = (...result) => {
       results.push(result);
       return new Promise((resolve, _reject) => {
-        setTimeout(() => {
-          return resolve();
-        }, 50);
+        setTimeout(() => resolve(), 50);
       });
     };
 
@@ -153,9 +151,7 @@ describe("Group", () => {
     const job = (...result) => {
       results.push(result);
       return new Promise((resolve, _reject) => {
-        setTimeout(() => {
-          return resolve();
-        }, 50);
+        setTimeout(() => resolve(), 50);
       });
     };
 
@@ -280,9 +276,7 @@ describe("Group", () => {
     group.instances[KEY] = limiter;
     return group
       .key(KEY)
-      .schedule(() => {
-        return Promise.resolve();
-      })
+      .schedule(() => Promise.resolve())
       .then(() => {
         expect(group.instances[KEY]).toBeDefined();
         return waitForState(() => {
