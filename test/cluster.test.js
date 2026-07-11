@@ -1,4 +1,5 @@
-import { test, describe, expect, waitForState, deferred } from "./helpers/test-api.js";
+import { describe, expect } from "vitest";
+import { test, waitForState, deferred } from "./helpers/test-api.js";
 const Bottleneck = require("./bottleneck");
 const Scripts = require("../src/cluster/Scripts.js");
 const assert = require("assert");
@@ -612,9 +613,7 @@ describe("Cluster-only", () => {
           // disconnect below, then released so we keep the completion-with-value
           // coverage: the task resolves locally (free.lua fails post-disconnect
           // and is swallowed), so redis still shows it as running.
-          p1 = expect(
-            rootLimiter.schedule({ weight: 1 }, h.deferredPromise, job1.signal, null, 1),
-          ).resolves.toEqual([1]);
+          p1 = rootLimiter.schedule({ weight: 1 }, h.deferredPromise, job1.signal, null, 1);
           // Expiration present, these jobs should be removed automatically
           rootLimiter
             .schedule({ expiration: 50, weight: 2 }, h.deferredPromise, never, null, 2)
@@ -635,7 +634,7 @@ describe("Cluster-only", () => {
         .then(() => rootLimiter.disconnect(false))
         .then(() => {
           job1.release();
-          return p1;
+          return expect(p1).resolves.toEqual([1]);
         })
         // Poll for the post-cleanup state instead of asserting an intermediate
         // snapshot in the narrow window between dispatch and the 50ms expiration

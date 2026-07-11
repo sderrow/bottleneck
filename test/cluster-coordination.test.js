@@ -1,5 +1,5 @@
-import { sleep } from "./helpers/clock.js";
-import { test, describe, expect, waitForState, deferred } from "./helpers/test-api.js";
+import { describe, expect } from "vitest";
+import { test, waitForState, deferred } from "./helpers/test-api.js";
 const Bottleneck = require("./bottleneck");
 const Scripts = require("../src/cluster/Scripts.js");
 

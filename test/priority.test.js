@@ -1,25 +1,25 @@
+import { describe, expect } from "vitest";
 import { useFakeClock, isFakeClock } from "./helpers/clock.js";
-import { test, describe, expect, waitForState, deferred } from "./helpers/test-api.js";
+import { test, waitForState, deferred } from "./helpers/test-api.js";
 const Bottleneck = require("./bottleneck");
 
 useFakeClock();
 
 describe("Priority", () => {
-  test("Should do basic ordering", ({ harness: h, makeLimiter }) => {
+  test("Should do basic ordering", async ({ harness: h, makeLimiter }) => {
     const limiter = makeLimiter({ maxConcurrent: 1, minTime: 100, rejectOnDrop: false });
 
-    return Promise.all([
+    await Promise.all([
       expect(limiter.schedule(h.slowPromise, 50, null, 1)).resolves.toEqual([1]),
       expect(limiter.schedule(h.promise, null, 2)).resolves.toEqual([2]),
       expect(limiter.schedule({ priority: 1 }, h.promise, null, 5, 6)).resolves.toEqual([5, 6]),
       expect(limiter.schedule(h.promise, null, 3)).resolves.toEqual([3]),
       expect(limiter.schedule(h.promise, null, 4)).resolves.toEqual([4]),
-    ])
-      .then(() => h.flushLimiter(limiter))
-      .then((_results) => {
-        expect(h.log).toHaveCallOrder([[1], [5, 6], [2], [3], [4]]);
-        expect(h).toHaveFinalCallAt(400);
-      });
+    ]);
+
+    await h.flushLimiter(limiter);
+    expect(h.log).toHaveCallOrder([[1], [5, 6], [2], [3], [4]]);
+    expect(h).toHaveFinalCallAt(400);
   });
 
   test("Should support LEAK", async ({ harness: h, makeLimiter }) => {
@@ -185,24 +185,28 @@ describe("Priority", () => {
       committed++;
     });
     const first = deferred();
-    expect(
-      limiter.schedule({ priority: 6 }, h.deferredPromise, first.signal, null, 1),
-    ).resolves.toEqual([1]);
-    expect(limiter.schedule({ priority: 5 }, h.promise, null, 2)).resolves.toEqual([2]);
-    expect(limiter.schedule({ priority: 4 }, h.promise, null, 3)).resolves.toEqual([3]);
-    expect(limiter.schedule({ priority: 3 }, h.promise, null, 4)).resolves.toEqual([4]);
+    const p1 = limiter.schedule({ priority: 6 }, h.deferredPromise, first.signal, null, 1);
+    const p2 = limiter.schedule({ priority: 5 }, h.promise, null, 2);
+    const p3 = limiter.schedule({ priority: 4 }, h.promise, null, 3);
+    const p4 = limiter.schedule({ priority: 3 }, h.promise, null, 4);
     await waitForState(() => {
       expect(committed).toBe(4);
     });
     first.release();
 
-    return h.flushLimiter(limiter).then((_results) => {
-      if (isFakeClock()) {
-        expect(h.results().elapsed).toBe(400);
-      } else {
-        expect(h.results().elapsed).toBeGreaterThanOrEqual(295);
-      }
-      expect(h.log).toHaveCallOrder([[1], [4], [3], [2]]);
-    });
+    await h.flushLimiter(limiter);
+    await Promise.all([
+      expect(p1).resolves.toEqual([1]),
+      expect(p2).resolves.toEqual([2]),
+      expect(p3).resolves.toEqual([3]),
+      expect(p4).resolves.toEqual([4]),
+    ]);
+
+    if (isFakeClock()) {
+      expect(h.results().elapsed).toBe(400);
+    } else {
+      expect(h.results().elapsed).toBeGreaterThanOrEqual(295);
+    }
+    expect(h.log).toHaveCallOrder([[1], [4], [3], [2]]);
   });
 });

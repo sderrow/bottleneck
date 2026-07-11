@@ -1,5 +1,6 @@
+import { describe, expect } from "vitest";
 import { useFakeClock } from "./helpers/clock.js";
-import { test, describe, expect, waitForState } from "./helpers/test-api.js";
+import { test, waitForState } from "./helpers/test-api.js";
 
 useFakeClock();
 
@@ -16,9 +17,9 @@ describe("Stop", () => {
       dropped++;
     });
 
-    expect(limiter.schedule({ id: "0" }, h.promise, null, 0)).resolves.toEqual([0]);
+    const p0 = limiter.schedule({ id: "0" }, h.promise, null, 0);
 
-    expect(limiter.schedule({ id: "1" }, h.slowPromise, 500, null, 1)).resolves.toEqual([1]);
+    const p1 = limiter.schedule({ id: "1" }, h.slowPromise, 500, null, 1);
 
     const scheduledDroppedJob = limiter.schedule({ id: "2" }, h.promise, null, 2);
     const queuedDroppedJob = limiter.schedule({ id: "3" }, h.promise, null, 3);
@@ -40,6 +41,8 @@ describe("Stop", () => {
 
     await Promise.all([
       stopPromise,
+      expect(p0).resolves.toEqual([0]),
+      expect(p1).resolves.toEqual([1]),
       expect(scheduledDroppedJob).rejects.toThrow("Dropped!"),
       expect(queuedDroppedJob).rejects.toThrow("Dropped!"),
       expect(submitFailedJob).rejects.toThrow("Stopped!"),
@@ -68,9 +71,9 @@ describe("Stop", () => {
       dropped++;
     });
 
-    expect(limiter.schedule({ id: "1" }, h.promise, null, 1)).resolves.toEqual([1]);
-    expect(limiter.schedule({ id: "2" }, h.promise, null, 2)).resolves.toEqual([2]);
-    expect(limiter.schedule({ id: "3" }, h.slowPromise, 100, null, 3)).resolves.toEqual([3]);
+    const p1 = limiter.schedule({ id: "1" }, h.promise, null, 1);
+    const p2 = limiter.schedule({ id: "2" }, h.promise, null, 2);
+    const p3 = limiter.schedule({ id: "3" }, h.slowPromise, 100, null, 3);
 
     await waitForState(() => {
       const counts = limiter.counts();
@@ -87,7 +90,13 @@ describe("Stop", () => {
     });
     const submitFailedJob = limiter.schedule(() => Promise.resolve(true));
 
-    await Promise.all([stopPromise, expect(submitFailedJob).rejects.toThrow("Stopped!")]);
+    await Promise.all([
+      stopPromise,
+      expect(p1).resolves.toEqual([1]),
+      expect(p2).resolves.toEqual([2]),
+      expect(p3).resolves.toEqual([3]),
+      expect(submitFailedJob).rejects.toThrow("Stopped!"),
+    ]);
     const counts = limiter.counts();
     expect(dropped).toEqual(0);
     expect(counts.RECEIVED).toEqual(0);
@@ -136,15 +145,9 @@ describe("Stop", () => {
     // All three jobs are still waiting when stop() drops the queue, so all
     // three promises must reject with the stop message.
     const dropped = [
-      expect(limiter.schedule({ id: "1" }, h.promise, null, 1)).rejects.toThrow(
-        "This limiter has been stopped.",
-      ),
-      expect(limiter.schedule({ id: "2" }, h.promise, null, 2)).rejects.toThrow(
-        "This limiter has been stopped.",
-      ),
-      expect(limiter.schedule({ id: "3" }, h.slowPromise, 100, null, 3)).rejects.toThrow(
-        "This limiter has been stopped.",
-      ),
+      limiter.schedule({ id: "1" }, h.promise, null, 1),
+      limiter.schedule({ id: "2" }, h.promise, null, 2),
+      limiter.schedule({ id: "3" }, h.slowPromise, 100, null, 3),
     ];
 
     return limiter
@@ -155,7 +158,9 @@ describe("Stop", () => {
       })
       .catch((err) => {
         expect(err.message).toEqual("stop() has already been called");
-        return Promise.all(dropped);
+        return Promise.all(
+          dropped.map((p) => expect(p).rejects.toThrow("This limiter has been stopped.")),
+        );
       });
   });
 
@@ -168,9 +173,9 @@ describe("Stop", () => {
       minTime: 100,
     });
 
-    expect(limiter.schedule({ id: "1" }, h.promise, null, 1)).resolves.toEqual([1]);
-    expect(limiter.schedule({ id: "2" }, h.promise, null, 2)).resolves.toEqual([2]);
-    expect(limiter.schedule({ id: "3" }, h.slowPromise, 100, null, 3)).resolves.toEqual([3]);
+    const p1 = limiter.schedule({ id: "1" }, h.promise, null, 1);
+    const p2 = limiter.schedule({ id: "2" }, h.promise, null, 2);
+    const p3 = limiter.schedule({ id: "3" }, h.slowPromise, 100, null, 3);
 
     return limiter
       .stop({ dropWaitingJobs: false })
@@ -180,6 +185,11 @@ describe("Stop", () => {
       })
       .catch((err) => {
         expect(err.message).toEqual("stop() has already been called");
+        return Promise.all([
+          expect(p1).resolves.toEqual([1]),
+          expect(p2).resolves.toEqual([2]),
+          expect(p3).resolves.toEqual([3]),
+        ]);
       });
   });
 });

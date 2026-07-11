@@ -1,5 +1,6 @@
+import { describe, expect } from "vitest";
 import { useFakeClock } from "./helpers/clock.js";
-import { test, describe, expect, waitForState, deferred } from "./helpers/test-api.js";
+import { test, waitForState, deferred } from "./helpers/test-api.js";
 const Bottleneck = require("./bottleneck");
 
 useFakeClock();
@@ -11,11 +12,12 @@ describe("Promises", () => {
     limiter.submit(h.job, null, 1, 9, h.noErrVal(1, 9));
     limiter.submit(h.job, null, 2, h.noErrVal(2));
     limiter.submit(h.job, null, 3, h.noErrVal(3));
-    expect(limiter.schedule(h.promise, null, 4, 5)).resolves.toEqual([4, 5]);
+    const p4 = limiter.schedule(h.promise, null, 4, 5);
 
     return h.flushLimiter(limiter).then((_results) => {
       expect(h.log).toHaveCallOrder([[1, 9], [2], [3], [4, 5]]);
       expect(h).toHaveFinalCallAt(300);
+      return expect(p4).resolves.toEqual([4, 5]);
     });
   });
 
@@ -56,8 +58,8 @@ describe("Promises", () => {
       dropped++;
     });
 
-    p1 = expect(limiter.schedule({ id: 1 }, h.slowPromise, 50, null, 1)).resolves.toEqual([1]);
-    p2 = expect(limiter.schedule({ id: 2 }, h.slowPromise, 50, null, 2)).resolves.toEqual([2]);
+    p1 = limiter.schedule({ id: 1 }, h.slowPromise, 50, null, 1);
+    p2 = limiter.schedule({ id: 2 }, h.slowPromise, 50, null, 2);
 
     return limiter
       .schedule({ id: 3 }, h.slowPromise, 50, null, 3)
@@ -65,7 +67,7 @@ describe("Promises", () => {
         expect(err.message).toEqual("This job has been dropped by Bottleneck");
         expect(err).toBeInstanceOf(Bottleneck.BottleneckError);
         caught++;
-        return Promise.all([p1, p2]);
+        return Promise.all([expect(p1).resolves.toEqual([1]), expect(p2).resolves.toEqual([2])]);
       })
       .then(() => h.flushLimiter(limiter))
       .then((_results) => {
@@ -101,11 +103,12 @@ describe("Promises", () => {
       limiter.submit(h.job, null, 3, h.noErrVal(3));
 
       const wrapped = limiter.wrap(h.promise);
-      expect(wrapped(null, 4)).resolves.toEqual([4]);
+      const p4 = wrapped(null, 4);
 
       return h.flushLimiter(limiter).then((_results) => {
         expect(h.log).toHaveCallOrder([[1], [2], [3], [4]]);
         expect(h).toHaveFinalCallAt(300);
+        return expect(p4).resolves.toEqual([4]);
       });
     });
 
@@ -163,8 +166,8 @@ describe("Promises", () => {
       const failureMessage = "BLEW UP!!!";
 
       const wrapped = limiter.wrap(h.promise);
-      expect(wrapped(null, 1)).resolves.toEqual([1]);
-      expect(wrapped(null, 2)).resolves.toEqual([2]);
+      const p1 = wrapped(null, 1);
+      const p2 = wrapped(null, 2);
 
       return wrapped(new Error(failureMessage), 3)
         .catch((err) => {
@@ -174,6 +177,7 @@ describe("Promises", () => {
         .then((_results) => {
           expect(h.log).toHaveCallOrder([[1], [2], [3]]);
           expect(h).toHaveFinalCallAt(200);
+          return Promise.all([expect(p1).resolves.toEqual([1]), expect(p2).resolves.toEqual([2])]);
         });
     });
 
@@ -185,11 +189,11 @@ describe("Promises", () => {
       limiter.schedule(() => primer.signal);
 
       const wrapped = limiter.wrap(h.promise);
-      expect(wrapped(null, 1)).resolves.toEqual([1]);
-      expect(wrapped(null, 2)).resolves.toEqual([2]);
-      expect(wrapped(null, 3)).resolves.toEqual([3]);
-      expect(wrapped(null, 4)).resolves.toEqual([4]);
-      expect(wrapped.withOptions({ priority: 1 }, null, 5)).resolves.toEqual([5]);
+      const p1 = wrapped(null, 1);
+      const p2 = wrapped(null, 2);
+      const p3 = wrapped(null, 3);
+      const p4 = wrapped(null, 4);
+      const p5 = wrapped.withOptions({ priority: 1 }, null, 5);
       const job6 = wrapped.withOptions({ priority: 1 }, new Error(failureMessage), 6);
 
       await waitForState(() => {
@@ -204,6 +208,13 @@ describe("Promises", () => {
         })
         .then((_results) => {
           expect(h.log).toHaveCallOrder([[5], [6], [1], [2], [3], [4]]);
+          return Promise.all([
+            expect(p1).resolves.toEqual([1]),
+            expect(p2).resolves.toEqual([2]),
+            expect(p3).resolves.toEqual([3]),
+            expect(p4).resolves.toEqual([4]),
+            expect(p5).resolves.toEqual([5]),
+          ]);
         });
     });
   });

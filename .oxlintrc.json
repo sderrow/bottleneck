@@ -42,6 +42,21 @@
     "unicorn/no-array-reverse": "off",
     "unicorn/no-array-sort": "off",
     "vitest/valid-describe-callback": "off",
+    // Floating expect().resolves/.rejects assertions warn today and FAIL in
+    // the next vitest major — they must be awaited, returned, or nested in an
+    // awaited Promise.all. Stored-in-variable forms are also rejected.
+    // NOTE: vitest plugin rules only recognize `expect` imported directly from
+    // "vitest" — never re-export it through a helper module.
+    "vitest/valid-expect": "error",
+    // Our `test` comes from test/helpers/test-api.js (fixtures), which the
+    // vitest plugin doesn't recognize as a test block — every expect() would
+    // false-positive as "standalone".
+    "vitest/no-standalone-expect": "off",
+    // This suite deliberately asserts inside catch handlers and typed error
+    // callbacks (e.g. counting expiration errors, asserting stop() reuse
+    // rejections mid-chain); expect-expect still guarantees every test
+    // asserts something.
+    "vitest/no-conditional-expect": "off",
     "vitest/expect-expect": [
       "error",
       {

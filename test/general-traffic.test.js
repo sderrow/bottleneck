@@ -1,5 +1,6 @@
-import { sleep, useFakeClock, useRealClockForThisTest } from "./helpers/clock.js";
-import { test, describe, expect, waitForState, deferred } from "./helpers/test-api.js";
+import { describe, expect } from "vitest";
+import { useFakeClock, useRealClockForThisTest } from "./helpers/clock.js";
+import { test, waitForState, deferred } from "./helpers/test-api.js";
 
 const path = require("path");
 const util = require("util");
@@ -17,7 +18,7 @@ describe("General traffic", () => {
         rejectOnDrop: false,
       });
 
-      const first = expect(limiter.schedule(h.slowPromise, 50, null, 1)).resolves.toEqual([1]);
+      const first = limiter.schedule(h.slowPromise, 50, null, 1);
       // Jobs 2-4 are dropped (highWater 0, rejectOnDrop false): their promises
       // never settle, so wrapping them in expect().resolves would hang the
       // test's auto-awaited assertions. toHaveCallOrder below proves they
@@ -26,7 +27,8 @@ describe("General traffic", () => {
       limiter.schedule(h.slowPromise, 50, null, 3);
       limiter.schedule(h.slowPromise, 50, null, 4);
 
-      return first
+      return expect(first)
+        .resolves.toEqual([1])
         .then(() => h.flushLimiter(limiter, { weight: 0 }))
         .then((_results) => {
           expect(h).toHaveFinalCallAt(50);
@@ -68,9 +70,7 @@ describe("General traffic", () => {
       // before jobs 3/4 commit, jobs 2/3 dispatch, and the test sees 3
       // results instead of the expected 2.
       const primer = deferred();
-      const first = expect(
-        limiter.schedule(h.deferredPromise, primer.signal, null, 1),
-      ).resolves.toEqual([1]);
+      const first = limiter.schedule(h.deferredPromise, primer.signal, null, 1);
 
       // Wait until the primer is running. Once it occupies the running
       // slot at maxConcurrent=1, no subsequent job can be dispatched
@@ -83,7 +83,7 @@ describe("General traffic", () => {
       // never settle — toHaveCallOrder below proves they never ran.
       limiter.schedule(h.slowPromise, 50, null, 2);
       limiter.schedule(h.slowPromise, 50, null, 3);
-      const last = expect(limiter.schedule(h.slowPromise, 50, null, 4)).resolves.toEqual([4]);
+      const last = limiter.schedule(h.slowPromise, 50, null, 4);
 
       // 4 = primer + j2 + j3 + j4 all committed via doQueue.
       await waitForState(() => {
@@ -91,7 +91,7 @@ describe("General traffic", () => {
       });
 
       primer.release();
-      await Promise.all([first, last]);
+      await Promise.all([expect(first).resolves.toEqual([1]), expect(last).resolves.toEqual([4])]);
       await h.flushLimiter(limiter, { weight: 0 });
       expect(h.log).toHaveCallOrder([[1], [4]]);
     });
@@ -104,8 +104,8 @@ describe("General traffic", () => {
     }) => {
       const limiter = makeLimiter({ maxConcurrent: 2 });
 
-      expect(limiter.schedule({ weight: 1 }, h.promise, null, 1)).resolves.toEqual([1]);
-      expect(limiter.schedule({ weight: 2 }, h.promise, null, 2)).resolves.toEqual([2]);
+      const p1 = limiter.schedule({ weight: 1 }, h.promise, null, 1);
+      const p2 = limiter.schedule({ weight: 2 }, h.promise, null, 2);
 
       return limiter
         .schedule({ weight: 3 }, h.promise, null, 3)
@@ -115,29 +115,31 @@ describe("General traffic", () => {
           );
           return h.flushLimiter(limiter);
         })
+        .then(() =>
+          Promise.all([expect(p1).resolves.toEqual([1]), expect(p2).resolves.toEqual([2])]),
+        )
         .then((_results) => {
           expect(h).toHaveFinalCallAt(0);
           expect(h.log).toHaveCallOrder([[1], [2]]);
         });
     });
 
-    test("Should support custom job weights", ({ harness: h, makeLimiter }) => {
+    test("Should support custom job weights", async ({ harness: h, makeLimiter }) => {
       const limiter = makeLimiter({ maxConcurrent: 2 });
 
       // Await all 5 schedule promises before h.flushLimiter(limiter); otherwise the weight: 0
       // job's slowPromise may not have settled by the time h.flushLimiter(limiter) reads calls[].
-      return Promise.all([
+      await Promise.all([
         expect(limiter.schedule({ weight: 1 }, h.slowPromise, 100, null, 1)).resolves.toEqual([1]),
         expect(limiter.schedule({ weight: 2 }, h.slowPromise, 200, null, 2)).resolves.toEqual([2]),
         expect(limiter.schedule({ weight: 1 }, h.slowPromise, 100, null, 3)).resolves.toEqual([3]),
         expect(limiter.schedule({ weight: 1 }, h.slowPromise, 100, null, 4)).resolves.toEqual([4]),
         expect(limiter.schedule({ weight: 0 }, h.slowPromise, 100, null, 5)).resolves.toEqual([5]),
-      ])
-        .then(() => h.flushLimiter(limiter))
-        .then((_results) => {
-          expect(h).toHaveFinalCallAt(400);
-          expect(h.log).toHaveCallOrder([[1], [2], [3], [4], [5]]);
-        });
+      ]);
+
+      await h.flushLimiter(limiter);
+      expect(h).toHaveFinalCallAt(400);
+      expect(h.log).toHaveCallOrder([[1], [2], [3], [4], [5]]);
     });
 
     test("Should overflow at the correct rate", ({ harness: h, makeLimiter }) => {
@@ -153,20 +155,13 @@ describe("General traffic", () => {
         calledDepleted++;
       });
 
-      const p1 = expect(
-        limiter.schedule({ weight: 1, id: 1 }, h.slowPromise, 100, null, 1),
-      ).resolves.toEqual([1]);
-      const p2 = expect(
-        limiter.schedule({ weight: 2, id: 2 }, h.slowPromise, 150, null, 2),
-      ).resolves.toEqual([2]);
-      const p3 = expect(
-        limiter.schedule({ weight: 1, id: 3 }, h.slowPromise, 100, null, 3),
-      ).resolves.toEqual([3]);
-      const p4 = expect(
-        limiter.schedule({ weight: 1, id: 4 }, h.slowPromise, 100, null, 4),
-      ).resolves.toEqual([4]);
+      const p1 = limiter.schedule({ weight: 1, id: 1 }, h.slowPromise, 100, null, 1);
+      const p2 = limiter.schedule({ weight: 2, id: 2 }, h.slowPromise, 150, null, 2);
+      const p3 = limiter.schedule({ weight: 1, id: 3 }, h.slowPromise, 100, null, 3);
+      const p4 = limiter.schedule({ weight: 1, id: 4 }, h.slowPromise, 100, null, 4);
 
-      return Promise.all([p1, p2])
+      return expect(Promise.all([p1, p2]))
+        .resolves.toEqual([[1], [2]])
         .then(() => {
           expect(limiter.queued()).toEqual(2);
           return limiter.currentReservoir();
@@ -191,7 +186,9 @@ describe("General traffic", () => {
           expect(reservoir).toEqual(0);
           return limiter.updateSettings({ reservoir: 1 });
         })
-        .then(() => Promise.all([p3, p4]))
+        .then(() =>
+          Promise.all([expect(p3).resolves.toEqual([3]), expect(p4).resolves.toEqual([4])]),
+        )
         .then(() => limiter.currentReservoir())
         .then((reservoir) => {
           expect(reservoir).toEqual(0);
@@ -202,7 +199,7 @@ describe("General traffic", () => {
   });
 
   describe("Expiration", () => {
-    test("Should cancel jobs", { timeout: 20000 }, ({ harness: h, makeLimiter }) => {
+    test("Should cancel jobs", { timeout: 20000 }, async ({ harness: h, makeLimiter }) => {
       const limiter = makeLimiter({ maxConcurrent: 2 });
       const t0 = Date.now();
 
@@ -215,7 +212,7 @@ describe("General traffic", () => {
       // explicitly inside the catch chain, after verifying running===1.
       const holdJ1 = deferred();
 
-      return Promise.all([
+      await Promise.all([
         expect(
           limiter.schedule(
             { id: "very-slow-no-expiration" },
@@ -250,18 +247,15 @@ describe("General traffic", () => {
               holdJ1.release();
             });
           }),
-      ])
-        .then(() => {
-          // Lower bound proves the unexpired job wasn't aborted early by
-          // the other job's expiration — j1 ran for at least 50ms (j2's
-          // expiration window) plus the 100ms hold above.
-          expect(Date.now() - t0).toBeGreaterThan(145);
-          return Promise.all([limiter.running(), limiter.done()]);
-        })
-        .then(([running, done]) => {
-          expect(running).toEqual(0);
-          expect(done).toEqual(2);
-        });
+      ]);
+
+      // Lower bound proves the unexpired job wasn't aborted early by
+      // the other job's expiration — j1 ran for at least 50ms (j2's
+      // expiration window) plus the 100ms hold above.
+      expect(Date.now() - t0).toBeGreaterThan(145);
+      const [running, done] = await Promise.all([limiter.running(), limiter.done()]);
+      expect(running).toEqual(0);
+      expect(done).toEqual(2);
     });
   });
 
@@ -306,7 +300,7 @@ describe("General traffic", () => {
   });
 
   describe("Reservoir Refresh", () => {
-    test("Should auto-refresh the reservoir", ({ harness: h, makeLimiter }) => {
+    test("Should auto-refresh the reservoir", async ({ harness: h, makeLimiter }) => {
       const limiter = makeLimiter({
         reservoir: 8,
         reservoirRefreshInterval: 150,
@@ -319,38 +313,37 @@ describe("General traffic", () => {
         calledDepleted++;
       });
 
-      return Promise.all([
+      await Promise.all([
         expect(limiter.schedule({ weight: 1 }, h.promise, null, 1)).resolves.toEqual([1]),
         expect(limiter.schedule({ weight: 2 }, h.promise, null, 2)).resolves.toEqual([2]),
         expect(limiter.schedule({ weight: 3 }, h.promise, null, 3)).resolves.toEqual([3]),
         expect(limiter.schedule({ weight: 4 }, h.promise, null, 4)).resolves.toEqual([4]),
         expect(limiter.schedule({ weight: 5 }, h.promise, null, 5)).resolves.toEqual([5]),
-      ])
-        .then(() => h.flushLimiter(limiter, { weight: 0, priority: 9 }))
-        .then((results) => {
-          expect(h.log).toHaveCallOrder([[1], [2], [3], [4], [5]]);
-          // The contract is "`depleted` fires when the reservoir reaches 0".
-          // We get >=2 fires reliably:
-          //   1) j5 (weight 5) dispatching after the t=300 refresh
-          //      reduces reservoir 5→0
-          //   2) h.last (weight 0) dispatching when reservoir is already 0
-          //      (a register with weight=0 returns reservoir=0 → depleted).
-          // Under sustained event-loop pressure (~900ms+ test duration on
-          // this normally-200ms test) a redis-driven heartbeat-published
-          // capacity message can interleave with h.last's own drain such
-          // that a third successful register-at-zero is observed. That's
-          // benign — the contract is "fires when reservoir is 0", not
-          // "fires exactly twice". We allow >=2 to absorb this rare case.
-          expect(calledDepleted).toBeGreaterThanOrEqual(2);
-          // Jobs 4 and 5 must wait for refreshes; that lower bound proves the
-          // refresh gate worked. Asserting current reservoir or a tight upper
-          // bound (checkDuration(300)) races a third refresh at t=450ms.
-          expect(results).toHaveCallAt(3, 150);
-          expect(results).toHaveCallAt(4, 300);
-        });
+      ]);
+
+      const results = await h.flushLimiter(limiter, { weight: 0, priority: 9 });
+      expect(h.log).toHaveCallOrder([[1], [2], [3], [4], [5]]);
+      // The contract is "`depleted` fires when the reservoir reaches 0".
+      // We get >=2 fires reliably:
+      //   1) j5 (weight 5) dispatching after the t=300 refresh
+      //      reduces reservoir 5→0
+      //   2) h.last (weight 0) dispatching when reservoir is already 0
+      //      (a register with weight=0 returns reservoir=0 → depleted).
+      // Under sustained event-loop pressure (~900ms+ test duration on
+      // this normally-200ms test) a redis-driven heartbeat-published
+      // capacity message can interleave with h.last's own drain such
+      // that a third successful register-at-zero is observed. That's
+      // benign — the contract is "fires when reservoir is 0", not
+      // "fires exactly twice". We allow >=2 to absorb this rare case.
+      expect(calledDepleted).toBeGreaterThanOrEqual(2);
+      // Jobs 4 and 5 must wait for refreshes; that lower bound proves the
+      // refresh gate worked. Asserting current reservoir or a tight upper
+      // bound (checkDuration(300)) races a third refresh at t=450ms.
+      expect(results).toHaveCallAt(3, 150);
+      expect(results).toHaveCallAt(4, 300);
     });
 
-    test("Should allow staggered X by Y type usage", ({ harness: h, makeLimiter }) => {
+    test("Should allow staggered X by Y type usage", async ({ harness: h, makeLimiter }) => {
       const limiter = makeLimiter({
         reservoir: 2,
         reservoirRefreshInterval: 150,
@@ -358,22 +351,21 @@ describe("General traffic", () => {
         heartbeatInterval: 75, // not for production use
       });
 
-      return Promise.all([
+      await Promise.all([
         expect(limiter.schedule(h.promise, null, 1)).resolves.toEqual([1]),
         expect(limiter.schedule(h.promise, null, 2)).resolves.toEqual([2]),
         expect(limiter.schedule(h.promise, null, 3)).resolves.toEqual([3]),
         expect(limiter.schedule(h.promise, null, 4)).resolves.toEqual([4]),
-      ])
-        .then(() => h.flushLimiter(limiter, { weight: 0, priority: 9 }))
-        .then((results) => {
-          expect(h.log).toHaveCallOrder([[1], [2], [3], [4]]);
-          // Jobs 3 and 4 must wait for the reservoir refresh at t=150ms; that
-          // lower bound proves the gate worked. Asserting the *current*
-          // reservoir is 0 races a possible second refresh at t=300 — and
-          // checkDuration(150) is too tight under load.
-          expect(results).toHaveCallAt(2, 150);
-          expect(results).toHaveCallAt(3, 150);
-        });
+      ]);
+
+      const results = await h.flushLimiter(limiter, { weight: 0, priority: 9 });
+      expect(h.log).toHaveCallOrder([[1], [2], [3], [4]]);
+      // Jobs 3 and 4 must wait for the reservoir refresh at t=150ms; that
+      // lower bound proves the gate worked. Asserting the *current*
+      // reservoir is 0 races a possible second refresh at t=300 — and
+      // checkDuration(150) is too tight under load.
+      expect(results).toHaveCallAt(2, 150);
+      expect(results).toHaveCallAt(3, 150);
     });
 
     test("Should keep process alive until queue is empty", async ({ makeLimiter }) => {
@@ -471,7 +463,7 @@ describe("General traffic", () => {
       expect(results).toHaveCallAt(4, 450);
     });
 
-    test("Should allow staggered X by Y type usage", ({ harness: h, makeLimiter }) => {
+    test("Should allow staggered X by Y type usage", async ({ harness: h, makeLimiter }) => {
       const limiter = makeLimiter({
         reservoir: 2,
         reservoirIncreaseInterval: 150,
@@ -479,32 +471,30 @@ describe("General traffic", () => {
         heartbeatInterval: 75, // not for production use
       });
 
-      return Promise.all([
+      await Promise.all([
         expect(limiter.schedule(h.promise, null, 1)).resolves.toEqual([1]),
         expect(limiter.schedule(h.promise, null, 2)).resolves.toEqual([2]),
         expect(limiter.schedule(h.promise, null, 3)).resolves.toEqual([3]),
         expect(limiter.schedule(h.promise, null, 4)).resolves.toEqual([4]),
-      ])
-        .then(() => limiter.currentReservoir())
-        .then((reservoir) => {
-          // After all 4 jobs dispatch, reservoir has been depleted to 0 twice
-          // (initial 2 by jobs 1,2; refill 2 by jobs 3,4). Under load, the
-          // 150ms increase tick can fire again *between* Promise.all resolving
-          // and currentReservoir() returning, bumping it back to 2 (or, very
-          // rarely, 4). Allowing up to one extra tick of slop keeps a sanity
-          // check while removing the flake. The actual gating contract is
-          // verified by the lower-bound time assertions below.
-          expect(reservoir).toBeLessThanOrEqual(2);
-          return h.flushLimiter(limiter, { weight: 0, priority: 9 });
-        })
-        .then((results) => {
-          expect(h.log).toHaveCallOrder([[1], [2], [3], [4]]);
-          // Jobs 3 and 4 must wait for the reservoir refill at t=150ms; lower
-          // bound proves the refill gate worked. No upper bound — under load
-          // dispatch latency adds to the wait time but doesn't violate the contract.
-          expect(results).toHaveCallAt(2, 150);
-          expect(results).toHaveCallAt(3, 150);
-        });
+      ]);
+
+      const reservoir = await limiter.currentReservoir();
+      // After all 4 jobs dispatch, reservoir has been depleted to 0 twice
+      // (initial 2 by jobs 1,2; refill 2 by jobs 3,4). Under load, the
+      // 150ms increase tick can fire again *between* Promise.all resolving
+      // and currentReservoir() returning, bumping it back to 2 (or, very
+      // rarely, 4). Allowing up to one extra tick of slop keeps a sanity
+      // check while removing the flake. The actual gating contract is
+      // verified by the lower-bound time assertions below.
+      expect(reservoir).toBeLessThanOrEqual(2);
+
+      const results = await h.flushLimiter(limiter, { weight: 0, priority: 9 });
+      expect(h.log).toHaveCallOrder([[1], [2], [3], [4]]);
+      // Jobs 3 and 4 must wait for the reservoir refill at t=150ms; lower
+      // bound proves the refill gate worked. No upper bound — under load
+      // dispatch latency adds to the wait time but doesn't violate the contract.
+      expect(results).toHaveCallAt(2, 150);
+      expect(results).toHaveCallAt(3, 150);
     });
 
     test("Should keep process alive until queue is empty", async ({ makeLimiter }) => {

@@ -1,5 +1,6 @@
+import { describe, expect } from "vitest";
 import { useFakeClock } from "./helpers/clock.js";
-import { test, describe, expect, waitForState, deferred } from "./helpers/test-api.js";
+import { test, waitForState, deferred } from "./helpers/test-api.js";
 const Bottleneck = require("./bottleneck");
 
 useFakeClock();
@@ -212,15 +213,9 @@ describe("General", () => {
       expect(limiter.counts()).toEqual({ RECEIVED: 0, QUEUED: 0, RUNNING: 0, EXECUTING: 0 });
 
       const hold1 = deferred();
-      expect(
-        limiter.schedule({ weight: 1, id: 1 }, h.deferredPromise, hold1.signal, null, 1),
-      ).resolves.toEqual([1]);
-      expect(limiter.schedule({ weight: 1, id: 2 }, h.slowPromise, 200, null, 2)).resolves.toEqual([
-        2,
-      ]);
-      expect(limiter.schedule({ weight: 2, id: 3 }, h.slowPromise, 100, null, 3)).resolves.toEqual([
-        3,
-      ]);
+      const p1 = limiter.schedule({ weight: 1, id: 1 }, h.deferredPromise, hold1.signal, null, 1);
+      const p2 = limiter.schedule({ weight: 1, id: 2 }, h.slowPromise, 200, null, 2);
+      const p3 = limiter.schedule({ weight: 2, id: 3 }, h.slowPromise, 100, null, 3);
       expect(limiter.counts()).toEqual({ RECEIVED: 3, QUEUED: 0, RUNNING: 0, EXECUTING: 0 });
 
       await waitForState(() => {
@@ -238,6 +233,11 @@ describe("General", () => {
 
       hold1.release();
       await h.flushLimiter(limiter);
+      await Promise.all([
+        expect(p1).resolves.toEqual([1]),
+        expect(p2).resolves.toEqual([2]),
+        expect(p3).resolves.toEqual([3]),
+      ]);
       expect(h).toHaveFinalCallAt(400);
       expect(h.log).toHaveCallOrder([[1], [2], [3]]);
     });
@@ -262,15 +262,9 @@ describe("General", () => {
       // (job 2 — was RUNNING for one microtask), QUEUED:1}). Holding job 1
       // with deferredPromise eliminates the race.
       const hold1 = deferred();
-      expect(
-        limiter.schedule({ weight: 1, id: 1 }, h.deferredPromise, hold1.signal, null, 1),
-      ).resolves.toEqual([1]);
-      expect(limiter.schedule({ weight: 1, id: 2 }, h.slowPromise, 200, null, 2)).resolves.toEqual([
-        2,
-      ]);
-      expect(limiter.schedule({ weight: 2, id: 3 }, h.slowPromise, 100, null, 3)).resolves.toEqual([
-        3,
-      ]);
+      const p1 = limiter.schedule({ weight: 1, id: 1 }, h.deferredPromise, hold1.signal, null, 1);
+      const p2 = limiter.schedule({ weight: 1, id: 2 }, h.slowPromise, 200, null, 2);
+      const p3 = limiter.schedule({ weight: 2, id: 3 }, h.slowPromise, 100, null, 3);
       expect(limiter.counts()).toEqual({
         RECEIVED: 3,
         QUEUED: 0,
@@ -322,6 +316,11 @@ describe("General", () => {
       expect(limiter.jobStatus(3)).toEqual("QUEUED");
 
       await h.flushLimiter(limiter);
+      await Promise.all([
+        expect(p1).resolves.toEqual([1]),
+        expect(p2).resolves.toEqual([2]),
+        expect(p3).resolves.toEqual([3]),
+      ]);
 
       expect(limiter.counts()).toEqual({
         RECEIVED: 0,
@@ -353,12 +352,8 @@ describe("General", () => {
       const hold1 = deferred();
 
       limiter.submit({ weight: 1, id: 1 }, h.deferredJob, hold1.signal, null, 1, h.noErrVal(1));
-      expect(limiter.schedule({ weight: 1, id: 2 }, h.slowPromise, 200, null, 2)).resolves.toEqual([
-        2,
-      ]);
-      expect(limiter.schedule({ weight: 2, id: 3 }, h.slowPromise, 100, null, 3)).resolves.toEqual([
-        3,
-      ]);
+      const p2 = limiter.schedule({ weight: 1, id: 2 }, h.slowPromise, 200, null, 2);
+      const p3 = limiter.schedule({ weight: 2, id: 3 }, h.slowPromise, 100, null, 3);
       expect(limiter.counts()).toEqual({
         RECEIVED: 3,
         QUEUED: 0,
@@ -414,6 +409,7 @@ describe("General", () => {
       expect(limiter.jobs("QUEUED")).toEqual(["3"]);
 
       await h.flushLimiter(limiter);
+      await Promise.all([expect(p2).resolves.toEqual([2]), expect(p3).resolves.toEqual([3])]);
 
       expect(limiter.counts()).toEqual({
         RECEIVED: 0,
@@ -463,15 +459,9 @@ describe("General", () => {
       });
 
       const hold1 = deferred();
-      expect(
-        limiter.schedule({ weight: 1, id: 1 }, h.deferredPromise, hold1.signal, null, 1),
-      ).resolves.toEqual([1]);
-      expect(limiter.schedule({ weight: 1, id: 2 }, h.slowPromise, 200, null, 2)).resolves.toEqual([
-        2,
-      ]);
-      expect(limiter.schedule({ weight: 2, id: 3 }, h.slowPromise, 100, null, 3)).resolves.toEqual([
-        3,
-      ]);
+      const p1 = limiter.schedule({ weight: 1, id: 1 }, h.deferredPromise, hold1.signal, null, 1);
+      const p2 = limiter.schedule({ weight: 1, id: 2 }, h.slowPromise, 200, null, 2);
+      const p3 = limiter.schedule({ weight: 2, id: 3 }, h.slowPromise, 100, null, 3);
       expect(limiter.counts()).toEqual({
         RECEIVED: 3,
         QUEUED: 0,
@@ -524,6 +514,11 @@ describe("General", () => {
       expect([onReceived, onQueued, onScheduled, onExecuting, onDone]).toEqual([3, 3, 2, 2, 1]);
 
       await h.flushLimiter(limiter);
+      await Promise.all([
+        expect(p1).resolves.toEqual([1]),
+        expect(p2).resolves.toEqual([2]),
+        expect(p3).resolves.toEqual([3]),
+      ]);
 
       expect(limiter.counts()).toEqual({
         RECEIVED: 0,
@@ -609,10 +604,11 @@ describe("General", () => {
         calledDepleted++;
       });
 
-      expect(limiter.schedule(h.slowPromise, 50, null, 1)).resolves.toEqual([1]);
+      const p1 = limiter.schedule(h.slowPromise, 50, null, 1);
 
       return expect(limiter.schedule(h.promise, null, 2))
         .resolves.toEqual([2])
+        .then(() => expect(p1).resolves.toEqual([1]))
         .then(() => {
           expect(calledEmptyOnce).toEqual(1);
           expect(calledIdleOnce).toEqual(1);
@@ -639,19 +635,22 @@ describe("General", () => {
       // emit an unrelated ETIMEDOUT first, which would otherwise pre-increment
       // any counter and starve the resolve condition.
       let fired = false;
-      return new Promise((resolve) => {
+      const errored = new Promise((resolve) => {
         limiter.on("error", (err) => {
           if (err.message === "Oh noes!" && !fired) {
             fired = true;
             resolve();
           }
         });
-        limiter.on("empty", () => {
-          throw new Error("Oh noes!");
-        });
-
-        expect(limiter.schedule(h.promise, null, 1)).resolves.toEqual([1]);
       });
+      limiter.on("empty", () => {
+        throw new Error("Oh noes!");
+      });
+
+      return Promise.all([
+        expect(limiter.schedule(h.promise, null, 1)).resolves.toEqual([1]),
+        errored,
+      ]);
     });
 
     test("Should wait for async event listeners", ({ harness: h, makeLimiter }) => {
@@ -659,22 +658,25 @@ describe("General", () => {
       // Match on the specific error message — under load any unrelated redis
       // error could fire first; we only care that "It broke!" eventually does.
       let fired = false;
-      return new Promise((resolve) => {
+      const errored = new Promise((resolve) => {
         limiter.on("error", (err) => {
           if (err.message === "It broke!" && !fired) {
             fired = true;
             resolve();
           }
         });
-        limiter.on("empty", () =>
-          h.slowPromise(100, null, 1, 2).then((x) => {
-            expect(x).toEqual([1, 2]);
-            throw new Error("It broke!");
-          }),
-        );
-
-        expect(limiter.schedule(h.promise, null, 1)).resolves.toEqual([1]);
       });
+      limiter.on("empty", () =>
+        h.slowPromise(100, null, 1, 2).then((x) => {
+          expect(x).toEqual([1, 2]);
+          throw new Error("It broke!");
+        }),
+      );
+
+      return Promise.all([
+        expect(limiter.schedule(h.promise, null, 1)).resolves.toEqual([1]),
+        errored,
+      ]);
     });
   });
 });

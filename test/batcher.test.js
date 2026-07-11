@@ -1,5 +1,6 @@
+import { describe, expect } from "vitest";
 import { useFakeClock, sleep } from "./helpers/clock.js";
-import { test, describe, expect } from "./helpers/test-api.js";
+import { test } from "./helpers/test-api.js";
 const Bottleneck = require("./bottleneck");
 
 // Batcher is datastore-independent, so this file only runs in the `local`

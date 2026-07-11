@@ -1,5 +1,6 @@
+import { describe, expect } from "vitest";
 import { useFakeClock, isFakeClock } from "./helpers/clock.js";
-import { test, describe, expect } from "./helpers/test-api.js";
+import { test } from "./helpers/test-api.js";
 
 useFakeClock();
 

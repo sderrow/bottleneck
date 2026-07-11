@@ -1,4 +1,5 @@
-import { test, describe, expect } from "./helpers/test-api.js";
+import { describe, expect } from "vitest";
+import { test } from "./helpers/test-api.js";
 const Bottleneck = require("./bottleneck");
 const Redis = require("ioredis");
 const buildClientOptions = require("./redis-client-options");
@@ -67,8 +68,8 @@ describe("ioredis-only", () => {
       connection,
     });
 
-    expect(limiter.schedule(h.promise, null, 1)).resolves.toEqual([1]);
-    expect(limiter.schedule(h.promise, null, 2)).resolves.toEqual([2]);
+    const p1 = limiter.schedule(h.promise, null, 1);
+    const p2 = limiter.schedule(h.promise, null, 2);
 
     return h
       .flushLimiter(limiter)
@@ -82,6 +83,7 @@ describe("ioredis-only", () => {
       })
       .then(() => {
         expect(limiter.clients().client.status).toStrictEqual("ready");
+        return Promise.all([expect(p1).resolves.toEqual([1]), expect(p2).resolves.toEqual([2])]);
       });
   });
 
@@ -96,8 +98,8 @@ describe("ioredis-only", () => {
       connection,
     });
 
-    expect(limiter.schedule(h.promise, null, 1)).resolves.toEqual([1]);
-    expect(limiter.schedule(h.promise, null, 2)).resolves.toEqual([2]);
+    const p1 = limiter.schedule(h.promise, null, 1);
+    const p2 = limiter.schedule(h.promise, null, 2);
 
     return h
       .flushLimiter(limiter)
@@ -112,6 +114,7 @@ describe("ioredis-only", () => {
       })
       .then(() => {
         expect(limiter.clients().client.status).toStrictEqual("ready");
+        return Promise.all([expect(p1).resolves.toEqual([1]), expect(p2).resolves.toEqual([2])]);
       });
   });
 

@@ -1,5 +1,6 @@
+import { describe, expect } from "vitest";
 import { useFakeClock } from "./helpers/clock.js";
-import { test, describe, expect, waitForState } from "./helpers/test-api.js";
+import { test, waitForState } from "./helpers/test-api.js";
 const Bottleneck = require("./bottleneck");
 
 useFakeClock();
@@ -226,7 +227,7 @@ describe("Group", () => {
     expect(limiter2._store.storeOptions.minTime).toStrictEqual(200);
   });
 
-  test("Should support keys(), limiters(), deleteKey()", ({ harness: h, track }) => {
+  test("Should support keys(), limiters(), deleteKey()", async ({ harness: h, track }) => {
     const group1 = track(
       new Bottleneck.Group({
         maxConcurrent: 1,
@@ -235,23 +236,23 @@ describe("Group", () => {
     const KEY_A = "AAA";
     const KEY_B = "BBB";
 
-    return Promise.all([
+    await Promise.all([
       expect(group1.key(KEY_A).schedule(h.promise, null, 1)).resolves.toEqual([1]),
       expect(group1.key(KEY_B).schedule(h.promise, null, 2)).resolves.toEqual([2]),
-    ])
-      .then(() => {
-        const keys = group1.keys();
-        const limiters = group1.limiters();
-        expect(keys).toStrictEqual([KEY_A, KEY_B]);
-        expect(limiters.length).toStrictEqual(2);
+    ]);
 
-        limiters.forEach((entry, i) => {
-          expect(entry.key).toStrictEqual(keys[i]);
-          expect(entry.limiter).toBeInstanceOf(Bottleneck);
-        });
+    const keys = group1.keys();
+    const limiters = group1.limiters();
+    expect(keys).toStrictEqual([KEY_A, KEY_B]);
+    expect(limiters.length).toStrictEqual(2);
 
-        return group1.deleteKey(KEY_A);
-      })
+    limiters.forEach((entry, i) => {
+      expect(entry.key).toStrictEqual(keys[i]);
+      expect(entry.limiter).toBeInstanceOf(Bottleneck);
+    });
+
+    return group1
+      .deleteKey(KEY_A)
       .then((deleted) => {
         expect(deleted).toStrictEqual(true);
         expect(group1.keys().length).toStrictEqual(1);

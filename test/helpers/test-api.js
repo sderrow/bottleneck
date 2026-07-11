@@ -166,6 +166,3 @@ export const test = baseTest.extend({
     await use(makeLimiter(limiterOptions, limiterMeta));
   },
 });
-
-export const expect = vitestExpect;
-export { describe, vi } from "vitest";
