@@ -5,7 +5,7 @@ const Bottleneck = require("./bottleneck");
 useFakeClock();
 
 describe("Promises", () => {
-  test("Should support promises", function ({ harness: h, makeLimiter }) {
+  test("Should support promises", ({ harness: h, makeLimiter }) => {
     const limiter = makeLimiter({ maxConcurrent: 1, minTime: 100 });
 
     limiter.submit(h.job, null, 1, 9, h.noErrVal(1, 9));
@@ -13,33 +13,33 @@ describe("Promises", () => {
     limiter.submit(h.job, null, 3, h.noErrVal(3));
     h.pNoErrVal(limiter.schedule(h.promise, null, 4, 5), 4, 5);
 
-    return h.flushLimiter(limiter).then(function (_results) {
+    return h.flushLimiter(limiter).then((_results) => {
       expect(h.log).toHaveCallOrder([[1, 9], [2], [3], [4, 5]]);
       expect(h).toHaveFinalCallAt(300);
     });
   });
 
-  test("Should pass error on failure", function ({ harness: h, makeLimiter }) {
+  test("Should pass error on failure", ({ harness: h, makeLimiter }) => {
     const failureMessage = "failed";
     const limiter = makeLimiter({ maxConcurrent: 1, minTime: 100 });
 
-    return limiter.schedule(h.promise, new Error(failureMessage)).catch(function (err) {
+    return limiter.schedule(h.promise, new Error(failureMessage)).catch((err) => {
       expect(err.message).toEqual(failureMessage);
     });
   });
 
-  test("Should allow non-Promise returns", function ({ makeLimiter }) {
+  test("Should allow non-Promise returns", ({ makeLimiter }) => {
     const limiter = makeLimiter();
     const str = "This is a string";
 
     return limiter
       .schedule(() => str)
-      .then(function (x) {
+      .then((x) => {
         expect(x).toEqual(str);
       });
   });
 
-  test("Should get rejected when rejectOnDrop is true", function ({ harness: h, makeLimiter }) {
+  test("Should get rejected when rejectOnDrop is true", ({ harness: h, makeLimiter }) => {
     const limiter = makeLimiter({
       maxConcurrent: 1,
       minTime: 0,
@@ -52,7 +52,7 @@ describe("Promises", () => {
     let p1;
     let p2;
 
-    limiter.on("dropped", function () {
+    limiter.on("dropped", () => {
       dropped++;
     });
 
@@ -61,16 +61,16 @@ describe("Promises", () => {
 
     return limiter
       .schedule({ id: 3 }, h.slowPromise, 50, null, 3)
-      .catch(function (err) {
+      .catch((err) => {
         expect(err.message).toEqual("This job has been dropped by Bottleneck");
         expect(err).toBeInstanceOf(Bottleneck.BottleneckError);
         caught++;
         return Promise.all([p1, p2]);
       })
-      .then(function () {
+      .then(() => {
         return h.flushLimiter(limiter);
       })
-      .then(function (_results) {
+      .then((_results) => {
         expect(h.log).toHaveCallOrder([[1], [2]]);
         expect(h).toHaveFinalCallAt(100);
         expect(dropped).toEqual(1);
@@ -78,9 +78,9 @@ describe("Promises", () => {
       });
   });
 
-  test("Should automatically wrap an exception in a rejected promise - schedule()", function ({
+  test("Should automatically wrap an exception in a rejected promise - schedule()", ({
     makeLimiter,
-  }) {
+  }) => {
     const limiter = makeLimiter({ maxConcurrent: 1, minTime: 100 });
 
     return limiter
@@ -93,11 +93,11 @@ describe("Promises", () => {
       });
   });
 
-  describe("Wrap", function () {
+  describe("Wrap", () => {
     let fn;
     test.override({ limiterOptions: { maxConcurrent: 1, minTime: 100 } });
 
-    test("Should wrap", function ({ harness: h, limiter }) {
+    test("Should wrap", ({ harness: h, limiter }) => {
       limiter.submit(h.job, null, 1, h.noErrVal(1));
       limiter.submit(h.job, null, 2, h.noErrVal(2));
       limiter.submit(h.job, null, 3, h.noErrVal(3));
@@ -105,15 +105,13 @@ describe("Promises", () => {
       const wrapped = limiter.wrap(h.promise);
       h.pNoErrVal(wrapped(null, 4), 4);
 
-      return h.flushLimiter(limiter).then(function (_results) {
+      return h.flushLimiter(limiter).then((_results) => {
         expect(h.log).toHaveCallOrder([[1], [2], [3], [4]]);
         expect(h).toHaveFinalCallAt(300);
       });
     });
 
-    test("Should automatically wrap a returned value in a resolved promise", function ({
-      limiter,
-    }) {
+    test("Should automatically wrap a returned value in a resolved promise", ({ limiter }) => {
       fn = limiter.wrap(() => {
         return 7;
       });
@@ -123,7 +121,7 @@ describe("Promises", () => {
       });
     });
 
-    test("Should automatically wrap an exception in a rejected promise", function ({ limiter }) {
+    test("Should automatically wrap an exception in a rejected promise", ({ limiter }) => {
       fn = limiter.wrap(() => {
         throw new Error("I will reject");
       });
@@ -135,7 +133,7 @@ describe("Promises", () => {
         });
     });
 
-    test("Should inherit the original target for wrapped methods", function ({ limiter }) {
+    test("Should inherit the original target for wrapped methods", ({ limiter }) => {
       const object = {
         fn: limiter.wrap(function () {
           return this;
@@ -147,7 +145,7 @@ describe("Promises", () => {
       });
     });
 
-    test("Should inherit the original target on prototype methods", function ({ limiter }) {
+    test("Should inherit the original target on prototype methods", ({ limiter }) => {
       class Animal {
         constructor(name) {
           this.name = name;
@@ -165,7 +163,7 @@ describe("Promises", () => {
       });
     });
 
-    test("Should pass errors back", function ({ harness: h, limiter }) {
+    test("Should pass errors back", ({ harness: h, limiter }) => {
       const failureMessage = "BLEW UP!!!";
 
       const wrapped = limiter.wrap(h.promise);
@@ -173,22 +171,22 @@ describe("Promises", () => {
       h.pNoErrVal(wrapped(null, 2), 2);
 
       return wrapped(new Error(failureMessage), 3)
-        .catch(function (err) {
+        .catch((err) => {
           expect(err.message).toEqual(failureMessage);
           return h.flushLimiter(limiter);
         })
-        .then(function (_results) {
+        .then((_results) => {
           expect(h.log).toHaveCallOrder([[1], [2], [3]]);
           expect(h).toHaveFinalCallAt(200);
         });
     });
 
-    test("Should allow passing options", async function ({ harness: h, makeLimiter }) {
+    test("Should allow passing options", async ({ harness: h, makeLimiter }) => {
       const failureMessage = "BLEW UP!!!";
       const limiter = makeLimiter({ maxConcurrent: 1, minTime: 50 });
 
       const primer = deferred();
-      limiter.schedule(function () {
+      limiter.schedule(() => {
         return primer.signal;
       });
 
@@ -206,11 +204,11 @@ describe("Promises", () => {
       primer.release();
 
       return job6
-        .catch(function (err) {
+        .catch((err) => {
           expect(err.message).toEqual(failureMessage);
           return h.flushLimiter(limiter);
         })
-        .then(function (_results) {
+        .then((_results) => {
           expect(h.log).toHaveCallOrder([[5], [6], [1], [2], [3], [4]]);
         });
     });

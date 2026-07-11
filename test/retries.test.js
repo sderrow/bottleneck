@@ -3,11 +3,11 @@ import { test, describe, expect } from "./helpers/test-api.js";
 
 useFakeClock();
 
-const badJob = function () {
+const badJob = () => {
   return Promise.reject(new Error("boom"));
 };
 
-const assertBackoffs = function (attemptTimes, backoffMs) {
+const assertBackoffs = (attemptTimes, backoffMs) => {
   for (let i = 1; i < attemptTimes.length; i++) {
     const delta = attemptTimes[i] - attemptTimes[i - 1];
     if (isFakeClock()) {
@@ -19,26 +19,26 @@ const assertBackoffs = function (attemptTimes, backoffMs) {
 };
 
 describe("Retries", () => {
-  test("Should retry when requested by the user (sync)", async function ({ makeLimiter }) {
+  test("Should retry when requested by the user (sync)", async ({ makeLimiter }) => {
     const limiter = makeLimiter({ trackDoneStatus: true });
     let failedEvents = 0;
     let retryEvents = 0;
     const attemptTimes = [];
 
-    limiter.on("failed", function (error, info) {
+    limiter.on("failed", (error, info) => {
       expect(limiter.counts().EXECUTING).toStrictEqual(1);
       expect(info.retryCount).toStrictEqual(failedEvents);
       failedEvents++;
       return 50;
     });
 
-    limiter.on("retry", function (_error, _info) {
+    limiter.on("retry", (_error, _info) => {
       expect(limiter.counts().EXECUTING).toStrictEqual(1);
       retryEvents++;
     });
 
     let times = 0;
-    const job = function () {
+    const job = () => {
       attemptTimes.push(Date.now());
       times++;
       if (times <= 2) {
@@ -56,26 +56,26 @@ describe("Retries", () => {
     expect(limiter.counts().DONE).toStrictEqual(1);
   });
 
-  test("Should retry when requested by the user (async)", async function ({ makeLimiter }) {
+  test("Should retry when requested by the user (async)", async ({ makeLimiter }) => {
     const limiter = makeLimiter({ trackDoneStatus: true });
     let failedEvents = 0;
     let retryEvents = 0;
     const attemptTimes = [];
 
-    limiter.on("failed", function (error, info) {
+    limiter.on("failed", (error, info) => {
       expect(limiter.counts().EXECUTING).toStrictEqual(1);
       expect(info.retryCount).toStrictEqual(failedEvents);
       failedEvents++;
       return Promise.resolve(50);
     });
 
-    limiter.on("retry", function (_error, _info) {
+    limiter.on("retry", (_error, _info) => {
       expect(limiter.counts().EXECUTING).toStrictEqual(1);
       retryEvents++;
     });
 
     let times = 0;
-    const job = function () {
+    const job = () => {
       attemptTimes.push(Date.now());
       times++;
       if (times <= 2) {
@@ -93,25 +93,25 @@ describe("Retries", () => {
     expect(limiter.counts().DONE).toStrictEqual(1);
   });
 
-  test("Should not retry when user returns an error (sync)", async function ({ makeLimiter }) {
+  test("Should not retry when user returns an error (sync)", async ({ makeLimiter }) => {
     const limiter = makeLimiter({ trackDoneStatus: true }, { expectErrors: true });
     let failedEvents = 0;
     let retryEvents = 0;
     let errorEvents = 0;
     let caught = false;
 
-    limiter.on("failed", function (error, info) {
+    limiter.on("failed", (error, info) => {
       expect(limiter.counts().EXECUTING).toStrictEqual(1);
       expect(info.retryCount).toStrictEqual(failedEvents);
       failedEvents++;
       throw new Error("Nope");
     });
 
-    limiter.on("retry", function (_error, _info) {
+    limiter.on("retry", (_error, _info) => {
       retryEvents++;
     });
 
-    limiter.on("error", function (error, _info) {
+    limiter.on("error", (error, _info) => {
       expect(error.message).toStrictEqual("Nope");
       errorEvents++;
     });
@@ -131,25 +131,25 @@ describe("Retries", () => {
     expect(limiter.counts().DONE).toStrictEqual(1);
   });
 
-  test("Should not retry when user returns an error (async)", async function ({ makeLimiter }) {
+  test("Should not retry when user returns an error (async)", async ({ makeLimiter }) => {
     const limiter = makeLimiter({ trackDoneStatus: true }, { expectErrors: true });
     let failedEvents = 0;
     let retryEvents = 0;
     let errorEvents = 0;
     let caught = false;
 
-    limiter.on("failed", function (error, info) {
+    limiter.on("failed", (error, info) => {
       expect(limiter.counts().EXECUTING).toStrictEqual(1);
       expect(info.retryCount).toStrictEqual(failedEvents);
       failedEvents++;
       return Promise.reject(new Error("Nope"));
     });
 
-    limiter.on("retry", function (_error, _info) {
+    limiter.on("retry", (_error, _info) => {
       retryEvents++;
     });
 
-    limiter.on("error", function (error, _info) {
+    limiter.on("error", (error, _info) => {
       expect(error.message).toStrictEqual("Nope");
       errorEvents++;
     });
@@ -169,20 +169,20 @@ describe("Retries", () => {
     expect(limiter.counts().DONE).toStrictEqual(1);
   });
 
-  test("Should not retry when user returns null (sync)", async function ({ makeLimiter }) {
+  test("Should not retry when user returns null (sync)", async ({ makeLimiter }) => {
     const limiter = makeLimiter({ trackDoneStatus: true });
     let failedEvents = 0;
     let retryEvents = 0;
     let caught = false;
 
-    limiter.on("failed", function (error, info) {
+    limiter.on("failed", (error, info) => {
       expect(limiter.counts().EXECUTING).toStrictEqual(1);
       expect(info.retryCount).toStrictEqual(failedEvents);
       failedEvents++;
       return null;
     });
 
-    limiter.on("retry", function (_error, _info) {
+    limiter.on("retry", (_error, _info) => {
       retryEvents++;
     });
 
@@ -200,20 +200,20 @@ describe("Retries", () => {
     expect(limiter.counts().DONE).toStrictEqual(1);
   });
 
-  test("Should not retry when user returns null (async)", async function ({ makeLimiter }) {
+  test("Should not retry when user returns null (async)", async ({ makeLimiter }) => {
     const limiter = makeLimiter({ trackDoneStatus: true });
     let failedEvents = 0;
     let retryEvents = 0;
     let caught = false;
 
-    limiter.on("failed", function (error, info) {
+    limiter.on("failed", (error, info) => {
       expect(limiter.counts().EXECUTING).toStrictEqual(1);
       expect(info.retryCount).toStrictEqual(failedEvents);
       failedEvents++;
       return Promise.resolve(null);
     });
 
-    limiter.on("retry", function (_error, _info) {
+    limiter.on("retry", (_error, _info) => {
       retryEvents++;
     });
 

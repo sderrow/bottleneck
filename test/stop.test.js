@@ -4,7 +4,7 @@ import { test, describe, expect, waitForState } from "./helpers/test-api.js";
 useFakeClock();
 
 describe("Stop", () => {
-  test("Should stop and drop the queue", async function ({ harness: h, makeLimiter }) {
+  test("Should stop and drop the queue", async ({ harness: h, makeLimiter }) => {
     const limiter = makeLimiter({
       maxConcurrent: 2,
       minTime: 100,
@@ -12,7 +12,7 @@ describe("Stop", () => {
     });
     let dropped = 0;
 
-    limiter.on("dropped", function () {
+    limiter.on("dropped", () => {
       dropped++;
     });
 
@@ -56,7 +56,7 @@ describe("Stop", () => {
     expect(h.log).toHaveCallOrder([[0], [1]]);
   });
 
-  test("Should stop and let the queue finish", async function ({ harness: h, makeLimiter }) {
+  test("Should stop and let the queue finish", async ({ harness: h, makeLimiter }) => {
     const limiter = makeLimiter({
       maxConcurrent: 1,
       minTime: 100,
@@ -64,7 +64,7 @@ describe("Stop", () => {
     });
     let dropped = 0;
 
-    limiter.on("dropped", function () {
+    limiter.on("dropped", () => {
       dropped++;
     });
 
@@ -99,7 +99,7 @@ describe("Stop", () => {
     expect(h.log).toHaveCallOrder([[1], [2], [3]]);
   });
 
-  test("Should still resolve when rejectOnDrop is false", function ({ harness: h, makeLimiter }) {
+  test("Should still resolve when rejectOnDrop is false", ({ harness: h, makeLimiter }) => {
     const limiter = makeLimiter({
       maxConcurrent: 1,
       minTime: 100,
@@ -112,27 +112,27 @@ describe("Stop", () => {
 
     return limiter
       .stop()
-      .then(function () {
+      .then(() => {
         return limiter.stop();
       })
-      .then(function () {
+      .then(() => {
         throw new Error("Should not be here");
       })
-      .catch(function (err) {
+      .catch((err) => {
         expect(err.message).toEqual("stop() has already been called");
       });
   });
 
-  test("Should not allow calling stop() twice when dropWaitingJobs=true", function ({
+  test("Should not allow calling stop() twice when dropWaitingJobs=true", ({
     harness: h,
     makeLimiter,
-  }) {
+  }) => {
     const limiter = makeLimiter({
       maxConcurrent: 1,
       minTime: 100,
     });
     let failed = 0;
-    const handler = function (err) {
+    const handler = (err) => {
       expect(err.message).toEqual("This limiter has been stopped.");
       failed++;
     };
@@ -143,22 +143,22 @@ describe("Stop", () => {
 
     return limiter
       .stop({ dropWaitingJobs: true })
-      .then(function () {
+      .then(() => {
         return limiter.stop({ dropWaitingJobs: true });
       })
-      .then(function () {
+      .then(() => {
         throw new Error("Should not be here");
       })
-      .catch(function (err) {
+      .catch((err) => {
         expect(err.message).toEqual("stop() has already been called");
         expect(failed).toEqual(3);
       });
   });
 
-  test("Should not allow calling stop() twice when dropWaitingJobs=false", function ({
+  test("Should not allow calling stop() twice when dropWaitingJobs=false", ({
     harness: h,
     makeLimiter,
-  }) {
+  }) => {
     const limiter = makeLimiter({
       maxConcurrent: 1,
       minTime: 100,
@@ -170,13 +170,13 @@ describe("Stop", () => {
 
     return limiter
       .stop({ dropWaitingJobs: false })
-      .then(function () {
+      .then(() => {
         return limiter.stop({ dropWaitingJobs: false });
       })
-      .then(function () {
+      .then(() => {
         throw new Error("Should not be here");
       })
-      .catch(function (err) {
+      .catch((err) => {
         expect(err.message).toEqual("stop() has already been called");
       });
   });

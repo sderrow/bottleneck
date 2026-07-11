@@ -53,7 +53,7 @@ export function createTaskFns(log) {
 
   function slowPromise(duration, err, ...result) {
     return new Promise((resolve, reject) => {
-      setTimeout(function () {
+      setTimeout(() => {
         log.record(err, result);
         if (err === null) {
           return resolve(result);
@@ -65,7 +65,7 @@ export function createTaskFns(log) {
 
   function deferredPromise(signal, err, ...result) {
     return new Promise((resolve, reject) => {
-      signal.then(function () {
+      signal.then(() => {
         log.record(err, result);
         if (err === null) {
           return resolve(result);

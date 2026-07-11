@@ -8,12 +8,12 @@ const Bottleneck = require("./bottleneck");
 useFakeClock();
 
 describe("Batcher", () => {
-  test("Should batch by time and size", async function () {
+  test("Should batch by time and size", async () => {
     const batcher = new Bottleneck.Batcher({ maxTime: 100, maxSize: 3 });
     const batches = [];
     const batchTimes = [];
 
-    batcher.on("batch", function (groups) {
+    batcher.on("batch", (groups) => {
       batchTimes.push(Date.now());
       batches.push(groups);
     });
@@ -29,12 +29,12 @@ describe("Batcher", () => {
     expect(batchTimes[1] - batchTimes[0]).toBe(100);
   });
 
-  test("Should batch by time", async function () {
+  test("Should batch by time", async () => {
     const batcher = new Bottleneck.Batcher({ maxTime: 100 });
     const batches = [];
     const batchTimes = [];
 
-    batcher.on("batch", function (groups) {
+    batcher.on("batch", (groups) => {
       batchTimes.push(Date.now());
       batches.push(groups);
     });
@@ -55,11 +55,11 @@ describe("Batcher", () => {
     expect(batchTimes[1] - t1).toBe(100);
   });
 
-  test("Should batch by size", async function () {
+  test("Should batch by size", async () => {
     const batcher = new Bottleneck.Batcher({ maxSize: 2 });
     const batches = [];
 
-    batcher.on("batch", function (groups) {
+    batcher.on("batch", (groups) => {
       batches.push(groups);
     });
 
@@ -73,12 +73,12 @@ describe("Batcher", () => {
     ]);
   });
 
-  test("Should stagger flushes", async function () {
+  test("Should stagger flushes", async () => {
     const batcher = new Bottleneck.Batcher({ maxTime: 100, maxSize: 3 });
     const batches = [];
     const batchTimes = [];
 
-    batcher.on("batch", function (groups) {
+    batcher.on("batch", (groups) => {
       batchTimes.push(Date.now());
       batches.push(groups);
     });
@@ -93,12 +93,12 @@ describe("Batcher", () => {
     expect(batchTimes[0] - t0).toBe(100);
   });
 
-  test("Should force then stagger flushes", async function () {
+  test("Should force then stagger flushes", async () => {
     const batcher = new Bottleneck.Batcher({ maxTime: 100, maxSize: 3 });
     const batches = [];
     const batchTimes = [];
 
-    batcher.on("batch", function (groups) {
+    batcher.on("batch", (groups) => {
       batchTimes.push(Date.now());
       batches.push(groups);
     });

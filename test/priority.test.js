@@ -5,7 +5,7 @@ const Bottleneck = require("./bottleneck");
 useFakeClock();
 
 describe("Priority", () => {
-  test("Should do basic ordering", function ({ harness: h, makeLimiter }) {
+  test("Should do basic ordering", ({ harness: h, makeLimiter }) => {
     const limiter = makeLimiter({ maxConcurrent: 1, minTime: 100, rejectOnDrop: false });
 
     return Promise.all([
@@ -15,16 +15,16 @@ describe("Priority", () => {
       h.pNoErrVal(limiter.schedule(h.promise, null, 3), 3),
       h.pNoErrVal(limiter.schedule(h.promise, null, 4), 4),
     ])
-      .then(function () {
+      .then(() => {
         return h.flushLimiter(limiter);
       })
-      .then(function (_results) {
+      .then((_results) => {
         expect(h.log).toHaveCallOrder([[1], [5, 6], [2], [3], [4]]);
         expect(h).toHaveFinalCallAt(400);
       });
   });
 
-  test("Should support LEAK", async function ({ harness: h, makeLimiter }) {
+  test("Should support LEAK", async ({ harness: h, makeLimiter }) => {
     const limiter = makeLimiter({
       maxConcurrent: 1,
       minTime: 100,
@@ -34,7 +34,7 @@ describe("Priority", () => {
     });
 
     let called = false;
-    limiter.on("dropped", function (dropped) {
+    limiter.on("dropped", (dropped) => {
       expect(dropped.task).toBeTruthy();
       expect(dropped.args).toBeTruthy();
       expect(dropped.promise).toBeTruthy();
@@ -55,13 +55,13 @@ describe("Priority", () => {
     await Promise.all(subs);
     first.release();
 
-    return h.flushLimiter(limiter, { weight: 0 }).then(function (_results) {
+    return h.flushLimiter(limiter, { weight: 0 }).then((_results) => {
       expect(h.log).toHaveCallOrder([[1], [6], [5]]);
       expect(called).toEqual(true);
     });
   });
 
-  test("Should support OVERFLOW", async function ({ harness: h, makeLimiter }) {
+  test("Should support OVERFLOW", async ({ harness: h, makeLimiter }) => {
     const limiter = makeLimiter({
       maxConcurrent: 1,
       minTime: 100,
@@ -70,7 +70,7 @@ describe("Priority", () => {
       rejectOnDrop: false,
     });
     let called = false;
-    limiter.on("dropped", function (dropped) {
+    limiter.on("dropped", (dropped) => {
       expect(dropped.task).toBeTruthy();
       expect(dropped.args).toBeTruthy();
       expect(dropped.promise).toBeTruthy();
@@ -93,16 +93,16 @@ describe("Priority", () => {
 
     return limiter
       .updateSettings({ highWater: null })
-      .then(function () {
+      .then(() => {
         return h.flushLimiter(limiter);
       })
-      .then(function (_results) {
+      .then((_results) => {
         expect(h.log).toHaveCallOrder([[1], [2], [3]]);
         expect(called).toEqual(true);
       });
   });
 
-  test("Should support OVERFLOW_PRIORITY", async function ({ harness: h, makeLimiter }) {
+  test("Should support OVERFLOW_PRIORITY", async ({ harness: h, makeLimiter }) => {
     const limiter = makeLimiter({
       maxConcurrent: 1,
       minTime: 100,
@@ -111,7 +111,7 @@ describe("Priority", () => {
       rejectOnDrop: false,
     });
     let called = false;
-    limiter.on("dropped", function (dropped) {
+    limiter.on("dropped", (dropped) => {
       expect(dropped.task).toBeTruthy();
       expect(dropped.args).toBeTruthy();
       expect(dropped.promise).toBeTruthy();
@@ -134,16 +134,16 @@ describe("Priority", () => {
 
     return limiter
       .updateSettings({ highWater: null })
-      .then(function () {
+      .then(() => {
         return h.flushLimiter(limiter);
       })
-      .then(function (_results) {
+      .then((_results) => {
         expect(h.log).toHaveCallOrder([[1], [5], [6]]);
         expect(called).toEqual(true);
       });
   });
 
-  test("Should support BLOCK", function ({ harness: h, makeLimiter }) {
+  test("Should support BLOCK", ({ harness: h, makeLimiter }) => {
     expect.hasAssertions();
     const limiter = makeLimiter({
       maxConcurrent: 1,
@@ -154,10 +154,10 @@ describe("Priority", () => {
     });
     let called = 0;
 
-    return new Promise(function (resolve) {
+    return new Promise((resolve) => {
       const first = deferred();
 
-      limiter.on("dropped", function (dropped) {
+      limiter.on("dropped", (dropped) => {
         expect(dropped.task).toBeTruthy();
         expect(dropped.args).toBeTruthy();
         expect(dropped.promise).toBeTruthy();
@@ -165,10 +165,10 @@ describe("Priority", () => {
         if (called === 3) {
           limiter
             .updateSettings({ highWater: null })
-            .then(function () {
+            .then(() => {
               return limiter.schedule(h.job, null, 8);
             })
-            .catch(function (err) {
+            .catch((err) => {
               expect(err).toBeInstanceOf(Bottleneck.BottleneckError);
               expect(err.message).toEqual("This job has been dropped by Bottleneck");
               limiter.removeAllListeners("error");
@@ -185,11 +185,11 @@ describe("Priority", () => {
     });
   });
 
-  test("Should have the right priority", async function ({ harness: h, makeLimiter }) {
+  test("Should have the right priority", async ({ harness: h, makeLimiter }) => {
     const limiter = makeLimiter({ maxConcurrent: 1, minTime: 100 });
 
     let committed = 0;
-    limiter.on("queued", function () {
+    limiter.on("queued", () => {
       committed++;
     });
     const first = deferred();
@@ -202,7 +202,7 @@ describe("Priority", () => {
     });
     first.release();
 
-    return h.flushLimiter(limiter).then(function (_results) {
+    return h.flushLimiter(limiter).then((_results) => {
       if (isFakeClock()) {
         expect(h.results().elapsed).toBe(400);
       } else {

@@ -5,7 +5,7 @@ const Bottleneck = require("./bottleneck");
 useFakeClock();
 
 describe("Group", () => {
-  test("Should create limiters", function ({ track }) {
+  test("Should create limiters", ({ track }) => {
     expect.hasAssertions();
     const group = track(
       new Bottleneck.Group({
@@ -16,10 +16,10 @@ describe("Group", () => {
 
     const results = [];
 
-    const job = function (...result) {
+    const job = (...result) => {
       results.push(result);
-      return new Promise(function (resolve, _reject) {
-        setTimeout(function () {
+      return new Promise((resolve, _reject) => {
+        setTimeout(() => {
           return resolve();
         }, 50);
       });
@@ -28,16 +28,16 @@ describe("Group", () => {
     group.key("A").schedule(job, 1, 2);
     group.key("A").schedule(job, 3);
     group.key("A").schedule(job, 4);
-    setTimeout(function () {
+    setTimeout(() => {
       group.key("B").schedule(job, 5);
     }, 20);
-    setTimeout(function () {
+    setTimeout(() => {
       group.key("C").schedule(job, 6);
       group.key("C").schedule(job, 7);
     }, 40);
 
-    return new Promise(function (resolve, reject) {
-      group.key("A").submit(function (cb) {
+    return new Promise((resolve, reject) => {
+      group.key("A").submit((cb) => {
         try {
           expect(results.length).toStrictEqual(6);
 
@@ -61,7 +61,7 @@ describe("Group", () => {
     });
   });
 
-  test("Should set up the limiter IDs (default)", function ({ track }) {
+  test("Should set up the limiter IDs (default)", ({ track }) => {
     const group = track(
       new Bottleneck.Group({
         maxConcurrent: 1,
@@ -73,7 +73,7 @@ describe("Group", () => {
     expect(group.key("B").id).toStrictEqual("group-key-B");
     expect(group.key("XYZ").id).toStrictEqual("group-key-XYZ");
 
-    const ids = group.keys().map(function (key) {
+    const ids = group.keys().map((key) => {
       const lim = group.key(key);
       expect(lim._store.timeout).toStrictEqual(group.timeout);
       return lim.id;
@@ -81,7 +81,7 @@ describe("Group", () => {
     expect(ids.sort()).toStrictEqual(["group-key-A", "group-key-B", "group-key-XYZ"]);
   });
 
-  test("Should set up the limiter IDs (custom)", function ({ track }) {
+  test("Should set up the limiter IDs (custom)", ({ track }) => {
     const group = track(
       new Bottleneck.Group({
         maxConcurrent: 1,
@@ -94,7 +94,7 @@ describe("Group", () => {
     expect(group.key("B").id).toStrictEqual("custom-id-B");
     expect(group.key("XYZ").id).toStrictEqual("custom-id-XYZ");
 
-    const ids = group.keys().map(function (key) {
+    const ids = group.keys().map((key) => {
       const lim = group.key(key);
       expect(lim._store.timeout).toStrictEqual(group.timeout);
       return lim.id;
@@ -102,7 +102,7 @@ describe("Group", () => {
     expect(ids.sort()).toStrictEqual(["custom-id-A", "custom-id-B", "custom-id-XYZ"]);
   });
 
-  test("Should pass new limiter to 'created' event", function ({ makeLimiter, track }) {
+  test("Should pass new limiter to 'created' event", ({ makeLimiter, track }) => {
     const limiter = makeLimiter();
     const group = track(
       new Bottleneck.Group({
@@ -114,10 +114,10 @@ describe("Group", () => {
     const keys = [];
     const ids = [];
     const promises = [];
-    group.on("created", function (created, key) {
+    group.on("created", (created, key) => {
       keys.push(key);
       promises.push(
-        created.updateSettings({ id: key }).then(function (lim) {
+        created.updateSettings({ id: key }).then((lim) => {
           ids.push(lim.id);
         }),
       );
@@ -132,13 +132,13 @@ describe("Group", () => {
     group.key("C");
     group.key("A");
 
-    return Promise.all(promises).then(function () {
+    return Promise.all(promises).then(() => {
       expect(keys).toStrictEqual(ids);
       return limiter.ready();
     });
   });
 
-  test("Should pass error on failure", function ({ track }) {
+  test("Should pass error on failure", ({ track }) => {
     const failureMessage = "SOMETHING BLEW UP!!";
     const group = track(
       new Bottleneck.Group({
@@ -150,10 +150,10 @@ describe("Group", () => {
 
     const results = [];
 
-    const job = function (...result) {
+    const job = (...result) => {
       results.push(result);
-      return new Promise(function (resolve, _reject) {
-        setTimeout(function () {
+      return new Promise((resolve, _reject) => {
+        setTimeout(() => {
           return resolve();
         }, 50);
       });
@@ -165,16 +165,16 @@ describe("Group", () => {
     group
       .key("B")
       .schedule(() => Promise.reject(new Error(failureMessage)))
-      .catch(function (err) {
+      .catch((err) => {
         results.push(["CAUGHT", err.message]);
       });
-    setTimeout(function () {
+    setTimeout(() => {
       group.key("C").schedule(job, 6);
       group.key("C").schedule(job, 7);
     }, 40);
 
-    return new Promise(function (resolve, reject) {
-      group.key("A").submit(function (cb) {
+    return new Promise((resolve, reject) => {
+      group.key("A").submit((cb) => {
         try {
           expect(results).toStrictEqual([[1, 2], ["CAUGHT", failureMessage], [6], [3], [7], [4]]);
           cb();
@@ -186,7 +186,7 @@ describe("Group", () => {
     });
   });
 
-  test("Should update its timeout", function ({ track }) {
+  test("Should update its timeout", ({ track }) => {
     const group1 = track(
       new Bottleneck.Group({
         maxConcurrent: 1,
@@ -206,13 +206,13 @@ describe("Group", () => {
 
     const p1 = group1.updateSettings({ timeout: 123 });
     const p2 = group2.updateSettings({ timeout: 456 });
-    return Promise.all([p1, p2]).then(function () {
+    return Promise.all([p1, p2]).then(() => {
       expect(group1.timeout).toStrictEqual(123);
       expect(group2.timeout).toStrictEqual(456);
     });
   });
 
-  test("Should update its limiter options", function ({ track }) {
+  test("Should update its limiter options", ({ track }) => {
     const group = track(
       new Bottleneck.Group({
         maxConcurrent: 1,
@@ -230,7 +230,7 @@ describe("Group", () => {
     expect(limiter2._store.storeOptions.minTime).toStrictEqual(200);
   });
 
-  test("Should support keys(), limiters(), deleteKey()", function ({ harness: h, track }) {
+  test("Should support keys(), limiters(), deleteKey()", ({ harness: h, track }) => {
     const group1 = track(
       new Bottleneck.Group({
         maxConcurrent: 1,
@@ -243,31 +243,31 @@ describe("Group", () => {
       h.pNoErrVal(group1.key(KEY_A).schedule(h.promise, null, 1), 1),
       h.pNoErrVal(group1.key(KEY_B).schedule(h.promise, null, 2), 2),
     ])
-      .then(function () {
+      .then(() => {
         const keys = group1.keys();
         const limiters = group1.limiters();
         expect(keys).toStrictEqual([KEY_A, KEY_B]);
         expect(limiters.length).toStrictEqual(2);
 
-        limiters.forEach(function (entry, i) {
+        limiters.forEach((entry, i) => {
           expect(entry.key).toStrictEqual(keys[i]);
           expect(entry.limiter).toBeInstanceOf(Bottleneck);
         });
 
         return group1.deleteKey(KEY_A);
       })
-      .then(function (deleted) {
+      .then((deleted) => {
         expect(deleted).toStrictEqual(true);
         expect(group1.keys().length).toStrictEqual(1);
         return group1.deleteKey(KEY_A);
       })
-      .then(function (deleted) {
+      .then((deleted) => {
         expect(deleted).toStrictEqual(false);
         expect(group1.keys().length).toStrictEqual(1);
       });
   });
 
-  test("Should call autocleanup", function ({ makeLimiter, track }) {
+  test("Should call autocleanup", ({ makeLimiter, track }) => {
     const KEY = "test-key";
     const group = track(
       new Bottleneck.Group({
@@ -280,16 +280,16 @@ describe("Group", () => {
     group.instances[KEY] = limiter;
     return group
       .key(KEY)
-      .schedule(function () {
+      .schedule(() => {
         return Promise.resolve();
       })
-      .then(function () {
+      .then(() => {
         expect(group.instances[KEY]).toBeDefined();
         return waitForState(() => {
           expect(group.instances[KEY]).toBeUndefined();
         });
       })
-      .then(function () {
+      .then(() => {
         expect(group.instances[KEY]).toBeUndefined();
       });
   });

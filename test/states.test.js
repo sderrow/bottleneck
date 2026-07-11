@@ -2,13 +2,13 @@ import { describe, it, expect } from "vitest";
 const States = require("../src/States");
 const BottleneckError = require("../src/BottleneckError");
 
-describe("States", function () {
-  it("Should be created and be empty", function () {
+describe("States", () => {
+  it("Should be created and be empty", () => {
     const states = new States(["A", "B", "C"]);
     expect(states.statusCounts()).toStrictEqual({ A: 0, B: 0, C: 0 });
   });
 
-  it("Should start new series", function () {
+  it("Should start new series", () => {
     const states = new States(["A", "B", "C"]);
 
     states.start("x");
@@ -17,7 +17,7 @@ describe("States", function () {
     expect(states.statusCounts()).toStrictEqual({ A: 2, B: 0, C: 0 });
   });
 
-  it("Should increment", function () {
+  it("Should increment", () => {
     const states = new States(["A", "B", "C"]);
 
     states.start("x");
@@ -41,7 +41,7 @@ describe("States", function () {
     expect(states.statusCounts()).toStrictEqual({ A: 0, B: 0, C: 0 });
   });
 
-  it("Should remove", function () {
+  it("Should remove", () => {
     const states = new States(["A", "B", "C"]);
 
     states.start("x");
@@ -58,7 +58,7 @@ describe("States", function () {
     expect(states.statusCounts()).toStrictEqual({ A: 0, B: 0, C: 0 });
   });
 
-  it("Should return current status", function () {
+  it("Should return current status", () => {
     const states = new States(["A", "B", "C"]);
 
     states.start("x");
@@ -73,7 +73,7 @@ describe("States", function () {
     expect(states.jobStatus("z")).toStrictEqual(null);
   });
 
-  it("Should return job ids for a status", function () {
+  it("Should return job ids for a status", () => {
     const states = new States(["A", "B", "C"]);
 
     states.start("x");

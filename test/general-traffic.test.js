@@ -8,8 +8,8 @@ const execFile = util.promisify(require("child_process").execFile);
 useFakeClock();
 
 describe("General traffic", () => {
-  describe("High water limit", function () {
-    test("Should support highWater set to 0", function ({ harness: h, makeLimiter }) {
+  describe("High water limit", () => {
+    test("Should support highWater set to 0", ({ harness: h, makeLimiter }) => {
       const limiter = makeLimiter({
         maxConcurrent: 1,
         minTime: 0,
@@ -23,16 +23,16 @@ describe("General traffic", () => {
       h.pNoErrVal(limiter.schedule(h.slowPromise, 50, null, 4), 4);
 
       return first
-        .then(function () {
+        .then(() => {
           return h.flushLimiter(limiter, { weight: 0 });
         })
-        .then(function (_results) {
+        .then((_results) => {
           expect(h).toHaveFinalCallAt(50);
           expect(h.log).toHaveCallOrder([[1]]);
         });
     });
 
-    test("Should support highWater set to 1", async function ({ harness: h, makeLimiter }) {
+    test("Should support highWater set to 1", async ({ harness: h, makeLimiter }) => {
       const limiter = makeLimiter({
         maxConcurrent: 1,
         minTime: 0,
@@ -53,7 +53,7 @@ describe("General traffic", () => {
       // there would proceed and let j2 run before j3/j4 ever submit,
       // yielding 3 results ([1, 2, 4] or [1, 3, 4]) instead of 2.
       let committed = 0;
-      limiter.on("queued", function () {
+      limiter.on("queued", () => {
         committed++;
       });
 
@@ -71,7 +71,7 @@ describe("General traffic", () => {
       // Wait until the primer is running. Once it occupies the running
       // slot at maxConcurrent=1, no subsequent job can be dispatched
       // until we release.
-      await waitForState(async function () {
+      await waitForState(async () => {
         expect(await limiter.running()).toBeGreaterThanOrEqual(1);
       });
 
@@ -80,7 +80,7 @@ describe("General traffic", () => {
       const last = h.pNoErrVal(limiter.schedule(h.slowPromise, 50, null, 4), 4);
 
       // 4 = primer + j2 + j3 + j4 all committed via doQueue.
-      await waitForState(function () {
+      await waitForState(() => {
         expect(committed).toBe(4);
       });
 
@@ -91,11 +91,11 @@ describe("General traffic", () => {
     });
   });
 
-  describe("Weight", function () {
-    test("Should not add jobs with a weight above the maxConcurrent", function ({
+  describe("Weight", () => {
+    test("Should not add jobs with a weight above the maxConcurrent", ({
       harness: h,
       makeLimiter,
-    }) {
+    }) => {
       const limiter = makeLimiter({ maxConcurrent: 2 });
 
       h.pNoErrVal(limiter.schedule({ weight: 1 }, h.promise, null, 1), 1);
@@ -103,19 +103,19 @@ describe("General traffic", () => {
 
       return limiter
         .schedule({ weight: 3 }, h.promise, null, 3)
-        .catch(function (err) {
+        .catch((err) => {
           expect(err.message).toEqual(
             "Impossible to add a job having a weight of 3 to a limiter having a maxConcurrent setting of 2",
           );
           return h.flushLimiter(limiter);
         })
-        .then(function (_results) {
+        .then((_results) => {
           expect(h).toHaveFinalCallAt(0);
           expect(h.log).toHaveCallOrder([[1], [2]]);
         });
     });
 
-    test("Should support custom job weights", function ({ harness: h, makeLimiter }) {
+    test("Should support custom job weights", ({ harness: h, makeLimiter }) => {
       const limiter = makeLimiter({ maxConcurrent: 2 });
 
       // Await all 5 schedule promises before h.flushLimiter(limiter); otherwise the weight: 0
@@ -127,16 +127,16 @@ describe("General traffic", () => {
         h.pNoErrVal(limiter.schedule({ weight: 1 }, h.slowPromise, 100, null, 4), 4),
         h.pNoErrVal(limiter.schedule({ weight: 0 }, h.slowPromise, 100, null, 5), 5),
       ])
-        .then(function () {
+        .then(() => {
           return h.flushLimiter(limiter);
         })
-        .then(function (_results) {
+        .then((_results) => {
           expect(h).toHaveFinalCallAt(400);
           expect(h.log).toHaveCallOrder([[1], [2], [3], [4], [5]]);
         });
     });
 
-    test("Should overflow at the correct rate", function ({ harness: h, makeLimiter }) {
+    test("Should overflow at the correct rate", ({ harness: h, makeLimiter }) => {
       const limiter = makeLimiter({
         maxConcurrent: 2,
         reservoir: 3,
@@ -144,7 +144,7 @@ describe("General traffic", () => {
 
       let calledDepleted = 0;
       const emptyArguments = [];
-      limiter.on("depleted", function (empty) {
+      limiter.on("depleted", (empty) => {
         emptyArguments.push(empty);
         calledDepleted++;
       });
@@ -167,37 +167,37 @@ describe("General traffic", () => {
       );
 
       return Promise.all([p1, p2])
-        .then(function () {
+        .then(() => {
           expect(limiter.queued()).toEqual(2);
           return limiter.currentReservoir();
         })
-        .then(function (reservoir) {
+        .then((reservoir) => {
           expect(reservoir).toEqual(0);
           expect(calledDepleted).toEqual(1);
           return limiter.incrementReservoir(1);
         })
-        .then(function (reservoir) {
+        .then((reservoir) => {
           expect(reservoir).toEqual(1);
           return h.flushLimiter(limiter, { priority: 1, weight: 0 });
         })
-        .then(function (_results) {
+        .then((_results) => {
           expect(calledDepleted).toEqual(3);
           expect(limiter.queued()).toEqual(1);
           expect(h).toHaveFinalCallAt(250);
           expect(h.log).toHaveCallOrder([[1], [2]]);
           return limiter.currentReservoir();
         })
-        .then(function (reservoir) {
+        .then((reservoir) => {
           expect(reservoir).toEqual(0);
           return limiter.updateSettings({ reservoir: 1 });
         })
-        .then(function () {
+        .then(() => {
           return Promise.all([p3, p4]);
         })
-        .then(function () {
+        .then(() => {
           return limiter.currentReservoir();
         })
-        .then(function (reservoir) {
+        .then((reservoir) => {
           expect(reservoir).toEqual(0);
           expect(calledDepleted).toEqual(4);
           expect(emptyArguments).toEqual([false, false, false, true]);
@@ -205,8 +205,8 @@ describe("General traffic", () => {
     });
   });
 
-  describe("Expiration", function () {
-    test("Should cancel jobs", { timeout: 20000 }, function ({ harness: h, makeLimiter }) {
+  describe("Expiration", () => {
+    test("Should cancel jobs", { timeout: 20000 }, ({ harness: h, makeLimiter }) => {
       const limiter = makeLimiter({ maxConcurrent: 2 });
       const t0 = Date.now();
 
@@ -233,10 +233,10 @@ describe("General traffic", () => {
 
         limiter
           .schedule({ expiration: 50, id: "slow-with-expiration" }, h.slowPromise, 75, null, 2)
-          .then(function () {
+          .then(() => {
             throw new Error("Should have timed out.");
           })
-          .catch(function (err) {
+          .catch((err) => {
             expect(err.message).toEqual("This job timed out after 50 ms.");
             // Lower bound proves expiration didn't fire instantly; the error
             // message itself proves it didn't fire after slowPromise(75).
@@ -244,38 +244,38 @@ describe("General traffic", () => {
 
             return Promise.all([limiter.running(), limiter.done()]);
           })
-          .then(function ([running, done]) {
+          .then(([running, done]) => {
             expect(running).toEqual(1);
             expect(done).toEqual(1);
             // Hold j1 for ≥100ms more so the post-Promise.all assertion
             // (`Date.now() - t0 > 145`) verifies j1 actually ran a
             // meaningful interval, without depending on a fixed timer that
             // can race event-loop jitter.
-            return sleep(100).then(function () {
+            return sleep(100).then(() => {
               holdJ1.release();
             });
           }),
       ])
-        .then(function () {
+        .then(() => {
           // Lower bound proves the unexpired job wasn't aborted early by
           // the other job's expiration — j1 ran for at least 50ms (j2's
           // expiration window) plus the 100ms hold above.
           expect(Date.now() - t0).toBeGreaterThan(145);
           return Promise.all([limiter.running(), limiter.done()]);
         })
-        .then(function ([running, done]) {
+        .then(([running, done]) => {
           expect(running).toEqual(0);
           expect(done).toEqual(2);
         });
     });
   });
 
-  describe("Pubsub", function () {
-    test("Should pass strings", function ({ makeLimiter }) {
+  describe("Pubsub", () => {
+    test("Should pass strings", ({ makeLimiter }) => {
       const limiter = makeLimiter({ maxConcurrent: 2 });
 
       return new Promise((resolve, reject) => {
-        limiter.on("message", function (msg) {
+        limiter.on("message", (msg) => {
           try {
             expect(msg).toEqual("hello");
             resolve();
@@ -288,7 +288,7 @@ describe("General traffic", () => {
       });
     });
 
-    test("Should pass objects", function ({ makeLimiter }) {
+    test("Should pass objects", ({ makeLimiter }) => {
       const limiter = makeLimiter({ maxConcurrent: 2 });
       const obj = {
         array: ["abc", true],
@@ -296,7 +296,7 @@ describe("General traffic", () => {
       };
 
       return new Promise((resolve, reject) => {
-        limiter.on("message", function (msg) {
+        limiter.on("message", (msg) => {
           try {
             expect(JSON.parse(msg)).toEqual(obj);
             resolve();
@@ -310,8 +310,8 @@ describe("General traffic", () => {
     });
   });
 
-  describe("Reservoir Refresh", function () {
-    test("Should auto-refresh the reservoir", function ({ harness: h, makeLimiter }) {
+  describe("Reservoir Refresh", () => {
+    test("Should auto-refresh the reservoir", ({ harness: h, makeLimiter }) => {
       const limiter = makeLimiter({
         reservoir: 8,
         reservoirRefreshInterval: 150,
@@ -320,7 +320,7 @@ describe("General traffic", () => {
       });
       let calledDepleted = 0;
 
-      limiter.on("depleted", function () {
+      limiter.on("depleted", () => {
         calledDepleted++;
       });
 
@@ -331,10 +331,10 @@ describe("General traffic", () => {
         h.pNoErrVal(limiter.schedule({ weight: 4 }, h.promise, null, 4), 4),
         h.pNoErrVal(limiter.schedule({ weight: 5 }, h.promise, null, 5), 5),
       ])
-        .then(function () {
+        .then(() => {
           return h.flushLimiter(limiter, { weight: 0, priority: 9 });
         })
-        .then(function (results) {
+        .then((results) => {
           expect(h.log).toHaveCallOrder([[1], [2], [3], [4], [5]]);
           // The contract is "`depleted` fires when the reservoir reaches 0".
           // We get >=2 fires reliably:
@@ -357,7 +357,7 @@ describe("General traffic", () => {
         });
     });
 
-    test("Should allow staggered X by Y type usage", function ({ harness: h, makeLimiter }) {
+    test("Should allow staggered X by Y type usage", ({ harness: h, makeLimiter }) => {
       const limiter = makeLimiter({
         reservoir: 2,
         reservoirRefreshInterval: 150,
@@ -371,10 +371,10 @@ describe("General traffic", () => {
         h.pNoErrVal(limiter.schedule(h.promise, null, 3), 3),
         h.pNoErrVal(limiter.schedule(h.promise, null, 4), 4),
       ])
-        .then(function () {
+        .then(() => {
           return h.flushLimiter(limiter, { weight: 0, priority: 9 });
         })
-        .then(function (results) {
+        .then((results) => {
           expect(h.log).toHaveCallOrder([[1], [2], [3], [4]]);
           // Jobs 3 and 4 must wait for the reservoir refresh at t=150ms; that
           // lower bound proves the gate worked. Asserting the *current*
@@ -385,7 +385,7 @@ describe("General traffic", () => {
         });
     });
 
-    test("Should keep process alive until queue is empty", async function ({ makeLimiter }) {
+    test("Should keep process alive until queue is empty", async ({ makeLimiter }) => {
       useRealClockForThisTest();
       const limiter = makeLimiter();
       const fixturePath = path.resolve(__dirname, "fixtures/keep-alive/refreshKeepAlive.mjs");
@@ -410,7 +410,7 @@ describe("General traffic", () => {
       const matches = stdout.match(/\[(\d+)\]/g);
       expect(matches).toBeTruthy();
       expect(matches.length).toEqual(4);
-      const nums = matches.map(function (m) {
+      const nums = matches.map((m) => {
         return Number(m.slice(1, -1));
       });
       expect(nums[2]).toBeGreaterThan(nums[0]);
@@ -418,8 +418,8 @@ describe("General traffic", () => {
     });
   });
 
-  describe("Reservoir Increase", function () {
-    test("Should auto-increase the reservoir", async function ({ harness: h, makeLimiter }) {
+  describe("Reservoir Increase", () => {
+    test("Should auto-increase the reservoir", async ({ harness: h, makeLimiter }) => {
       const limiter = makeLimiter({
         reservoir: 3,
         reservoirIncreaseInterval: 150,
@@ -428,7 +428,7 @@ describe("General traffic", () => {
       });
       let calledDepleted = 0;
 
-      limiter.on("depleted", function () {
+      limiter.on("depleted", () => {
         calledDepleted++;
       });
 
@@ -449,10 +449,10 @@ describe("General traffic", () => {
       expect(results).toHaveCallAt(4, 450);
     });
 
-    test("Should auto-increase the reservoir up to a maximum", async function ({
+    test("Should auto-increase the reservoir up to a maximum", async ({
       harness: h,
       makeLimiter,
-    }) {
+    }) => {
       const limiter = makeLimiter({
         reservoir: 3,
         reservoirIncreaseInterval: 150,
@@ -462,7 +462,7 @@ describe("General traffic", () => {
       });
       let calledDepleted = 0;
 
-      limiter.on("depleted", function () {
+      limiter.on("depleted", () => {
         calledDepleted++;
       });
 
@@ -482,7 +482,7 @@ describe("General traffic", () => {
       expect(results).toHaveCallAt(4, 450);
     });
 
-    test("Should allow staggered X by Y type usage", function ({ harness: h, makeLimiter }) {
+    test("Should allow staggered X by Y type usage", ({ harness: h, makeLimiter }) => {
       const limiter = makeLimiter({
         reservoir: 2,
         reservoirIncreaseInterval: 150,
@@ -496,10 +496,10 @@ describe("General traffic", () => {
         h.pNoErrVal(limiter.schedule(h.promise, null, 3), 3),
         h.pNoErrVal(limiter.schedule(h.promise, null, 4), 4),
       ])
-        .then(function () {
+        .then(() => {
           return limiter.currentReservoir();
         })
-        .then(function (reservoir) {
+        .then((reservoir) => {
           // After all 4 jobs dispatch, reservoir has been depleted to 0 twice
           // (initial 2 by jobs 1,2; refill 2 by jobs 3,4). Under load, the
           // 150ms increase tick can fire again *between* Promise.all resolving
@@ -510,7 +510,7 @@ describe("General traffic", () => {
           expect(reservoir).toBeLessThanOrEqual(2);
           return h.flushLimiter(limiter, { weight: 0, priority: 9 });
         })
-        .then(function (results) {
+        .then((results) => {
           expect(h.log).toHaveCallOrder([[1], [2], [3], [4]]);
           // Jobs 3 and 4 must wait for the reservoir refill at t=150ms; lower
           // bound proves the refill gate worked. No upper bound — under load
@@ -520,7 +520,7 @@ describe("General traffic", () => {
         });
     });
 
-    test("Should keep process alive until queue is empty", async function ({ makeLimiter }) {
+    test("Should keep process alive until queue is empty", async ({ makeLimiter }) => {
       useRealClockForThisTest();
       const limiter = makeLimiter();
       const fixturePath = path.resolve(__dirname, "fixtures/keep-alive/increaseKeepAlive.mjs");
@@ -537,7 +537,7 @@ describe("General traffic", () => {
       const matches = stdout.match(/\[(\d+)\]/g);
       expect(matches).toBeTruthy();
       expect(matches.length).toEqual(4);
-      const nums = matches.map(function (m) {
+      const nums = matches.map((m) => {
         return Number(m.slice(1, -1));
       });
       expect(nums[2]).toBeGreaterThan(nums[0]);

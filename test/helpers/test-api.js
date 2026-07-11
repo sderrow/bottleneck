@@ -13,7 +13,7 @@ function pNoErrVal(promise, ...expected) {
 }
 
 function noErrVal(...expected) {
-  return function (err, ...actual) {
+  return (err, ...actual) => {
     vitestExpect(err).toBeNull();
     vitestExpect(actual).toEqual(expected);
   };

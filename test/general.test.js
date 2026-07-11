@@ -5,19 +5,19 @@ const Bottleneck = require("./bottleneck");
 useFakeClock();
 
 describe("General", () => {
-  test("Should prompt to upgrade", function ({ makeLimiter }) {
+  test("Should prompt to upgrade", ({ makeLimiter }) => {
     const limiter = makeLimiter();
     expect(() => {
       const _limiter = new Bottleneck(1, 250);
     }).toThrow(/Bottleneck v2 takes a single object argument/);
   });
 
-  test("Should allow null capacity", async function ({ makeLimiter }) {
+  test("Should allow null capacity", async ({ makeLimiter }) => {
     const limiter = makeLimiter({ id: "null", minTime: 0 });
     await expect(limiter.updateSettings({ minTime: 10 })).resolves.toBe(limiter);
   });
 
-  test("Should keep scope", async function ({ makeLimiter }) {
+  test("Should keep scope", async ({ makeLimiter }) => {
     const limiter = makeLimiter({ maxConcurrent: 1 });
 
     class Job {
@@ -34,15 +34,15 @@ describe("General", () => {
     expect(await limiter.wrap(job.action.bind(job))(2)).toEqual(7);
   });
 
-  test("Should pass multiple arguments back even on errors when using submit()", function ({
+  test("Should pass multiple arguments back even on errors when using submit()", ({
     harness: h,
     makeLimiter,
-  }) {
+  }) => {
     expect.hasAssertions();
     const limiter = makeLimiter({ maxConcurrent: 1 });
 
-    return new Promise(function (resolve, reject) {
-      limiter.submit(h.job, new Error("welp"), 1, 2, function (err, x, y) {
+    return new Promise((resolve, reject) => {
+      limiter.submit(h.job, new Error("welp"), 1, 2, (err, x, y) => {
         try {
           expect(err.message).toEqual("welp");
           expect(x).toEqual(1);
@@ -55,7 +55,7 @@ describe("General", () => {
     });
   });
 
-  test("Should expose the Events library", function ({ makeLimiter }) {
+  test("Should expose the Events library", ({ makeLimiter }) => {
     const limiter = makeLimiter();
 
     class Hello {
@@ -86,11 +86,11 @@ describe("General", () => {
     return myObject.emitter.trigger("blah");
   });
 
-  describe("Counts and statuses", function () {
-    test("Should check() and return the queued count with and without a priority value", async function ({
+  describe("Counts and statuses", () => {
+    test("Should check() and return the queued count with and without a priority value", async ({
       harness: h,
       makeLimiter,
-    }) {
+    }) => {
       const limiter = makeLimiter({ maxConcurrent: 1, minTime: 100 });
 
       // Hold job 1 with a deferred promise so it never finishes until we
@@ -141,7 +141,7 @@ describe("General", () => {
       expect(h.log).toHaveCallOrder([[1], [5], [2], [3], [4]]);
     });
 
-    test("Should return the running and done counts", async function ({ harness: h, makeLimiter }) {
+    test("Should return the running and done counts", async ({ harness: h, makeLimiter }) => {
       const limiter = makeLimiter({ maxConcurrent: 5, minTime: 0 });
 
       // Held jobs let the test observe each (running, done) checkpoint
@@ -168,7 +168,7 @@ describe("General", () => {
 
       hold1.release();
       hold3.release();
-      await waitForState(async function () {
+      await waitForState(async () => {
         const [r, d] = await Promise.all([limiter.running(), limiter.done()]);
         expect(r).toBe(3);
         expect(d).toBe(2);
@@ -179,7 +179,7 @@ describe("General", () => {
       expect(done2).toEqual(2);
 
       hold2.release();
-      await waitForState(async function () {
+      await waitForState(async () => {
         const [r, d] = await Promise.all([limiter.running(), limiter.done()]);
         expect(r).toBe(0);
         expect(d).toBe(5);
@@ -193,7 +193,7 @@ describe("General", () => {
       expect(h.log).toHaveCallOrder([[], [1], [3], [2]]);
     });
 
-    test("Should refuse duplicate Job IDs", async function ({ harness: h, makeLimiter }) {
+    test("Should refuse duplicate Job IDs", async ({ harness: h, makeLimiter }) => {
       const limiter = makeLimiter({ maxConcurrent: 2, minTime: 100, trackDoneStatus: true });
 
       try {
@@ -205,7 +205,7 @@ describe("General", () => {
       }
     });
 
-    test("Should return job statuses", async function ({ harness: h, makeLimiter }) {
+    test("Should return job statuses", async ({ harness: h, makeLimiter }) => {
       const limiter = makeLimiter({ maxConcurrent: 2, minTime: 100 });
       await limiter.ready();
 
@@ -220,7 +220,7 @@ describe("General", () => {
       h.pNoErrVal(limiter.schedule({ weight: 2, id: 3 }, h.slowPromise, 100, null, 3), 3);
       expect(limiter.counts()).toEqual({ RECEIVED: 3, QUEUED: 0, RUNNING: 0, EXECUTING: 0 });
 
-      await waitForState(function () {
+      await waitForState(() => {
         const counts = limiter.counts();
         expect(counts.RECEIVED).toBe(0);
         expect(counts.QUEUED).toBe(1);
@@ -239,10 +239,7 @@ describe("General", () => {
       expect(h.log).toHaveCallOrder([[1], [2], [3]]);
     });
 
-    test("Should return job statuses, including DONE", async function ({
-      harness: h,
-      makeLimiter,
-    }) {
+    test("Should return job statuses, including DONE", async ({ harness: h, makeLimiter }) => {
       const limiter = makeLimiter({ maxConcurrent: 2, minTime: 100, trackDoneStatus: true });
 
       expect(limiter.counts()).toEqual({
@@ -276,7 +273,7 @@ describe("General", () => {
         DONE: 0,
       });
 
-      await waitForState(function () {
+      await waitForState(() => {
         const counts = limiter.counts();
         expect(counts.RECEIVED).toBe(0);
         expect(counts.QUEUED).toBe(1);
@@ -298,7 +295,7 @@ describe("General", () => {
 
       hold1.release();
 
-      await waitForState(function () {
+      await waitForState(() => {
         const counts = limiter.counts();
         expect(counts.RECEIVED).toBe(0);
         expect(counts.QUEUED).toBe(1);
@@ -330,7 +327,7 @@ describe("General", () => {
       expect(h.log).toHaveCallOrder([[1], [2], [3]]);
     });
 
-    test("Should return jobs for a status", async function ({ harness: h, makeLimiter }) {
+    test("Should return jobs for a status", async ({ harness: h, makeLimiter }) => {
       const limiter = makeLimiter({ maxConcurrent: 2, minTime: 100, trackDoneStatus: true });
 
       expect(limiter.counts()).toEqual({
@@ -363,7 +360,7 @@ describe("General", () => {
       expect(limiter.jobs()).toEqual(["1", "2", "3"]);
       expect(limiter.jobs("RECEIVED")).toEqual(["1", "2", "3"]);
 
-      await waitForState(function () {
+      await waitForState(() => {
         const counts = limiter.counts();
         expect(counts.RECEIVED).toBe(0);
         expect(counts.QUEUED).toBe(1);
@@ -388,7 +385,7 @@ describe("General", () => {
       // After hold1.release(), job 1 transitions to DONE and frees a slot. Job 2 is
       // already in RUNNING and immediately moves to EXECUTING. Wait for that
       // to complete to avoid catching the brief in-between RUNNING=1 state.
-      await waitForState(function () {
+      await waitForState(() => {
         const counts = limiter.counts();
         expect(counts.DONE).toBe(1);
         expect(counts.EXECUTING).toBe(1);
@@ -418,7 +415,7 @@ describe("General", () => {
       expect(h.log).toHaveCallOrder([[1], [2], [3]]);
     });
 
-    test("Should trigger events on status changes", async function ({ harness: h, makeLimiter }) {
+    test("Should trigger events on status changes", async ({ harness: h, makeLimiter }) => {
       const limiter = makeLimiter({ maxConcurrent: 2, minTime: 100, trackDoneStatus: true });
       await limiter.ready();
       let onReceived = 0;
@@ -472,7 +469,7 @@ describe("General", () => {
 
       expect([onReceived, onQueued, onScheduled, onExecuting, onDone]).toEqual([3, 0, 0, 0, 0]);
 
-      await waitForState(function () {
+      await waitForState(() => {
         const counts = limiter.counts();
         expect(counts.RECEIVED).toBe(0);
         expect(counts.QUEUED).toBe(1);
@@ -492,7 +489,7 @@ describe("General", () => {
 
       hold1.release();
 
-      await waitForState(function () {
+      await waitForState(() => {
         const counts = limiter.counts();
         expect(counts.RECEIVED).toBe(0);
         expect(counts.QUEUED).toBe(1);
@@ -527,36 +524,36 @@ describe("General", () => {
     });
   });
 
-  describe("Events", function () {
-    test("Should return itself", function ({ makeLimiter }) {
+  describe("Events", () => {
+    test("Should return itself", ({ makeLimiter }) => {
       const limiter = makeLimiter({ id: "test-limiter" });
 
-      const returned = limiter.on("ready", function () {});
+      const returned = limiter.on("ready", () => {});
       // The contract is that `.on()` returns the limiter itself for chaining;
       // compare to `limiter.id` rather than the literal "test-limiter" so this
       // works in Redis projects where test/bottleneck.js prefixes ids per fork.
       expect(returned.id).toEqual(limiter.id);
     });
 
-    test("Should fire events on empty queue", function ({ harness: h, makeLimiter }) {
+    test("Should fire events on empty queue", ({ harness: h, makeLimiter }) => {
       const limiter = makeLimiter({ maxConcurrent: 1, minTime: 100 });
       let calledEmpty = 0;
       let calledIdle = 0;
       let calledDepleted = 0;
 
-      limiter.on("empty", function () {
+      limiter.on("empty", () => {
         calledEmpty++;
       });
-      limiter.on("idle", function () {
+      limiter.on("idle", () => {
         calledIdle++;
       });
-      limiter.on("depleted", function () {
+      limiter.on("depleted", () => {
         calledDepleted++;
       });
 
       return h
         .pNoErrVal(limiter.schedule({ id: 1 }, h.slowPromise, 50, null, 1), 1)
-        .then(function () {
+        .then(() => {
           expect(calledEmpty).toEqual(1);
           expect(calledIdle).toEqual(1);
           return Promise.all([
@@ -564,10 +561,10 @@ describe("General", () => {
             h.pNoErrVal(limiter.schedule({ id: 3 }, h.slowPromise, 50, null, 3), 3),
           ]);
         })
-        .then(function () {
+        .then(() => {
           return limiter.submit({ id: 4 }, h.slowJob, 50, null, 4, null);
         })
-        .then(function () {
+        .then(() => {
           expect(h).toHaveFinalCallAt(250);
           expect(h.log).toHaveCallOrder([[1], [2], [3]]);
           expect(calledEmpty).toEqual(3);
@@ -577,7 +574,7 @@ describe("General", () => {
         });
     });
 
-    test("Should fire events once", function ({ harness: h, makeLimiter }) {
+    test("Should fire events once", ({ harness: h, makeLimiter }) => {
       const limiter = makeLimiter({ maxConcurrent: 1, minTime: 100 });
       let calledEmptyOnce = 0;
       let calledIdleOnce = 0;
@@ -585,19 +582,19 @@ describe("General", () => {
       let calledIdle = 0;
       let calledDepleted = 0;
 
-      limiter.once("empty", function () {
+      limiter.once("empty", () => {
         calledEmptyOnce++;
       });
-      limiter.once("idle", function () {
+      limiter.once("idle", () => {
         calledIdleOnce++;
       });
-      limiter.on("empty", function () {
+      limiter.on("empty", () => {
         calledEmpty++;
       });
-      limiter.on("idle", function () {
+      limiter.on("idle", () => {
         calledIdle++;
       });
-      limiter.on("depleted", function () {
+      limiter.on("depleted", () => {
         calledDepleted++;
       });
 
@@ -605,14 +602,14 @@ describe("General", () => {
 
       return h
         .pNoErrVal(limiter.schedule(h.promise, null, 2), 2)
-        .then(function () {
+        .then(() => {
           expect(calledEmptyOnce).toEqual(1);
           expect(calledIdleOnce).toEqual(1);
           expect(calledEmpty).toEqual(1);
           expect(calledIdle).toEqual(1);
           return h.pNoErrVal(limiter.schedule(h.promise, null, 3), 3);
         })
-        .then(function () {
+        .then(() => {
           expect(h).toHaveFinalCallAt(200);
           expect(h.log).toHaveCallOrder([[1], [2], [3]]);
           expect(calledEmptyOnce).toEqual(1);
@@ -623,7 +620,7 @@ describe("General", () => {
         });
     });
 
-    test("Should support faulty event listeners", function ({ harness: h, makeLimiter }) {
+    test("Should support faulty event listeners", ({ harness: h, makeLimiter }) => {
       const limiter = makeLimiter({ maxConcurrent: 1, minTime: 100 }, { expectErrors: true });
       // We only care that the listener-thrown error eventually surfaces on
       // the "error" event. Counting calls is brittle under Redis-backed runs
@@ -632,13 +629,13 @@ describe("General", () => {
       // any counter and starve the resolve condition.
       let fired = false;
       return new Promise((resolve) => {
-        limiter.on("error", function (err) {
+        limiter.on("error", (err) => {
           if (err.message === "Oh noes!" && !fired) {
             fired = true;
             resolve();
           }
         });
-        limiter.on("empty", function () {
+        limiter.on("empty", () => {
           throw new Error("Oh noes!");
         });
 
@@ -646,20 +643,20 @@ describe("General", () => {
       });
     });
 
-    test("Should wait for async event listeners", function ({ harness: h, makeLimiter }) {
+    test("Should wait for async event listeners", ({ harness: h, makeLimiter }) => {
       const limiter = makeLimiter({ maxConcurrent: 1, minTime: 100 }, { expectErrors: true });
       // Match on the specific error message — under load any unrelated redis
       // error could fire first; we only care that "It broke!" eventually does.
       let fired = false;
       return new Promise((resolve) => {
-        limiter.on("error", function (err) {
+        limiter.on("error", (err) => {
           if (err.message === "It broke!" && !fired) {
             fired = true;
             resolve();
           }
         });
-        limiter.on("empty", function () {
-          return h.slowPromise(100, null, 1, 2).then(function (x) {
+        limiter.on("empty", () => {
+          return h.slowPromise(100, null, 1, 2).then((x) => {
             expect(x).toEqual([1, 2]);
             throw new Error("It broke!");
           });
