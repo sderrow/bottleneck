@@ -139,13 +139,13 @@ export const test = baseTest.extend({
   // it parses the pattern to build the dependency graph — so the empty
   // pattern is mandatory for dependency-free fixtures.
   // oxlint-disable-next-line no-empty-pattern
-  harness: async function ({}, use) {
+  async harness({}, use) {
     await use(createJobHarness());
   },
   limiterOptions: {},
   limiterMeta: {},
   // oxlint-disable-next-line no-empty-pattern
-  track: async function ({}, use) {
+  async track({}, use) {
     const resources = [];
     await use((resource) => {
       resources.push(resource);
@@ -159,10 +159,10 @@ export const test = baseTest.extend({
       }
     }
   },
-  makeLimiter: async function ({ track }, use) {
+  async makeLimiter({ track }, use) {
     await use((opts, meta) => track(makeLimiterHelper(opts, meta)));
   },
-  limiter: async function ({ makeLimiter, limiterOptions, limiterMeta }, use) {
+  async limiter({ makeLimiter, limiterOptions, limiterMeta }, use) {
     await use(makeLimiter(limiterOptions, limiterMeta));
   },
 });
