@@ -212,12 +212,15 @@ describe("General", () => {
       expect(limiter.counts()).toEqual({ RECEIVED: 0, QUEUED: 0, RUNNING: 0, EXECUTING: 0 });
 
       const hold1 = deferred();
-      h.pNoErrVal(
+      expect(
         limiter.schedule({ weight: 1, id: 1 }, h.deferredPromise, hold1.signal, null, 1),
-        1,
-      );
-      h.pNoErrVal(limiter.schedule({ weight: 1, id: 2 }, h.slowPromise, 200, null, 2), 2);
-      h.pNoErrVal(limiter.schedule({ weight: 2, id: 3 }, h.slowPromise, 100, null, 3), 3);
+      ).resolves.toEqual([1]);
+      expect(limiter.schedule({ weight: 1, id: 2 }, h.slowPromise, 200, null, 2)).resolves.toEqual([
+        2,
+      ]);
+      expect(limiter.schedule({ weight: 2, id: 3 }, h.slowPromise, 100, null, 3)).resolves.toEqual([
+        3,
+      ]);
       expect(limiter.counts()).toEqual({ RECEIVED: 3, QUEUED: 0, RUNNING: 0, EXECUTING: 0 });
 
       await waitForState(() => {
@@ -259,12 +262,15 @@ describe("General", () => {
       // (job 2 — was RUNNING for one microtask), QUEUED:1}). Holding job 1
       // with deferredPromise eliminates the race.
       const hold1 = deferred();
-      h.pNoErrVal(
+      expect(
         limiter.schedule({ weight: 1, id: 1 }, h.deferredPromise, hold1.signal, null, 1),
-        1,
-      );
-      h.pNoErrVal(limiter.schedule({ weight: 1, id: 2 }, h.slowPromise, 200, null, 2), 2);
-      h.pNoErrVal(limiter.schedule({ weight: 2, id: 3 }, h.slowPromise, 100, null, 3), 3);
+      ).resolves.toEqual([1]);
+      expect(limiter.schedule({ weight: 1, id: 2 }, h.slowPromise, 200, null, 2)).resolves.toEqual([
+        2,
+      ]);
+      expect(limiter.schedule({ weight: 2, id: 3 }, h.slowPromise, 100, null, 3)).resolves.toEqual([
+        3,
+      ]);
       expect(limiter.counts()).toEqual({
         RECEIVED: 3,
         QUEUED: 0,
@@ -347,8 +353,12 @@ describe("General", () => {
       const hold1 = deferred();
 
       limiter.submit({ weight: 1, id: 1 }, h.deferredJob, hold1.signal, null, 1, h.noErrVal(1));
-      h.pNoErrVal(limiter.schedule({ weight: 1, id: 2 }, h.slowPromise, 200, null, 2), 2);
-      h.pNoErrVal(limiter.schedule({ weight: 2, id: 3 }, h.slowPromise, 100, null, 3), 3);
+      expect(limiter.schedule({ weight: 1, id: 2 }, h.slowPromise, 200, null, 2)).resolves.toEqual([
+        2,
+      ]);
+      expect(limiter.schedule({ weight: 2, id: 3 }, h.slowPromise, 100, null, 3)).resolves.toEqual([
+        3,
+      ]);
       expect(limiter.counts()).toEqual({
         RECEIVED: 3,
         QUEUED: 0,
@@ -453,12 +463,15 @@ describe("General", () => {
       });
 
       const hold1 = deferred();
-      h.pNoErrVal(
+      expect(
         limiter.schedule({ weight: 1, id: 1 }, h.deferredPromise, hold1.signal, null, 1),
-        1,
-      );
-      h.pNoErrVal(limiter.schedule({ weight: 1, id: 2 }, h.slowPromise, 200, null, 2), 2);
-      h.pNoErrVal(limiter.schedule({ weight: 2, id: 3 }, h.slowPromise, 100, null, 3), 3);
+      ).resolves.toEqual([1]);
+      expect(limiter.schedule({ weight: 1, id: 2 }, h.slowPromise, 200, null, 2)).resolves.toEqual([
+        2,
+      ]);
+      expect(limiter.schedule({ weight: 2, id: 3 }, h.slowPromise, 100, null, 3)).resolves.toEqual([
+        3,
+      ]);
       expect(limiter.counts()).toEqual({
         RECEIVED: 3,
         QUEUED: 0,
@@ -551,14 +564,14 @@ describe("General", () => {
         calledDepleted++;
       });
 
-      return h
-        .pNoErrVal(limiter.schedule({ id: 1 }, h.slowPromise, 50, null, 1), 1)
+      return expect(limiter.schedule({ id: 1 }, h.slowPromise, 50, null, 1))
+        .resolves.toEqual([1])
         .then(() => {
           expect(calledEmpty).toEqual(1);
           expect(calledIdle).toEqual(1);
           return Promise.all([
-            h.pNoErrVal(limiter.schedule({ id: 2 }, h.slowPromise, 50, null, 2), 2),
-            h.pNoErrVal(limiter.schedule({ id: 3 }, h.slowPromise, 50, null, 3), 3),
+            expect(limiter.schedule({ id: 2 }, h.slowPromise, 50, null, 2)).resolves.toEqual([2]),
+            expect(limiter.schedule({ id: 3 }, h.slowPromise, 50, null, 3)).resolves.toEqual([3]),
           ]);
         })
         .then(() => limiter.submit({ id: 4 }, h.slowJob, 50, null, 4, null))
@@ -596,16 +609,16 @@ describe("General", () => {
         calledDepleted++;
       });
 
-      h.pNoErrVal(limiter.schedule(h.slowPromise, 50, null, 1), 1);
+      expect(limiter.schedule(h.slowPromise, 50, null, 1)).resolves.toEqual([1]);
 
-      return h
-        .pNoErrVal(limiter.schedule(h.promise, null, 2), 2)
+      return expect(limiter.schedule(h.promise, null, 2))
+        .resolves.toEqual([2])
         .then(() => {
           expect(calledEmptyOnce).toEqual(1);
           expect(calledIdleOnce).toEqual(1);
           expect(calledEmpty).toEqual(1);
           expect(calledIdle).toEqual(1);
-          return h.pNoErrVal(limiter.schedule(h.promise, null, 3), 3);
+          return expect(limiter.schedule(h.promise, null, 3)).resolves.toEqual([3]);
         })
         .then(() => {
           expect(h).toHaveFinalCallAt(200);
@@ -637,7 +650,7 @@ describe("General", () => {
           throw new Error("Oh noes!");
         });
 
-        h.pNoErrVal(limiter.schedule(h.promise, null, 1), 1);
+        expect(limiter.schedule(h.promise, null, 1)).resolves.toEqual([1]);
       });
     });
 
@@ -660,7 +673,7 @@ describe("General", () => {
           }),
         );
 
-        h.pNoErrVal(limiter.schedule(h.promise, null, 1), 1);
+        expect(limiter.schedule(h.promise, null, 1)).resolves.toEqual([1]);
       });
     });
   });

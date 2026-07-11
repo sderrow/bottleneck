@@ -67,8 +67,8 @@ describe("ioredis-only", () => {
       connection,
     });
 
-    h.pNoErrVal(limiter.schedule(h.promise, null, 1), 1);
-    h.pNoErrVal(limiter.schedule(h.promise, null, 2), 2);
+    expect(limiter.schedule(h.promise, null, 1)).resolves.toEqual([1]);
+    expect(limiter.schedule(h.promise, null, 2)).resolves.toEqual([2]);
 
     return h
       .flushLimiter(limiter)
@@ -96,8 +96,8 @@ describe("ioredis-only", () => {
       connection,
     });
 
-    h.pNoErrVal(limiter.schedule(h.promise, null, 1), 1);
-    h.pNoErrVal(limiter.schedule(h.promise, null, 2), 2);
+    expect(limiter.schedule(h.promise, null, 1)).resolves.toEqual([1]);
+    expect(limiter.schedule(h.promise, null, 2)).resolves.toEqual([2]);
 
     return h
       .flushLimiter(limiter)

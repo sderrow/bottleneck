@@ -6,12 +6,6 @@ import makeLimiterHelper from "./limiter.js";
 export { waitForState } from "./wait-for-state.js";
 export { deferred } from "./job-tasks.js";
 
-function pNoErrVal(promise, ...expected) {
-  return promise.then((actual) => {
-    vitestExpect(actual).toEqual(expected);
-  });
-}
-
 function noErrVal(...expected) {
   return (err, ...actual) => {
     vitestExpect(err).toBeNull();
@@ -60,7 +54,6 @@ function createJobHarness() {
     getResults,
     results: getResults,
     flushLimiter,
-    pNoErrVal,
     noErrVal,
     callTimes,
   };

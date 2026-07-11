@@ -496,8 +496,8 @@ describe("Cluster coordination", () => {
     const key = "heartbeat";
 
     const limiter = group.key(key);
-    return h
-      .pNoErrVal(limiter.schedule(h.promise, null, 1), 1)
+    return expect(limiter.schedule(h.promise, null, 1))
+      .resolves.toEqual([1])
       .then(() => limiter.done())
       .then((doneCount) => {
         expect(doneCount).toEqual(1);
@@ -536,9 +536,9 @@ describe("Cluster coordination", () => {
     const key = "deleted";
     const limiter = group1.key(key); // only for countKeys() use
 
-    return h
-      .pNoErrVal(group1.key(key).schedule(h.promise, null, 1), 1)
-      .then(() => h.pNoErrVal(group2.key(key).schedule(h.promise, null, 2), 2))
+    return expect(group1.key(key).schedule(h.promise, null, 1))
+      .resolves.toEqual([1])
+      .then(() => expect(group2.key(key).schedule(h.promise, null, 2)).resolves.toEqual([2]))
       .then(() => {
         expect(group1.keys().length).toEqual(1);
         expect(group2.keys().length).toEqual(1);
@@ -606,8 +606,8 @@ describe("Cluster coordination", () => {
     const key = "deleted-cluster-wide";
     const limiter = group1.key(key); // only for countKeys() use
 
-    return h
-      .pNoErrVal(group1.key(key).schedule(h.promise, null, 1), 1)
+    return expect(group1.key(key).schedule(h.promise, null, 1))
+      .resolves.toEqual([1])
       .then(() => {
         expect(group1.keys().length).toEqual(1);
         expect(group2.keys().length).toEqual(0);

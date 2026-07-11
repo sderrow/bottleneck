@@ -65,8 +65,8 @@ describe("Cluster-only", () => {
         expect(limiter.datastore).toEqual(process.env.DATASTORE);
 
         return Promise.all([
-          h.pNoErrVal(rootLimiter.schedule(h.promise, null, 1), 1),
-          h.pNoErrVal(limiter.schedule(h.promise, null, 2), 2),
+          expect(rootLimiter.schedule(h.promise, null, 1)).resolves.toEqual([1]),
+          expect(limiter.schedule(h.promise, null, 2)).resolves.toEqual([2]),
         ]);
       })
       .then(() => h.flushLimiter(rootLimiter))
@@ -99,9 +99,9 @@ describe("Cluster-only", () => {
         expect(limiter2.datastore).toEqual(process.env.DATASTORE);
 
         return Promise.all([
-          h.pNoErrVal(rootLimiter.schedule(h.promise, null, 1), 1),
-          h.pNoErrVal(limiter1.schedule(h.promise, null, 2), 2),
-          h.pNoErrVal(limiter2.schedule(h.promise, null, 3), 3),
+          expect(rootLimiter.schedule(h.promise, null, 1)).resolves.toEqual([1]),
+          expect(limiter1.schedule(h.promise, null, 2)).resolves.toEqual([2]),
+          expect(limiter2.schedule(h.promise, null, 3)).resolves.toEqual([3]),
         ]);
       })
       .then(() => h.flushLimiter(rootLimiter))
@@ -141,8 +141,8 @@ describe("Cluster-only", () => {
         expect(limiter2.datastore).toEqual(process.env.DATASTORE);
 
         return Promise.all([
-          h.pNoErrVal(limiter1.schedule(h.promise, null, 1), 1),
-          h.pNoErrVal(limiter2.schedule(h.promise, null, 2), 2),
+          expect(limiter1.schedule(h.promise, null, 1)).resolves.toEqual([1]),
+          expect(limiter2.schedule(h.promise, null, 2)).resolves.toEqual([2]),
         ]);
       })
       .then(() => h.flushLimiter(rootLimiter))
@@ -193,10 +193,10 @@ describe("Cluster-only", () => {
         expect(limiter4.datastore).toEqual(process.env.DATASTORE);
 
         return Promise.all([
-          h.pNoErrVal(limiter1.schedule(h.promise, null, 1), 1),
-          h.pNoErrVal(limiter2.schedule(h.promise, null, 2), 2),
-          h.pNoErrVal(limiter3.schedule(h.promise, null, 3), 3),
-          h.pNoErrVal(limiter4.schedule(h.promise, null, 4), 4),
+          expect(limiter1.schedule(h.promise, null, 1)).resolves.toEqual([1]),
+          expect(limiter2.schedule(h.promise, null, 2)).resolves.toEqual([2]),
+          expect(limiter3.schedule(h.promise, null, 3)).resolves.toEqual([3]),
+          expect(limiter4.schedule(h.promise, null, 4)).resolves.toEqual([4]),
         ]);
       })
       .then(() => h.flushLimiter(rootLimiter))
@@ -612,10 +612,9 @@ describe("Cluster-only", () => {
           // disconnect below, then released so we keep the completion-with-value
           // coverage: the task resolves locally (free.lua fails post-disconnect
           // and is swallowed), so redis still shows it as running.
-          p1 = h.pNoErrVal(
+          p1 = expect(
             rootLimiter.schedule({ weight: 1 }, h.deferredPromise, job1.signal, null, 1),
-            1,
-          );
+          ).resolves.toEqual([1]);
           // Expiration present, these jobs should be removed automatically
           rootLimiter
             .schedule({ expiration: 50, weight: 2 }, h.deferredPromise, never, null, 2)

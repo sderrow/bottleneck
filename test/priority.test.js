@@ -9,11 +9,11 @@ describe("Priority", () => {
     const limiter = makeLimiter({ maxConcurrent: 1, minTime: 100, rejectOnDrop: false });
 
     return Promise.all([
-      h.pNoErrVal(limiter.schedule(h.slowPromise, 50, null, 1), 1),
-      h.pNoErrVal(limiter.schedule(h.promise, null, 2), 2),
-      h.pNoErrVal(limiter.schedule({ priority: 1 }, h.promise, null, 5, 6), 5, 6),
-      h.pNoErrVal(limiter.schedule(h.promise, null, 3), 3),
-      h.pNoErrVal(limiter.schedule(h.promise, null, 4), 4),
+      expect(limiter.schedule(h.slowPromise, 50, null, 1)).resolves.toEqual([1]),
+      expect(limiter.schedule(h.promise, null, 2)).resolves.toEqual([2]),
+      expect(limiter.schedule({ priority: 1 }, h.promise, null, 5, 6)).resolves.toEqual([5, 6]),
+      expect(limiter.schedule(h.promise, null, 3)).resolves.toEqual([3]),
+      expect(limiter.schedule(h.promise, null, 4)).resolves.toEqual([4]),
     ])
       .then(() => h.flushLimiter(limiter))
       .then((_results) => {
@@ -185,10 +185,12 @@ describe("Priority", () => {
       committed++;
     });
     const first = deferred();
-    h.pNoErrVal(limiter.schedule({ priority: 6 }, h.deferredPromise, first.signal, null, 1), 1);
-    h.pNoErrVal(limiter.schedule({ priority: 5 }, h.promise, null, 2), 2);
-    h.pNoErrVal(limiter.schedule({ priority: 4 }, h.promise, null, 3), 3);
-    h.pNoErrVal(limiter.schedule({ priority: 3 }, h.promise, null, 4), 4);
+    expect(
+      limiter.schedule({ priority: 6 }, h.deferredPromise, first.signal, null, 1),
+    ).resolves.toEqual([1]);
+    expect(limiter.schedule({ priority: 5 }, h.promise, null, 2)).resolves.toEqual([2]);
+    expect(limiter.schedule({ priority: 4 }, h.promise, null, 3)).resolves.toEqual([3]);
+    expect(limiter.schedule({ priority: 3 }, h.promise, null, 4)).resolves.toEqual([4]);
     await waitForState(() => {
       expect(committed).toBe(4);
     });

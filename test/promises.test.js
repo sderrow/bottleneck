@@ -11,7 +11,7 @@ describe("Promises", () => {
     limiter.submit(h.job, null, 1, 9, h.noErrVal(1, 9));
     limiter.submit(h.job, null, 2, h.noErrVal(2));
     limiter.submit(h.job, null, 3, h.noErrVal(3));
-    h.pNoErrVal(limiter.schedule(h.promise, null, 4, 5), 4, 5);
+    expect(limiter.schedule(h.promise, null, 4, 5)).resolves.toEqual([4, 5]);
 
     return h.flushLimiter(limiter).then((_results) => {
       expect(h.log).toHaveCallOrder([[1, 9], [2], [3], [4, 5]]);
@@ -56,8 +56,8 @@ describe("Promises", () => {
       dropped++;
     });
 
-    p1 = h.pNoErrVal(limiter.schedule({ id: 1 }, h.slowPromise, 50, null, 1), 1);
-    p2 = h.pNoErrVal(limiter.schedule({ id: 2 }, h.slowPromise, 50, null, 2), 2);
+    p1 = expect(limiter.schedule({ id: 1 }, h.slowPromise, 50, null, 1)).resolves.toEqual([1]);
+    p2 = expect(limiter.schedule({ id: 2 }, h.slowPromise, 50, null, 2)).resolves.toEqual([2]);
 
     return limiter
       .schedule({ id: 3 }, h.slowPromise, 50, null, 3)
@@ -101,7 +101,7 @@ describe("Promises", () => {
       limiter.submit(h.job, null, 3, h.noErrVal(3));
 
       const wrapped = limiter.wrap(h.promise);
-      h.pNoErrVal(wrapped(null, 4), 4);
+      expect(wrapped(null, 4)).resolves.toEqual([4]);
 
       return h.flushLimiter(limiter).then((_results) => {
         expect(h.log).toHaveCallOrder([[1], [2], [3], [4]]);
@@ -163,8 +163,8 @@ describe("Promises", () => {
       const failureMessage = "BLEW UP!!!";
 
       const wrapped = limiter.wrap(h.promise);
-      h.pNoErrVal(wrapped(null, 1), 1);
-      h.pNoErrVal(wrapped(null, 2), 2);
+      expect(wrapped(null, 1)).resolves.toEqual([1]);
+      expect(wrapped(null, 2)).resolves.toEqual([2]);
 
       return wrapped(new Error(failureMessage), 3)
         .catch((err) => {
@@ -185,11 +185,11 @@ describe("Promises", () => {
       limiter.schedule(() => primer.signal);
 
       const wrapped = limiter.wrap(h.promise);
-      h.pNoErrVal(wrapped(null, 1), 1);
-      h.pNoErrVal(wrapped(null, 2), 2);
-      h.pNoErrVal(wrapped(null, 3), 3);
-      h.pNoErrVal(wrapped(null, 4), 4);
-      h.pNoErrVal(wrapped.withOptions({ priority: 1 }, null, 5), 5);
+      expect(wrapped(null, 1)).resolves.toEqual([1]);
+      expect(wrapped(null, 2)).resolves.toEqual([2]);
+      expect(wrapped(null, 3)).resolves.toEqual([3]);
+      expect(wrapped(null, 4)).resolves.toEqual([4]);
+      expect(wrapped.withOptions({ priority: 1 }, null, 5)).resolves.toEqual([5]);
       const job6 = wrapped.withOptions({ priority: 1 }, new Error(failureMessage), 6);
 
       await waitForState(() => {

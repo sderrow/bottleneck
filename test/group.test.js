@@ -236,8 +236,8 @@ describe("Group", () => {
     const KEY_B = "BBB";
 
     return Promise.all([
-      h.pNoErrVal(group1.key(KEY_A).schedule(h.promise, null, 1), 1),
-      h.pNoErrVal(group1.key(KEY_B).schedule(h.promise, null, 2), 2),
+      expect(group1.key(KEY_A).schedule(h.promise, null, 1)).resolves.toEqual([1]),
+      expect(group1.key(KEY_B).schedule(h.promise, null, 2)).resolves.toEqual([2]),
     ])
       .then(() => {
         const keys = group1.keys();

@@ -17,10 +17,14 @@ describe("General traffic", () => {
         rejectOnDrop: false,
       });
 
-      const first = h.pNoErrVal(limiter.schedule(h.slowPromise, 50, null, 1), 1);
-      h.pNoErrVal(limiter.schedule(h.slowPromise, 50, null, 2), 2);
-      h.pNoErrVal(limiter.schedule(h.slowPromise, 50, null, 3), 3);
-      h.pNoErrVal(limiter.schedule(h.slowPromise, 50, null, 4), 4);
+      const first = expect(limiter.schedule(h.slowPromise, 50, null, 1)).resolves.toEqual([1]);
+      // Jobs 2-4 are dropped (highWater 0, rejectOnDrop false): their promises
+      // never settle, so wrapping them in expect().resolves would hang the
+      // test's auto-awaited assertions. toHaveCallOrder below proves they
+      // never ran.
+      limiter.schedule(h.slowPromise, 50, null, 2);
+      limiter.schedule(h.slowPromise, 50, null, 3);
+      limiter.schedule(h.slowPromise, 50, null, 4);
 
       return first
         .then(() => h.flushLimiter(limiter, { weight: 0 }))
@@ -64,7 +68,9 @@ describe("General traffic", () => {
       // before jobs 3/4 commit, jobs 2/3 dispatch, and the test sees 3
       // results instead of the expected 2.
       const primer = deferred();
-      const first = h.pNoErrVal(limiter.schedule(h.deferredPromise, primer.signal, null, 1), 1);
+      const first = expect(
+        limiter.schedule(h.deferredPromise, primer.signal, null, 1),
+      ).resolves.toEqual([1]);
 
       // Wait until the primer is running. Once it occupies the running
       // slot at maxConcurrent=1, no subsequent job can be dispatched
@@ -73,9 +79,11 @@ describe("General traffic", () => {
         expect(await limiter.running()).toBeGreaterThanOrEqual(1);
       });
 
-      h.pNoErrVal(limiter.schedule(h.slowPromise, 50, null, 2), 2);
-      h.pNoErrVal(limiter.schedule(h.slowPromise, 50, null, 3), 3);
-      const last = h.pNoErrVal(limiter.schedule(h.slowPromise, 50, null, 4), 4);
+      // Jobs 2-3 are displaced by LEAK (rejectOnDrop false): their promises
+      // never settle — toHaveCallOrder below proves they never ran.
+      limiter.schedule(h.slowPromise, 50, null, 2);
+      limiter.schedule(h.slowPromise, 50, null, 3);
+      const last = expect(limiter.schedule(h.slowPromise, 50, null, 4)).resolves.toEqual([4]);
 
       // 4 = primer + j2 + j3 + j4 all committed via doQueue.
       await waitForState(() => {
@@ -96,8 +104,8 @@ describe("General traffic", () => {
     }) => {
       const limiter = makeLimiter({ maxConcurrent: 2 });
 
-      h.pNoErrVal(limiter.schedule({ weight: 1 }, h.promise, null, 1), 1);
-      h.pNoErrVal(limiter.schedule({ weight: 2 }, h.promise, null, 2), 2);
+      expect(limiter.schedule({ weight: 1 }, h.promise, null, 1)).resolves.toEqual([1]);
+      expect(limiter.schedule({ weight: 2 }, h.promise, null, 2)).resolves.toEqual([2]);
 
       return limiter
         .schedule({ weight: 3 }, h.promise, null, 3)
@@ -119,11 +127,11 @@ describe("General traffic", () => {
       // Await all 5 schedule promises before h.flushLimiter(limiter); otherwise the weight: 0
       // job's slowPromise may not have settled by the time h.flushLimiter(limiter) reads calls[].
       return Promise.all([
-        h.pNoErrVal(limiter.schedule({ weight: 1 }, h.slowPromise, 100, null, 1), 1),
-        h.pNoErrVal(limiter.schedule({ weight: 2 }, h.slowPromise, 200, null, 2), 2),
-        h.pNoErrVal(limiter.schedule({ weight: 1 }, h.slowPromise, 100, null, 3), 3),
-        h.pNoErrVal(limiter.schedule({ weight: 1 }, h.slowPromise, 100, null, 4), 4),
-        h.pNoErrVal(limiter.schedule({ weight: 0 }, h.slowPromise, 100, null, 5), 5),
+        expect(limiter.schedule({ weight: 1 }, h.slowPromise, 100, null, 1)).resolves.toEqual([1]),
+        expect(limiter.schedule({ weight: 2 }, h.slowPromise, 200, null, 2)).resolves.toEqual([2]),
+        expect(limiter.schedule({ weight: 1 }, h.slowPromise, 100, null, 3)).resolves.toEqual([3]),
+        expect(limiter.schedule({ weight: 1 }, h.slowPromise, 100, null, 4)).resolves.toEqual([4]),
+        expect(limiter.schedule({ weight: 0 }, h.slowPromise, 100, null, 5)).resolves.toEqual([5]),
       ])
         .then(() => h.flushLimiter(limiter))
         .then((_results) => {
@@ -145,22 +153,18 @@ describe("General traffic", () => {
         calledDepleted++;
       });
 
-      const p1 = h.pNoErrVal(
+      const p1 = expect(
         limiter.schedule({ weight: 1, id: 1 }, h.slowPromise, 100, null, 1),
-        1,
-      );
-      const p2 = h.pNoErrVal(
+      ).resolves.toEqual([1]);
+      const p2 = expect(
         limiter.schedule({ weight: 2, id: 2 }, h.slowPromise, 150, null, 2),
-        2,
-      );
-      const p3 = h.pNoErrVal(
+      ).resolves.toEqual([2]);
+      const p3 = expect(
         limiter.schedule({ weight: 1, id: 3 }, h.slowPromise, 100, null, 3),
-        3,
-      );
-      const p4 = h.pNoErrVal(
+      ).resolves.toEqual([3]);
+      const p4 = expect(
         limiter.schedule({ weight: 1, id: 4 }, h.slowPromise, 100, null, 4),
-        4,
-      );
+      ).resolves.toEqual([4]);
 
       return Promise.all([p1, p2])
         .then(() => {
@@ -212,7 +216,7 @@ describe("General traffic", () => {
       const holdJ1 = deferred();
 
       return Promise.all([
-        h.pNoErrVal(
+        expect(
           limiter.schedule(
             { id: "very-slow-no-expiration" },
             h.deferredPromise,
@@ -220,8 +224,7 @@ describe("General traffic", () => {
             null,
             1,
           ),
-          1,
-        ),
+        ).resolves.toEqual([1]),
 
         limiter
           .schedule({ expiration: 50, id: "slow-with-expiration" }, h.slowPromise, 75, null, 2)
@@ -317,11 +320,11 @@ describe("General traffic", () => {
       });
 
       return Promise.all([
-        h.pNoErrVal(limiter.schedule({ weight: 1 }, h.promise, null, 1), 1),
-        h.pNoErrVal(limiter.schedule({ weight: 2 }, h.promise, null, 2), 2),
-        h.pNoErrVal(limiter.schedule({ weight: 3 }, h.promise, null, 3), 3),
-        h.pNoErrVal(limiter.schedule({ weight: 4 }, h.promise, null, 4), 4),
-        h.pNoErrVal(limiter.schedule({ weight: 5 }, h.promise, null, 5), 5),
+        expect(limiter.schedule({ weight: 1 }, h.promise, null, 1)).resolves.toEqual([1]),
+        expect(limiter.schedule({ weight: 2 }, h.promise, null, 2)).resolves.toEqual([2]),
+        expect(limiter.schedule({ weight: 3 }, h.promise, null, 3)).resolves.toEqual([3]),
+        expect(limiter.schedule({ weight: 4 }, h.promise, null, 4)).resolves.toEqual([4]),
+        expect(limiter.schedule({ weight: 5 }, h.promise, null, 5)).resolves.toEqual([5]),
       ])
         .then(() => h.flushLimiter(limiter, { weight: 0, priority: 9 }))
         .then((results) => {
@@ -356,10 +359,10 @@ describe("General traffic", () => {
       });
 
       return Promise.all([
-        h.pNoErrVal(limiter.schedule(h.promise, null, 1), 1),
-        h.pNoErrVal(limiter.schedule(h.promise, null, 2), 2),
-        h.pNoErrVal(limiter.schedule(h.promise, null, 3), 3),
-        h.pNoErrVal(limiter.schedule(h.promise, null, 4), 4),
+        expect(limiter.schedule(h.promise, null, 1)).resolves.toEqual([1]),
+        expect(limiter.schedule(h.promise, null, 2)).resolves.toEqual([2]),
+        expect(limiter.schedule(h.promise, null, 3)).resolves.toEqual([3]),
+        expect(limiter.schedule(h.promise, null, 4)).resolves.toEqual([4]),
       ])
         .then(() => h.flushLimiter(limiter, { weight: 0, priority: 9 }))
         .then((results) => {
@@ -419,11 +422,11 @@ describe("General traffic", () => {
       });
 
       await Promise.all([
-        h.pNoErrVal(limiter.schedule({ weight: 1 }, h.promise, null, 1), 1),
-        h.pNoErrVal(limiter.schedule({ weight: 2 }, h.promise, null, 2), 2),
-        h.pNoErrVal(limiter.schedule({ weight: 3 }, h.promise, null, 3), 3),
-        h.pNoErrVal(limiter.schedule({ weight: 4 }, h.promise, null, 4), 4),
-        h.pNoErrVal(limiter.schedule({ weight: 5 }, h.promise, null, 5), 5),
+        expect(limiter.schedule({ weight: 1 }, h.promise, null, 1)).resolves.toEqual([1]),
+        expect(limiter.schedule({ weight: 2 }, h.promise, null, 2)).resolves.toEqual([2]),
+        expect(limiter.schedule({ weight: 3 }, h.promise, null, 3)).resolves.toEqual([3]),
+        expect(limiter.schedule({ weight: 4 }, h.promise, null, 4)).resolves.toEqual([4]),
+        expect(limiter.schedule({ weight: 5 }, h.promise, null, 5)).resolves.toEqual([5]),
       ]);
 
       const results = await h.flushLimiter(limiter, { weight: 0, priority: 9 });
@@ -453,11 +456,11 @@ describe("General traffic", () => {
       });
 
       await Promise.all([
-        h.pNoErrVal(limiter.schedule({ weight: 1 }, h.promise, null, 1), 1),
-        h.pNoErrVal(limiter.schedule({ weight: 2 }, h.promise, null, 2), 2),
-        h.pNoErrVal(limiter.schedule({ weight: 3 }, h.promise, null, 3), 3),
-        h.pNoErrVal(limiter.schedule({ weight: 4 }, h.promise, null, 4), 4),
-        h.pNoErrVal(limiter.schedule({ weight: 5 }, h.promise, null, 5), 5),
+        expect(limiter.schedule({ weight: 1 }, h.promise, null, 1)).resolves.toEqual([1]),
+        expect(limiter.schedule({ weight: 2 }, h.promise, null, 2)).resolves.toEqual([2]),
+        expect(limiter.schedule({ weight: 3 }, h.promise, null, 3)).resolves.toEqual([3]),
+        expect(limiter.schedule({ weight: 4 }, h.promise, null, 4)).resolves.toEqual([4]),
+        expect(limiter.schedule({ weight: 5 }, h.promise, null, 5)).resolves.toEqual([5]),
       ]);
 
       const results = await h.flushLimiter(limiter, { weight: 0, priority: 9 });
@@ -477,10 +480,10 @@ describe("General traffic", () => {
       });
 
       return Promise.all([
-        h.pNoErrVal(limiter.schedule(h.promise, null, 1), 1),
-        h.pNoErrVal(limiter.schedule(h.promise, null, 2), 2),
-        h.pNoErrVal(limiter.schedule(h.promise, null, 3), 3),
-        h.pNoErrVal(limiter.schedule(h.promise, null, 4), 4),
+        expect(limiter.schedule(h.promise, null, 1)).resolves.toEqual([1]),
+        expect(limiter.schedule(h.promise, null, 2)).resolves.toEqual([2]),
+        expect(limiter.schedule(h.promise, null, 3)).resolves.toEqual([3]),
+        expect(limiter.schedule(h.promise, null, 4)).resolves.toEqual([4]),
       ])
         .then(() => limiter.currentReservoir())
         .then((reservoir) => {

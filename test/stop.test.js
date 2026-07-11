@@ -16,9 +16,9 @@ describe("Stop", () => {
       dropped++;
     });
 
-    h.pNoErrVal(limiter.schedule({ id: "0" }, h.promise, null, 0), 0);
+    expect(limiter.schedule({ id: "0" }, h.promise, null, 0)).resolves.toEqual([0]);
 
-    h.pNoErrVal(limiter.schedule({ id: "1" }, h.slowPromise, 500, null, 1), 1);
+    expect(limiter.schedule({ id: "1" }, h.slowPromise, 500, null, 1)).resolves.toEqual([1]);
 
     const scheduledDroppedJob = limiter.schedule({ id: "2" }, h.promise, null, 2);
     const queuedDroppedJob = limiter.schedule({ id: "3" }, h.promise, null, 3);
@@ -68,9 +68,9 @@ describe("Stop", () => {
       dropped++;
     });
 
-    h.pNoErrVal(limiter.schedule({ id: "1" }, h.promise, null, 1), 1);
-    h.pNoErrVal(limiter.schedule({ id: "2" }, h.promise, null, 2), 2);
-    h.pNoErrVal(limiter.schedule({ id: "3" }, h.slowPromise, 100, null, 3), 3);
+    expect(limiter.schedule({ id: "1" }, h.promise, null, 1)).resolves.toEqual([1]);
+    expect(limiter.schedule({ id: "2" }, h.promise, null, 2)).resolves.toEqual([2]);
+    expect(limiter.schedule({ id: "3" }, h.slowPromise, 100, null, 3)).resolves.toEqual([3]);
 
     await waitForState(() => {
       const counts = limiter.counts();
@@ -106,9 +106,13 @@ describe("Stop", () => {
       rejectOnDrop: false,
     });
 
-    h.pNoErrVal(limiter.schedule({ id: "1" }, h.promise, null, 1), 1);
-    h.pNoErrVal(limiter.schedule({ id: "2" }, h.promise, null, 2), 2);
-    h.pNoErrVal(limiter.schedule({ id: "3" }, h.slowPromise, 100, null, 3), 3);
+    // With rejectOnDrop false, jobs dropped by stop() never settle their
+    // promises — so there is deliberately no assertion on them (wrapping in
+    // expect().resolves would hang the test's auto-awaited assertions). The
+    // contract under test is only that stop() resolves and rejects on reuse.
+    limiter.schedule({ id: "1" }, h.promise, null, 1);
+    limiter.schedule({ id: "2" }, h.promise, null, 2);
+    limiter.schedule({ id: "3" }, h.slowPromise, 100, null, 3);
 
     return limiter
       .stop()
@@ -129,15 +133,19 @@ describe("Stop", () => {
       maxConcurrent: 1,
       minTime: 100,
     });
-    let failed = 0;
-    const handler = (err) => {
-      expect(err.message).toEqual("This limiter has been stopped.");
-      failed++;
-    };
-
-    h.pNoErrVal(limiter.schedule({ id: "1" }, h.promise, null, 1), 1).catch(handler);
-    h.pNoErrVal(limiter.schedule({ id: "2" }, h.promise, null, 2), 2).catch(handler);
-    h.pNoErrVal(limiter.schedule({ id: "3" }, h.slowPromise, 100, null, 3), 3).catch(handler);
+    // All three jobs are still waiting when stop() drops the queue, so all
+    // three promises must reject with the stop message.
+    const dropped = [
+      expect(limiter.schedule({ id: "1" }, h.promise, null, 1)).rejects.toThrow(
+        "This limiter has been stopped.",
+      ),
+      expect(limiter.schedule({ id: "2" }, h.promise, null, 2)).rejects.toThrow(
+        "This limiter has been stopped.",
+      ),
+      expect(limiter.schedule({ id: "3" }, h.slowPromise, 100, null, 3)).rejects.toThrow(
+        "This limiter has been stopped.",
+      ),
+    ];
 
     return limiter
       .stop({ dropWaitingJobs: true })
@@ -147,7 +155,7 @@ describe("Stop", () => {
       })
       .catch((err) => {
         expect(err.message).toEqual("stop() has already been called");
-        expect(failed).toEqual(3);
+        return Promise.all(dropped);
       });
   });
 
@@ -160,9 +168,9 @@ describe("Stop", () => {
       minTime: 100,
     });
 
-    h.pNoErrVal(limiter.schedule({ id: "1" }, h.promise, null, 1), 1);
-    h.pNoErrVal(limiter.schedule({ id: "2" }, h.promise, null, 2), 2);
-    h.pNoErrVal(limiter.schedule({ id: "3" }, h.slowPromise, 100, null, 3), 3);
+    expect(limiter.schedule({ id: "1" }, h.promise, null, 1)).resolves.toEqual([1]);
+    expect(limiter.schedule({ id: "2" }, h.promise, null, 2)).resolves.toEqual([2]);
+    expect(limiter.schedule({ id: "3" }, h.slowPromise, 100, null, 3)).resolves.toEqual([3]);
 
     return limiter
       .stop({ dropWaitingJobs: false })
