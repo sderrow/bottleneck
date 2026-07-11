@@ -11,7 +11,7 @@ export function deferred() {
   const signal = new Promise((resolve) => {
     release = resolve;
   });
-  return { signal: signal, release: release };
+  return { signal, release };
 }
 
 /**
@@ -76,11 +76,11 @@ export function createTaskFns(log) {
   }
 
   return {
-    job: job,
-    slowJob: slowJob,
-    deferredJob: deferredJob,
-    promise: promise,
-    slowPromise: slowPromise,
-    deferredPromise: deferredPromise,
+    job,
+    slowJob,
+    deferredJob,
+    promise,
+    slowPromise,
+    deferredPromise,
   };
 }

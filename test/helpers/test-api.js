@@ -28,7 +28,7 @@ function createJobHarness() {
   });
 
   const log = {
-    record: record,
+    record,
     calls: record.mock.calls,
   };
 
@@ -57,12 +57,12 @@ function createJobHarness() {
     promise: tasks.promise,
     slowPromise: tasks.slowPromise,
     deferredPromise: tasks.deferredPromise,
-    getResults: getResults,
+    getResults,
     results: getResults,
-    flushLimiter: flushLimiter,
-    pNoErrVal: pNoErrVal,
-    noErrVal: noErrVal,
-    callTimes: callTimes,
+    flushLimiter,
+    pNoErrVal,
+    noErrVal,
+    callTimes,
   };
 }
 
