@@ -12,20 +12,45 @@
 // Host/port are forwarded via process.env; worker forks inherit them
 // automatically because they are spawned after this setup function runs.
 
+import type { StartedRedisContainer } from "@testcontainers/redis";
+
 let stop: (() => Promise<unknown>) | undefined;
+
+const START_ATTEMPTS = 3;
+const RETRY_DELAY_MS = 2_000;
 
 export async function setup(): Promise<void> {
   const { RedisContainer } = await import("@testcontainers/redis");
 
-  const container = await new RedisContainer("redis:7-alpine")
-    .withStartupTimeout(30_000)
-    .withCommand(["redis-server", "--save", "", "--appendonly", "no"])
-    .start();
+  // testcontainers hardcodes a 10s port-bind-inspection timeout that
+  // withStartupTimeout cannot override (inspect-container-util-ports-exposed.js),
+  // so under Docker Desktop churn .start() can time out even with margin to spare.
+  // Retry with a fresh builder each attempt; containers leaked by a failed
+  // attempt are reaped by ryuk at session end, and vitest applies no timeout
+  // to root globalSetup, so the worst-case ~40s here is safe.
+  let container: StartedRedisContainer | undefined;
+  for (let attempt = 1; attempt <= START_ATTEMPTS; attempt++) {
+    try {
+      container = await new RedisContainer("redis:7-alpine")
+        .withStartupTimeout(30_000)
+        .withCommand(["redis-server", "--save", "", "--appendonly", "no"])
+        .start();
+      break;
+    } catch (err) {
+      if (attempt === START_ATTEMPTS) throw err;
+      console.warn(
+        `[global-setup] Redis container start failed (attempt ${attempt}/${START_ATTEMPTS}): ${err}; retrying in ${RETRY_DELAY_MS}ms`,
+      );
+      await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
+    }
+  }
 
-  process.env.REDIS_HOST = container.getHost();
-  process.env.REDIS_PORT = String(container.getPort());
+  const started = container!;
 
-  stop = () => container.stop();
+  process.env.REDIS_HOST = started.getHost();
+  process.env.REDIS_PORT = String(started.getPort());
+
+  stop = () => started.stop();
 }
 
 export async function teardown(): Promise<void> {

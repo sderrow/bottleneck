@@ -1,19 +1,12 @@
-import { describe, it, afterEach, expect } from "vitest";
-import { createJobHarness } from "./helpers/job-tracking.js";
-import { waitForState } from "./helpers/wait-for-state.js";
-const makeLimiter = require("./helpers/limiter");
+import { useFakeClock } from "./helpers/clock.js";
+import { test, describe, expect, waitForState, deferred } from "./helpers/test-api.js";
 const Bottleneck = require("./bottleneck");
 
-describe("Promises", function () {
-  let limiter;
+useFakeClock();
 
-  afterEach(function () {
-    return limiter.disconnect(false);
-  });
-
-  it("Should support promises", function () {
-    const h = createJobHarness();
-    limiter = makeLimiter({ maxConcurrent: 1, minTime: 100 });
+describe("Promises", () => {
+  test("Should support promises", function ({ harness: h, makeLimiter }) {
+    const limiter = makeLimiter({ maxConcurrent: 1, minTime: 100 });
 
     limiter.submit(h.job, null, 1, 9, h.noErrVal(1, 9));
     limiter.submit(h.job, null, 2, h.noErrVal(2));
@@ -21,23 +14,22 @@ describe("Promises", function () {
     h.pNoErrVal(limiter.schedule(h.promise, null, 4, 5), 4, 5);
 
     return h.flushLimiter(limiter).then(function (_results) {
-      h.checkResultsOrder([[1, 9], [2], [3], [4, 5]]);
-      h.checkDuration(300);
+      expect(h.log).toHaveCallOrder([[1, 9], [2], [3], [4, 5]]);
+      expect(h).toHaveFinalCallAt(300);
     });
   });
 
-  it("Should pass error on failure", function () {
-    const h = createJobHarness();
+  test("Should pass error on failure", function ({ harness: h, makeLimiter }) {
     const failureMessage = "failed";
-    limiter = makeLimiter({ maxConcurrent: 1, minTime: 100 });
+    const limiter = makeLimiter({ maxConcurrent: 1, minTime: 100 });
 
     return limiter.schedule(h.promise, new Error(failureMessage)).catch(function (err) {
       expect(err.message).toEqual(failureMessage);
     });
   });
 
-  it("Should allow non-Promise returns", function () {
-    limiter = makeLimiter();
+  test("Should allow non-Promise returns", function ({ makeLimiter }) {
+    const limiter = makeLimiter();
     const str = "This is a string";
 
     return limiter
@@ -47,9 +39,8 @@ describe("Promises", function () {
       });
   });
 
-  it("Should get rejected when rejectOnDrop is true", function () {
-    const h = createJobHarness();
-    limiter = makeLimiter({
+  test("Should get rejected when rejectOnDrop is true", function ({ harness: h, makeLimiter }) {
+    const limiter = makeLimiter({
       maxConcurrent: 1,
       minTime: 0,
       highWater: 1,
@@ -80,15 +71,17 @@ describe("Promises", function () {
         return h.flushLimiter(limiter);
       })
       .then(function (_results) {
-        h.checkResultsOrder([[1], [2]]);
-        h.checkDuration(100);
+        expect(h.log).toHaveCallOrder([[1], [2]]);
+        expect(h).toHaveFinalCallAt(100);
         expect(dropped).toEqual(1);
         expect(caught).toEqual(1);
       });
   });
 
-  it("Should automatically wrap an exception in a rejected promise - schedule()", function () {
-    limiter = makeLimiter({ maxConcurrent: 1, minTime: 100 });
+  test("Should automatically wrap an exception in a rejected promise - schedule()", function ({
+    makeLimiter,
+  }) {
+    const limiter = makeLimiter({ maxConcurrent: 1, minTime: 100 });
 
     return limiter
       .schedule(() => {
@@ -102,10 +95,9 @@ describe("Promises", function () {
 
   describe("Wrap", function () {
     let fn;
-    it("Should wrap", function () {
-      const h = createJobHarness();
-      limiter = makeLimiter({ maxConcurrent: 1, minTime: 100 });
+    test.override({ limiterOptions: { maxConcurrent: 1, minTime: 100 } });
 
+    test("Should wrap", function ({ harness: h, limiter }) {
       limiter.submit(h.job, null, 1, h.noErrVal(1));
       limiter.submit(h.job, null, 2, h.noErrVal(2));
       limiter.submit(h.job, null, 3, h.noErrVal(3));
@@ -114,14 +106,14 @@ describe("Promises", function () {
       h.pNoErrVal(wrapped(null, 4), 4);
 
       return h.flushLimiter(limiter).then(function (_results) {
-        h.checkResultsOrder([[1], [2], [3], [4]]);
-        h.checkDuration(300);
+        expect(h.log).toHaveCallOrder([[1], [2], [3], [4]]);
+        expect(h).toHaveFinalCallAt(300);
       });
     });
 
-    it("Should automatically wrap a returned value in a resolved promise", function () {
-      limiter = makeLimiter({ maxConcurrent: 1, minTime: 100 });
-
+    test("Should automatically wrap a returned value in a resolved promise", function ({
+      limiter,
+    }) {
       fn = limiter.wrap(() => {
         return 7;
       });
@@ -131,9 +123,7 @@ describe("Promises", function () {
       });
     });
 
-    it("Should automatically wrap an exception in a rejected promise", function () {
-      limiter = makeLimiter({ maxConcurrent: 1, minTime: 100 });
-
+    test("Should automatically wrap an exception in a rejected promise", function ({ limiter }) {
       fn = limiter.wrap(() => {
         throw new Error("I will reject");
       });
@@ -145,9 +135,7 @@ describe("Promises", function () {
         });
     });
 
-    it("Should inherit the original target for wrapped methods", function () {
-      limiter = makeLimiter({ maxConcurrent: 1, minTime: 100 });
-
+    test("Should inherit the original target for wrapped methods", function ({ limiter }) {
       const object = {
         fn: limiter.wrap(function () {
           return this;
@@ -159,9 +147,7 @@ describe("Promises", function () {
       });
     });
 
-    it("Should inherit the original target on prototype methods", function () {
-      limiter = makeLimiter({ maxConcurrent: 1, minTime: 100 });
-
+    test("Should inherit the original target on prototype methods", function ({ limiter }) {
       class Animal {
         constructor(name) {
           this.name = name;
@@ -179,10 +165,8 @@ describe("Promises", function () {
       });
     });
 
-    it("Should pass errors back", function () {
+    test("Should pass errors back", function ({ harness: h, limiter }) {
       const failureMessage = "BLEW UP!!!";
-      const h = createJobHarness();
-      limiter = makeLimiter({ maxConcurrent: 1, minTime: 100 });
 
       const wrapped = limiter.wrap(h.promise);
       h.pNoErrVal(wrapped(null, 1), 1);
@@ -194,22 +178,18 @@ describe("Promises", function () {
           return h.flushLimiter(limiter);
         })
         .then(function (_results) {
-          h.checkResultsOrder([[1], [2], [3]]);
-          h.checkDuration(200);
+          expect(h.log).toHaveCallOrder([[1], [2], [3]]);
+          expect(h).toHaveFinalCallAt(200);
         });
     });
 
-    it("Should allow passing options", async function () {
+    test("Should allow passing options", async function ({ harness: h, makeLimiter }) {
       const failureMessage = "BLEW UP!!!";
-      const h = createJobHarness();
-      limiter = makeLimiter({ maxConcurrent: 1, minTime: 50 });
+      const limiter = makeLimiter({ maxConcurrent: 1, minTime: 50 });
 
-      let releasePrimer;
-      const primerHeld = new Promise(function (r) {
-        releasePrimer = r;
-      });
+      const primer = deferred();
       limiter.schedule(function () {
-        return primerHeld;
+        return primer.signal;
       });
 
       const wrapped = limiter.wrap(h.promise);
@@ -223,7 +203,7 @@ describe("Promises", function () {
       await waitForState(() => {
         expect(limiter.queued()).toBe(6);
       });
-      releasePrimer();
+      primer.release();
 
       return job6
         .catch(function (err) {
@@ -231,7 +211,7 @@ describe("Promises", function () {
           return h.flushLimiter(limiter);
         })
         .then(function (_results) {
-          h.checkResultsOrder([[5], [6], [1], [2], [3], [4]]);
+          expect(h.log).toHaveCallOrder([[5], [6], [1], [2], [3], [4]]);
         });
     });
   });

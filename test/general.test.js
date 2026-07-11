@@ -1,31 +1,24 @@
-import { describe, it, afterEach, expect } from "vitest";
-import { createJobHarness } from "./helpers/job-tracking.js";
-import { waitForState } from "./helpers/wait-for-state.js";
-const makeLimiter = require("./helpers/limiter");
+import { useFakeClock } from "./helpers/clock.js";
+import { test, describe, expect, waitForState, deferred } from "./helpers/test-api.js";
 const Bottleneck = require("./bottleneck");
 
-describe("General", function () {
-  let limiter;
+useFakeClock();
 
-  afterEach(function () {
-    if (limiter == null) return;
-    return limiter.disconnect(false);
-  });
-
-  it("Should prompt to upgrade", function () {
-    limiter = makeLimiter();
+describe("General", () => {
+  test("Should prompt to upgrade", function ({ makeLimiter }) {
+    const limiter = makeLimiter();
     expect(() => {
       const _limiter = new Bottleneck(1, 250);
     }).toThrow(/Bottleneck v2 takes a single object argument/);
   });
 
-  it("Should allow null capacity", async function () {
-    limiter = makeLimiter({ id: "null", minTime: 0 });
+  test("Should allow null capacity", async function ({ makeLimiter }) {
+    const limiter = makeLimiter({ id: "null", minTime: 0 });
     await expect(limiter.updateSettings({ minTime: 10 })).resolves.toBe(limiter);
   });
 
-  it("Should keep scope", async function () {
-    limiter = makeLimiter({ maxConcurrent: 1 });
+  test("Should keep scope", async function ({ makeLimiter }) {
+    const limiter = makeLimiter({ maxConcurrent: 1 });
 
     class Job {
       constructor() {
@@ -41,10 +34,12 @@ describe("General", function () {
     expect(await limiter.wrap(job.action.bind(job))(2)).toEqual(7);
   });
 
-  it("Should pass multiple arguments back even on errors when using submit()", function () {
+  test("Should pass multiple arguments back even on errors when using submit()", function ({
+    harness: h,
+    makeLimiter,
+  }) {
     expect.hasAssertions();
-    const h = createJobHarness();
-    limiter = makeLimiter({ maxConcurrent: 1 });
+    const limiter = makeLimiter({ maxConcurrent: 1 });
 
     return new Promise(function (resolve, reject) {
       limiter.submit(h.job, new Error("welp"), 1, 2, function (err, x, y) {
@@ -60,8 +55,8 @@ describe("General", function () {
     });
   });
 
-  it("Should expose the Events library", function () {
-    limiter = makeLimiter();
+  test("Should expose the Events library", function ({ makeLimiter }) {
+    const limiter = makeLimiter();
 
     class Hello {
       constructor() {
@@ -92,25 +87,24 @@ describe("General", function () {
   });
 
   describe("Counts and statuses", function () {
-    it("Should check() and return the queued count with and without a priority value", async function () {
-      const h = createJobHarness();
-      limiter = makeLimiter({ maxConcurrent: 1, minTime: 100 });
+    test("Should check() and return the queued count with and without a priority value", async function ({
+      harness: h,
+      makeLimiter,
+    }) {
+      const limiter = makeLimiter({ maxConcurrent: 1, minTime: 100 });
 
       // Hold job 1 with a deferred promise so it never finishes until we
       // explicitly release it. Otherwise the prior `slowJob, 50` could finish
       // before all 4 submits complete (each submit adds Redis RTT) and a
       // queued job dispatches, making `queued()` count race the minTime gate.
-      let release1;
-      const hold1 = new Promise(function (resolve) {
-        release1 = resolve;
-      });
+      const hold1 = deferred();
 
       expect(await limiter.check()).toEqual(true);
 
       expect(limiter.queued()).toEqual(0);
       expect(await limiter.clusterQueued()).toEqual(0);
 
-      await limiter.submit({ id: 1 }, h.deferredJob, hold1, null, 1, h.noErrVal(1));
+      await limiter.submit({ id: 1 }, h.deferredJob, hold1.signal, null, 1, h.noErrVal(1));
       expect(limiter.queued()).toEqual(0); // It's already running
 
       expect(await limiter.check()).toEqual(false);
@@ -139,49 +133,41 @@ describe("General", function () {
       expect(limiter.queued(1)).toEqual(1);
       expect(limiter.queued(5)).toEqual(3);
 
-      release1();
+      hold1.release();
 
       await h.flushLimiter(limiter);
       expect(limiter.queued()).toEqual(0);
       expect(await limiter.clusterQueued()).toEqual(0);
-      h.checkResultsOrder([[1], [5], [2], [3], [4]]);
+      expect(h.log).toHaveCallOrder([[1], [5], [2], [3], [4]]);
     });
 
-    it("Should return the running and done counts", async function () {
-      const h = createJobHarness();
-      limiter = makeLimiter({ maxConcurrent: 5, minTime: 0 });
+    test("Should return the running and done counts", async function ({ harness: h, makeLimiter }) {
+      const limiter = makeLimiter({ maxConcurrent: 5, minTime: 0 });
 
       // Held jobs let the test observe each (running, done) checkpoint
       // deterministically. With slowPromise(100) the first checkpoint
       // (running=5) raced Redis RTT — an early job could transition to
       // DONE before the running()/done() round-trip returned, dropping
       // running to 4.
-      let release1, release2, release3;
-      const hold1 = new Promise(function (r) {
-        release1 = r;
-      });
-      const hold2 = new Promise(function (r) {
-        release2 = r;
-      });
-      const hold3 = new Promise(function (r) {
-        release3 = r;
-      });
+      const hold1 = deferred();
+      const hold2 = deferred();
+      const hold3 = deferred();
 
       const [running0, done0] = await Promise.all([limiter.running(), limiter.done()]);
       expect(running0).toEqual(0);
       expect(done0).toEqual(0);
 
-      limiter.submit({ weight: 1, id: 1 }, h.deferredJob, hold1, null, 1, h.noErrVal(1));
-      limiter.submit({ weight: 3, id: 2 }, h.deferredJob, hold2, null, 2, h.noErrVal(2));
-      limiter.submit({ weight: 1, id: 3 }, h.deferredJob, hold3, null, 3, h.noErrVal(3));
+      limiter.submit({ weight: 1, id: 1 }, h.deferredJob, hold1.signal, null, 1, h.noErrVal(1));
+      limiter.submit({ weight: 3, id: 2 }, h.deferredJob, hold2.signal, null, 2, h.noErrVal(2));
+      limiter.submit({ weight: 1, id: 3 }, h.deferredJob, hold3.signal, null, 3, h.noErrVal(3));
       await limiter.schedule({ weight: 0, id: 4 }, h.promise, null);
 
       const [running1, done1] = await Promise.all([limiter.running(), limiter.done()]);
       expect(running1).toEqual(5);
       expect(done1).toEqual(0);
 
-      release1();
-      release3();
+      hold1.release();
+      hold3.release();
       await waitForState(async function () {
         const [r, d] = await Promise.all([limiter.running(), limiter.done()]);
         expect(r).toBe(3);
@@ -192,7 +178,7 @@ describe("General", function () {
       expect(running2).toEqual(3);
       expect(done2).toEqual(2);
 
-      release2();
+      hold2.release();
       await waitForState(async function () {
         const [r, d] = await Promise.all([limiter.running(), limiter.done()]);
         expect(r).toBe(0);
@@ -204,12 +190,11 @@ describe("General", function () {
       expect(done3).toEqual(5);
 
       await h.flushLimiter(limiter);
-      h.checkResultsOrder([[], [1], [3], [2]]);
+      expect(h.log).toHaveCallOrder([[], [1], [3], [2]]);
     });
 
-    it("Should refuse duplicate Job IDs", async function () {
-      const h = createJobHarness();
-      limiter = makeLimiter({ maxConcurrent: 2, minTime: 100, trackDoneStatus: true });
+    test("Should refuse duplicate Job IDs", async function ({ harness: h, makeLimiter }) {
+      const limiter = makeLimiter({ maxConcurrent: 2, minTime: 100, trackDoneStatus: true });
 
       try {
         await limiter.schedule({ id: "a" }, h.promise, null, 1);
@@ -220,43 +205,45 @@ describe("General", function () {
       }
     });
 
-    it("Should return job statuses", function () {
-      const h = createJobHarness();
-      limiter = makeLimiter({ maxConcurrent: 2, minTime: 100 });
+    test("Should return job statuses", async function ({ harness: h, makeLimiter }) {
+      const limiter = makeLimiter({ maxConcurrent: 2, minTime: 100 });
+      await limiter.ready();
 
       expect(limiter.counts()).toEqual({ RECEIVED: 0, QUEUED: 0, RUNNING: 0, EXECUTING: 0 });
 
-      h.pNoErrVal(limiter.schedule({ weight: 1, id: 1 }, h.slowPromise, 100, null, 1), 1);
+      const hold1 = deferred();
+      h.pNoErrVal(
+        limiter.schedule({ weight: 1, id: 1 }, h.deferredPromise, hold1.signal, null, 1),
+        1,
+      );
       h.pNoErrVal(limiter.schedule({ weight: 1, id: 2 }, h.slowPromise, 200, null, 2), 2);
       h.pNoErrVal(limiter.schedule({ weight: 2, id: 3 }, h.slowPromise, 100, null, 3), 3);
       expect(limiter.counts()).toEqual({ RECEIVED: 3, QUEUED: 0, RUNNING: 0, EXECUTING: 0 });
 
-      // Poll for the dispatched state instead of a fixed wait — under redis latency,
-      // a 50ms sleep can race with Lua dispatch.
-      return waitForState(function () {
+      await waitForState(function () {
         const counts = limiter.counts();
         expect(counts.RECEIVED).toBe(0);
         expect(counts.QUEUED).toBe(1);
         expect(counts.RUNNING).toBe(1);
         expect(counts.EXECUTING).toBe(1);
-      })
-        .then(function () {
-          expect(limiter.counts()).toEqual({ RECEIVED: 0, QUEUED: 1, RUNNING: 1, EXECUTING: 1 });
-          expect(limiter.jobStatus(1)).toEqual("EXECUTING");
-          expect(limiter.jobStatus(2)).toEqual("RUNNING");
-          expect(limiter.jobStatus(3)).toEqual("QUEUED");
+      });
 
-          return h.flushLimiter(limiter);
-        })
-        .then(function (_results) {
-          h.checkDuration(400);
-          h.checkResultsOrder([[1], [2], [3]]);
-        });
+      expect(limiter.counts()).toEqual({ RECEIVED: 0, QUEUED: 1, RUNNING: 1, EXECUTING: 1 });
+      expect(limiter.jobStatus(1)).toEqual("EXECUTING");
+      expect(limiter.jobStatus(2)).toEqual("RUNNING");
+      expect(limiter.jobStatus(3)).toEqual("QUEUED");
+
+      hold1.release();
+      await h.flushLimiter(limiter);
+      expect(h).toHaveFinalCallAt(400);
+      expect(h.log).toHaveCallOrder([[1], [2], [3]]);
     });
 
-    it("Should return job statuses, including DONE", async function () {
-      const h = createJobHarness();
-      limiter = makeLimiter({ maxConcurrent: 2, minTime: 100, trackDoneStatus: true });
+    test("Should return job statuses, including DONE", async function ({
+      harness: h,
+      makeLimiter,
+    }) {
+      const limiter = makeLimiter({ maxConcurrent: 2, minTime: 100, trackDoneStatus: true });
 
       expect(limiter.counts()).toEqual({
         RECEIVED: 0,
@@ -274,11 +261,11 @@ describe("General", function () {
       // resolved first (state would jump straight to {DONE:1, EXECUTING:1
       // (job 2 — was RUNNING for one microtask), QUEUED:1}). Holding job 1
       // with deferredPromise eliminates the race.
-      let release1;
-      const hold1 = new Promise(function (resolve) {
-        release1 = resolve;
-      });
-      h.pNoErrVal(limiter.schedule({ weight: 1, id: 1 }, h.deferredPromise, hold1, null, 1), 1);
+      const hold1 = deferred();
+      h.pNoErrVal(
+        limiter.schedule({ weight: 1, id: 1 }, h.deferredPromise, hold1.signal, null, 1),
+        1,
+      );
       h.pNoErrVal(limiter.schedule({ weight: 1, id: 2 }, h.slowPromise, 200, null, 2), 2);
       h.pNoErrVal(limiter.schedule({ weight: 2, id: 3 }, h.slowPromise, 100, null, 3), 3);
       expect(limiter.counts()).toEqual({
@@ -309,7 +296,7 @@ describe("General", function () {
       expect(limiter.jobStatus(2)).toEqual("RUNNING");
       expect(limiter.jobStatus(3)).toEqual("QUEUED");
 
-      release1();
+      hold1.release();
 
       await waitForState(function () {
         const counts = limiter.counts();
@@ -340,12 +327,11 @@ describe("General", function () {
         EXECUTING: 0,
         DONE: 4,
       });
-      h.checkResultsOrder([[1], [2], [3]]);
+      expect(h.log).toHaveCallOrder([[1], [2], [3]]);
     });
 
-    it("Should return jobs for a status", async function () {
-      const h = createJobHarness();
-      limiter = makeLimiter({ maxConcurrent: 2, minTime: 100, trackDoneStatus: true });
+    test("Should return jobs for a status", async function ({ harness: h, makeLimiter }) {
+      const limiter = makeLimiter({ maxConcurrent: 2, minTime: 100, trackDoneStatus: true });
 
       expect(limiter.counts()).toEqual({
         RECEIVED: 0,
@@ -361,12 +347,9 @@ describe("General", function () {
       // races with minTime=100 — the moment job 2 dispatches is the same
       // instant job 1 finishes, so the {DONE:0, EXECUTING:1, RUNNING:1}
       // window may not exist depending on microtask order.
-      let release1;
-      const hold1 = new Promise(function (resolve) {
-        release1 = resolve;
-      });
+      const hold1 = deferred();
 
-      limiter.submit({ weight: 1, id: 1 }, h.deferredJob, hold1, null, 1, h.noErrVal(1));
+      limiter.submit({ weight: 1, id: 1 }, h.deferredJob, hold1.signal, null, 1, h.noErrVal(1));
       h.pNoErrVal(limiter.schedule({ weight: 1, id: 2 }, h.slowPromise, 200, null, 2), 2);
       h.pNoErrVal(limiter.schedule({ weight: 2, id: 3 }, h.slowPromise, 100, null, 3), 3);
       expect(limiter.counts()).toEqual({
@@ -400,9 +383,9 @@ describe("General", function () {
       expect(limiter.jobs("RUNNING")).toEqual(["2"]);
       expect(limiter.jobs("QUEUED")).toEqual(["3"]);
 
-      release1();
+      hold1.release();
 
-      // After release1, job 1 transitions to DONE and frees a slot. Job 2 is
+      // After hold1.release(), job 1 transitions to DONE and frees a slot. Job 2 is
       // already in RUNNING and immediately moves to EXECUTING. Wait for that
       // to complete to avoid catching the brief in-between RUNNING=1 state.
       await waitForState(function () {
@@ -432,12 +415,12 @@ describe("General", function () {
         EXECUTING: 0,
         DONE: 4,
       });
-      h.checkResultsOrder([[1], [2], [3]]);
+      expect(h.log).toHaveCallOrder([[1], [2], [3]]);
     });
 
-    it("Should trigger events on status changes", function () {
-      const h = createJobHarness();
-      limiter = makeLimiter({ maxConcurrent: 2, minTime: 100, trackDoneStatus: true });
+    test("Should trigger events on status changes", async function ({ harness: h, makeLimiter }) {
+      const limiter = makeLimiter({ maxConcurrent: 2, minTime: 100, trackDoneStatus: true });
+      await limiter.ready();
       let onReceived = 0;
       let onQueued = 0;
       let onScheduled = 0;
@@ -472,7 +455,11 @@ describe("General", function () {
         DONE: 0,
       });
 
-      h.pNoErrVal(limiter.schedule({ weight: 1, id: 1 }, h.slowPromise, 100, null, 1), 1);
+      const hold1 = deferred();
+      h.pNoErrVal(
+        limiter.schedule({ weight: 1, id: 1 }, h.deferredPromise, hold1.signal, null, 1),
+        1,
+      );
       h.pNoErrVal(limiter.schedule({ weight: 1, id: 2 }, h.slowPromise, 200, null, 2), 2);
       h.pNoErrVal(limiter.schedule({ weight: 2, id: 3 }, h.slowPromise, 100, null, 3), 3);
       expect(limiter.counts()).toEqual({
@@ -485,71 +472,64 @@ describe("General", function () {
 
       expect([onReceived, onQueued, onScheduled, onExecuting, onDone]).toEqual([3, 0, 0, 0, 0]);
 
-      // Poll for the dispatched state. Include DONE=0 in the predicate to avoid
-      // racing the JOB_1 → DONE transition that can happen in the same
-      // microtask JOB_2 dispatches.
-      return waitForState(function () {
+      await waitForState(function () {
         const counts = limiter.counts();
         expect(counts.RECEIVED).toBe(0);
         expect(counts.QUEUED).toBe(1);
         expect(counts.RUNNING).toBe(1);
         expect(counts.EXECUTING).toBe(1);
         expect(counts.DONE).toBe(0);
-      })
-        .then(function () {
-          expect(limiter.counts()).toEqual({
-            RECEIVED: 0,
-            QUEUED: 1,
-            RUNNING: 1,
-            EXECUTING: 1,
-            DONE: 0,
-          });
-          expect([onReceived, onQueued, onScheduled, onExecuting, onDone]).toEqual([3, 3, 2, 1, 0]);
+      });
 
-          return waitForState(function () {
-            const counts = limiter.counts();
-            expect(counts.RECEIVED).toBe(0);
-            expect(counts.QUEUED).toBe(1);
-            expect(counts.RUNNING).toBe(0);
-            expect(counts.EXECUTING).toBe(1);
-            expect(counts.DONE).toBe(1);
-          });
-        })
-        .then(function () {
-          expect(limiter.counts()).toEqual({
-            RECEIVED: 0,
-            QUEUED: 1,
-            RUNNING: 0,
-            EXECUTING: 1,
-            DONE: 1,
-          });
-          expect(limiter.jobs("DONE")).toEqual(["1"]);
-          expect(limiter.jobs("EXECUTING")).toEqual(["2"]);
-          expect(limiter.jobs("QUEUED")).toEqual(["3"]);
-          expect([onReceived, onQueued, onScheduled, onExecuting, onDone]).toEqual([3, 3, 2, 2, 1]);
+      expect(limiter.counts()).toEqual({
+        RECEIVED: 0,
+        QUEUED: 1,
+        RUNNING: 1,
+        EXECUTING: 1,
+        DONE: 0,
+      });
+      expect([onReceived, onQueued, onScheduled, onExecuting, onDone]).toEqual([3, 3, 2, 1, 0]);
 
-          return h.flushLimiter(limiter);
-        })
-        .then(function (_results) {
-          expect(limiter.counts()).toEqual({
-            RECEIVED: 0,
-            QUEUED: 0,
-            RUNNING: 0,
-            EXECUTING: 0,
-            DONE: 4,
-          });
-          expect([onReceived, onQueued, onScheduled, onExecuting, onDone]).toEqual([4, 4, 4, 4, 4]);
-          // The real contract is the event count + ordering; total wall-clock
-          // duration depends on minTime + slowPromise sums plus any Redis RTT
-          // and is too noisy to bound tightly.
-          h.checkResultsOrder([[1], [2], [3]]);
-        });
+      hold1.release();
+
+      await waitForState(function () {
+        const counts = limiter.counts();
+        expect(counts.RECEIVED).toBe(0);
+        expect(counts.QUEUED).toBe(1);
+        expect(counts.RUNNING).toBe(0);
+        expect(counts.EXECUTING).toBe(1);
+        expect(counts.DONE).toBe(1);
+      });
+
+      expect(limiter.counts()).toEqual({
+        RECEIVED: 0,
+        QUEUED: 1,
+        RUNNING: 0,
+        EXECUTING: 1,
+        DONE: 1,
+      });
+      expect(limiter.jobs("DONE")).toEqual(["1"]);
+      expect(limiter.jobs("EXECUTING")).toEqual(["2"]);
+      expect(limiter.jobs("QUEUED")).toEqual(["3"]);
+      expect([onReceived, onQueued, onScheduled, onExecuting, onDone]).toEqual([3, 3, 2, 2, 1]);
+
+      await h.flushLimiter(limiter);
+
+      expect(limiter.counts()).toEqual({
+        RECEIVED: 0,
+        QUEUED: 0,
+        RUNNING: 0,
+        EXECUTING: 0,
+        DONE: 4,
+      });
+      expect([onReceived, onQueued, onScheduled, onExecuting, onDone]).toEqual([4, 4, 4, 4, 4]);
+      expect(h.log).toHaveCallOrder([[1], [2], [3]]);
     });
   });
 
   describe("Events", function () {
-    it("Should return itself", function () {
-      limiter = makeLimiter({ id: "test-limiter" });
+    test("Should return itself", function ({ makeLimiter }) {
+      const limiter = makeLimiter({ id: "test-limiter" });
 
       const returned = limiter.on("ready", function () {});
       // The contract is that `.on()` returns the limiter itself for chaining;
@@ -558,9 +538,8 @@ describe("General", function () {
       expect(returned.id).toEqual(limiter.id);
     });
 
-    it("Should fire events on empty queue", function () {
-      const h = createJobHarness();
-      limiter = makeLimiter({ maxConcurrent: 1, minTime: 100 });
+    test("Should fire events on empty queue", function ({ harness: h, makeLimiter }) {
+      const limiter = makeLimiter({ maxConcurrent: 1, minTime: 100 });
       let calledEmpty = 0;
       let calledIdle = 0;
       let calledDepleted = 0;
@@ -589,8 +568,8 @@ describe("General", function () {
           return limiter.submit({ id: 4 }, h.slowJob, 50, null, 4, null);
         })
         .then(function () {
-          h.checkDuration(250);
-          h.checkResultsOrder([[1], [2], [3]]);
+          expect(h).toHaveFinalCallAt(250);
+          expect(h.log).toHaveCallOrder([[1], [2], [3]]);
           expect(calledEmpty).toEqual(3);
           expect(calledIdle).toEqual(2);
           expect(calledDepleted).toEqual(0);
@@ -598,9 +577,8 @@ describe("General", function () {
         });
     });
 
-    it("Should fire events once", function () {
-      const h = createJobHarness();
-      limiter = makeLimiter({ maxConcurrent: 1, minTime: 100 });
+    test("Should fire events once", function ({ harness: h, makeLimiter }) {
+      const limiter = makeLimiter({ maxConcurrent: 1, minTime: 100 });
       let calledEmptyOnce = 0;
       let calledIdleOnce = 0;
       let calledEmpty = 0;
@@ -635,8 +613,8 @@ describe("General", function () {
           return h.pNoErrVal(limiter.schedule(h.promise, null, 3), 3);
         })
         .then(function () {
-          h.checkDuration(200);
-          h.checkResultsOrder([[1], [2], [3]]);
+          expect(h).toHaveFinalCallAt(200);
+          expect(h.log).toHaveCallOrder([[1], [2], [3]]);
           expect(calledEmptyOnce).toEqual(1);
           expect(calledIdleOnce).toEqual(1);
           expect(calledEmpty).toEqual(2);
@@ -645,9 +623,8 @@ describe("General", function () {
         });
     });
 
-    it("Should support faulty event listeners", function () {
-      const h = createJobHarness();
-      limiter = makeLimiter({ maxConcurrent: 1, minTime: 100 }, { expectErrors: true });
+    test("Should support faulty event listeners", function ({ harness: h, makeLimiter }) {
+      const limiter = makeLimiter({ maxConcurrent: 1, minTime: 100 }, { expectErrors: true });
       // We only care that the listener-thrown error eventually surfaces on
       // the "error" event. Counting calls is brittle under Redis-backed runs
       // because a connectTimeout retry (see test/redis-client-options.js) can
@@ -669,9 +646,8 @@ describe("General", function () {
       });
     });
 
-    it("Should wait for async event listeners", function () {
-      const h = createJobHarness();
-      limiter = makeLimiter({ maxConcurrent: 1, minTime: 100 }, { expectErrors: true });
+    test("Should wait for async event listeners", function ({ harness: h, makeLimiter }) {
+      const limiter = makeLimiter({ maxConcurrent: 1, minTime: 100 }, { expectErrors: true });
       // Match on the specific error message — under load any unrelated redis
       // error could fire first; we only care that "It broke!" eventually does.
       let fired = false;

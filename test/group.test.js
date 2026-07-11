@@ -1,23 +1,18 @@
-import { describe, it, afterEach, expect } from "vitest";
-import { createJobHarness } from "./helpers/job-tracking.js";
-import { waitForState } from "./helpers/wait-for-state.js";
-const makeLimiter = require("./helpers/limiter");
+import { useFakeClock } from "./helpers/clock.js";
+import { test, describe, expect, waitForState } from "./helpers/test-api.js";
 const Bottleneck = require("./bottleneck");
 
-describe("Group", function () {
-  let limiter;
+useFakeClock();
 
-  afterEach(function () {
-    return limiter.disconnect(false);
-  });
-
-  it("Should create limiters", function () {
+describe("Group", () => {
+  test("Should create limiters", function ({ track }) {
     expect.hasAssertions();
-    limiter = makeLimiter();
-    const group = new Bottleneck.Group({
-      maxConcurrent: 1,
-      minTime: 100,
-    });
+    const group = track(
+      new Bottleneck.Group({
+        maxConcurrent: 1,
+        minTime: 100,
+      }),
+    );
 
     const results = [];
 
@@ -66,12 +61,13 @@ describe("Group", function () {
     });
   });
 
-  it("Should set up the limiter IDs (default)", function () {
-    limiter = makeLimiter();
-    const group = new Bottleneck.Group({
-      maxConcurrent: 1,
-      minTime: 100,
-    });
+  test("Should set up the limiter IDs (default)", function ({ track }) {
+    const group = track(
+      new Bottleneck.Group({
+        maxConcurrent: 1,
+        minTime: 100,
+      }),
+    );
 
     expect(group.key("A").id).toStrictEqual("group-key-A");
     expect(group.key("B").id).toStrictEqual("group-key-B");
@@ -85,13 +81,14 @@ describe("Group", function () {
     expect(ids.sort()).toStrictEqual(["group-key-A", "group-key-B", "group-key-XYZ"]);
   });
 
-  it("Should set up the limiter IDs (custom)", function () {
-    limiter = makeLimiter();
-    const group = new Bottleneck.Group({
-      maxConcurrent: 1,
-      minTime: 100,
-      id: "custom-id",
-    });
+  test("Should set up the limiter IDs (custom)", function ({ track }) {
+    const group = track(
+      new Bottleneck.Group({
+        maxConcurrent: 1,
+        minTime: 100,
+        id: "custom-id",
+      }),
+    );
 
     expect(group.key("A").id).toStrictEqual("custom-id-A");
     expect(group.key("B").id).toStrictEqual("custom-id-B");
@@ -105,12 +102,14 @@ describe("Group", function () {
     expect(ids.sort()).toStrictEqual(["custom-id-A", "custom-id-B", "custom-id-XYZ"]);
   });
 
-  it("Should pass new limiter to 'created' event", function () {
-    limiter = makeLimiter();
-    const group = new Bottleneck.Group({
-      maxConcurrent: 1,
-      minTime: 100,
-    });
+  test("Should pass new limiter to 'created' event", function ({ makeLimiter, track }) {
+    const limiter = makeLimiter();
+    const group = track(
+      new Bottleneck.Group({
+        maxConcurrent: 1,
+        minTime: 100,
+      }),
+    );
 
     const keys = [];
     const ids = [];
@@ -139,13 +138,14 @@ describe("Group", function () {
     });
   });
 
-  it("Should pass error on failure", function () {
+  test("Should pass error on failure", function ({ track }) {
     const failureMessage = "SOMETHING BLEW UP!!";
-    limiter = makeLimiter();
-    const group = new Bottleneck.Group({
-      maxConcurrent: 1,
-      minTime: 100,
-    });
+    const group = track(
+      new Bottleneck.Group({
+        maxConcurrent: 1,
+        minTime: 100,
+      }),
+    );
     expect(Object.keys(group.limiters)).toStrictEqual([]);
 
     const results = [];
@@ -186,17 +186,20 @@ describe("Group", function () {
     });
   });
 
-  it("Should update its timeout", function () {
-    limiter = makeLimiter();
-    const group1 = new Bottleneck.Group({
-      maxConcurrent: 1,
-      minTime: 100,
-    });
-    const group2 = new Bottleneck.Group({
-      maxConcurrent: 1,
-      minTime: 100,
-      timeout: 5000,
-    });
+  test("Should update its timeout", function ({ track }) {
+    const group1 = track(
+      new Bottleneck.Group({
+        maxConcurrent: 1,
+        minTime: 100,
+      }),
+    );
+    const group2 = track(
+      new Bottleneck.Group({
+        maxConcurrent: 1,
+        minTime: 100,
+        timeout: 5000,
+      }),
+    );
 
     expect(group1.timeout).toStrictEqual(300000);
     expect(group2.timeout).toStrictEqual(5000);
@@ -209,12 +212,13 @@ describe("Group", function () {
     });
   });
 
-  it("Should update its limiter options", function () {
-    limiter = makeLimiter();
-    const group = new Bottleneck.Group({
-      maxConcurrent: 1,
-      minTime: 100,
-    });
+  test("Should update its limiter options", function ({ track }) {
+    const group = track(
+      new Bottleneck.Group({
+        maxConcurrent: 1,
+        minTime: 100,
+      }),
+    );
 
     const limiter1 = group.key("AAA");
     expect(limiter1._store.storeOptions.minTime).toStrictEqual(100);
@@ -226,12 +230,12 @@ describe("Group", function () {
     expect(limiter2._store.storeOptions.minTime).toStrictEqual(200);
   });
 
-  it("Should support keys(), limiters(), deleteKey()", function () {
-    const h = createJobHarness();
-    limiter = makeLimiter();
-    const group1 = new Bottleneck.Group({
-      maxConcurrent: 1,
-    });
+  test("Should support keys(), limiters(), deleteKey()", function ({ harness: h, track }) {
+    const group1 = track(
+      new Bottleneck.Group({
+        maxConcurrent: 1,
+      }),
+    );
     const KEY_A = "AAA";
     const KEY_B = "BBB";
 
@@ -263,13 +267,15 @@ describe("Group", function () {
       });
   });
 
-  it("Should call autocleanup", function () {
+  test("Should call autocleanup", function ({ makeLimiter, track }) {
     const KEY = "test-key";
-    const group = new Bottleneck.Group({
-      maxConcurrent: 1,
-    });
+    const group = track(
+      new Bottleneck.Group({
+        maxConcurrent: 1,
+      }),
+    );
     group.updateSettings({ timeout: 500 });
-    limiter = makeLimiter({ id: "something", timeout: group.timeout });
+    const limiter = makeLimiter({ id: "something", timeout: group.timeout });
 
     group.instances[KEY] = limiter;
     return group

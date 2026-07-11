@@ -1,21 +1,14 @@
-import { describe, it, expect, afterEach } from "vitest";
+import { useFakeClock, wait } from "./helpers/clock.js";
+import { test, describe, expect } from "./helpers/test-api.js";
 const Bottleneck = require("./bottleneck");
 
-const wait = function (ms) {
-  return new Promise(function (resolve) {
-    setTimeout(resolve, ms);
-  });
-};
+// Batcher is datastore-independent, so this file only runs in the `local`
+// project (excluded from the redis projects in vitest.config.ts) and always
+// gets the fake clock — timing assertions below are exact virtual times.
+useFakeClock();
 
-describe("Batcher", function () {
-  let limiter;
-
-  afterEach(function () {
-    if (limiter) return limiter.disconnect(false);
-  });
-
-  it("Should batch by time and size", async function () {
-    limiter = new Bottleneck();
+describe("Batcher", () => {
+  test("Should batch by time and size", async function () {
     const batcher = new Bottleneck.Batcher({ maxTime: 100, maxSize: 3 });
     const batches = [];
     const batchTimes = [];
@@ -32,12 +25,11 @@ describe("Batcher", function () {
       [1, 2, 3],
       [4, 5],
     ]);
-    expect(batchTimes[0] - t0).toBeLessThan(20);
-    expect(batchTimes[1] - batchTimes[0]).toBeGreaterThanOrEqual(95);
+    expect(batchTimes[0] - t0).toBe(0);
+    expect(batchTimes[1] - batchTimes[0]).toBe(100);
   });
 
-  it("Should batch by time", async function () {
-    limiter = new Bottleneck();
+  test("Should batch by time", async function () {
     const batcher = new Bottleneck.Batcher({ maxTime: 100 });
     const batches = [];
     const batchTimes = [];
@@ -51,7 +43,7 @@ describe("Batcher", function () {
     await Promise.all([batcher.add(1), batcher.add(2)]);
 
     expect(batches).toStrictEqual([[1, 2]]);
-    expect(batchTimes[0] - t0).toBeGreaterThanOrEqual(95);
+    expect(batchTimes[0] - t0).toBe(100);
 
     const t1 = Date.now();
     await Promise.all([batcher.add(3), batcher.add(4)]);
@@ -60,11 +52,10 @@ describe("Batcher", function () {
       [1, 2],
       [3, 4],
     ]);
-    expect(batchTimes[1] - t1).toBeGreaterThanOrEqual(95);
+    expect(batchTimes[1] - t1).toBe(100);
   });
 
-  it("Should batch by size", async function () {
-    limiter = new Bottleneck();
+  test("Should batch by size", async function () {
     const batcher = new Bottleneck.Batcher({ maxSize: 2 });
     const batches = [];
 
@@ -82,8 +73,7 @@ describe("Batcher", function () {
     ]);
   });
 
-  it("Should stagger flushes", async function () {
-    limiter = new Bottleneck();
+  test("Should stagger flushes", async function () {
     const batcher = new Bottleneck.Batcher({ maxTime: 100, maxSize: 3 });
     const batches = [];
     const batchTimes = [];
@@ -100,19 +90,10 @@ describe("Batcher", function () {
     await Promise.all([p1, p2]);
 
     expect(batches).toStrictEqual([[1, 2]]);
-    const elapsed = batchTimes[0] - t0;
-    // Lower bound is the contract: the flush MUST wait for maxTime=100ms
-    // since adding p2 mid-window must not reset (or shorten) the flush
-    // timer. The upper bound is just a sanity check — under sustained
-    // event-loop pressure (parallel test files, redis containers booting,
-    // GC) setTimeout can drift well past maxTime+40ms; the original 140ms
-    // upper bound was flaky for that reason.
-    expect(elapsed).toBeGreaterThanOrEqual(95);
-    expect(elapsed).toBeLessThan(1000);
+    expect(batchTimes[0] - t0).toBe(100);
   });
 
-  it("Should force then stagger flushes", async function () {
-    limiter = new Bottleneck();
+  test("Should force then stagger flushes", async function () {
     const batcher = new Bottleneck.Batcher({ maxTime: 100, maxSize: 3 });
     const batches = [];
     const batchTimes = [];
@@ -125,7 +106,7 @@ describe("Batcher", function () {
     const t0 = Date.now();
     await Promise.all([batcher.add(1), batcher.add(2), batcher.add(3)]);
     expect(batches).toStrictEqual([[1, 2, 3]]);
-    expect(batchTimes[0] - t0).toBeLessThan(20);
+    expect(batchTimes[0] - t0).toBe(0);
 
     const t1 = Date.now();
     const p4 = batcher.add(4);
@@ -137,8 +118,6 @@ describe("Batcher", function () {
       [1, 2, 3],
       [4, 5],
     ]);
-    const elapsed = batchTimes[1] - t1;
-    expect(elapsed).toBeGreaterThanOrEqual(95);
-    expect(elapsed).toBeLessThan(140);
+    expect(batchTimes[1] - t1).toBe(100);
   });
 });

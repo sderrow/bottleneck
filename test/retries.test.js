@@ -1,5 +1,7 @@
-import { describe, it, expect, afterEach } from "vitest";
-const makeLimiter = require("./helpers/limiter");
+import { useFakeClock, isFakeClock } from "./helpers/clock.js";
+import { test, describe, expect } from "./helpers/test-api.js";
+
+useFakeClock();
 
 const badJob = function () {
   return Promise.reject(new Error("boom"));
@@ -8,19 +10,17 @@ const badJob = function () {
 const assertBackoffs = function (attemptTimes, backoffMs) {
   for (let i = 1; i < attemptTimes.length; i++) {
     const delta = attemptTimes[i] - attemptTimes[i - 1];
-    expect(delta).toBeGreaterThanOrEqual(backoffMs - 5);
+    if (isFakeClock()) {
+      expect(delta).toBe(backoffMs);
+    } else {
+      expect(delta).toBeGreaterThanOrEqual(backoffMs - 5);
+    }
   }
 };
 
-describe("Retries", function () {
-  let limiter;
-
-  afterEach(function () {
-    return limiter.disconnect(false);
-  });
-
-  it("Should retry when requested by the user (sync)", async function () {
-    limiter = makeLimiter({ trackDoneStatus: true });
+describe("Retries", () => {
+  test("Should retry when requested by the user (sync)", async function ({ makeLimiter }) {
+    const limiter = makeLimiter({ trackDoneStatus: true });
     let failedEvents = 0;
     let retryEvents = 0;
     const attemptTimes = [];
@@ -56,8 +56,8 @@ describe("Retries", function () {
     expect(limiter.counts().DONE).toStrictEqual(1);
   });
 
-  it("Should retry when requested by the user (async)", async function () {
-    limiter = makeLimiter({ trackDoneStatus: true });
+  test("Should retry when requested by the user (async)", async function ({ makeLimiter }) {
+    const limiter = makeLimiter({ trackDoneStatus: true });
     let failedEvents = 0;
     let retryEvents = 0;
     const attemptTimes = [];
@@ -93,8 +93,8 @@ describe("Retries", function () {
     expect(limiter.counts().DONE).toStrictEqual(1);
   });
 
-  it("Should not retry when user returns an error (sync)", async function () {
-    limiter = makeLimiter({ trackDoneStatus: true }, { expectErrors: true });
+  test("Should not retry when user returns an error (sync)", async function ({ makeLimiter }) {
+    const limiter = makeLimiter({ trackDoneStatus: true }, { expectErrors: true });
     let failedEvents = 0;
     let retryEvents = 0;
     let errorEvents = 0;
@@ -131,8 +131,8 @@ describe("Retries", function () {
     expect(limiter.counts().DONE).toStrictEqual(1);
   });
 
-  it("Should not retry when user returns an error (async)", async function () {
-    limiter = makeLimiter({ trackDoneStatus: true }, { expectErrors: true });
+  test("Should not retry when user returns an error (async)", async function ({ makeLimiter }) {
+    const limiter = makeLimiter({ trackDoneStatus: true }, { expectErrors: true });
     let failedEvents = 0;
     let retryEvents = 0;
     let errorEvents = 0;
@@ -169,8 +169,8 @@ describe("Retries", function () {
     expect(limiter.counts().DONE).toStrictEqual(1);
   });
 
-  it("Should not retry when user returns null (sync)", async function () {
-    limiter = makeLimiter({ trackDoneStatus: true });
+  test("Should not retry when user returns null (sync)", async function ({ makeLimiter }) {
+    const limiter = makeLimiter({ trackDoneStatus: true });
     let failedEvents = 0;
     let retryEvents = 0;
     let caught = false;
@@ -200,8 +200,8 @@ describe("Retries", function () {
     expect(limiter.counts().DONE).toStrictEqual(1);
   });
 
-  it("Should not retry when user returns null (async)", async function () {
-    limiter = makeLimiter({ trackDoneStatus: true });
+  test("Should not retry when user returns null (async)", async function ({ makeLimiter }) {
+    const limiter = makeLimiter({ trackDoneStatus: true });
     let failedEvents = 0;
     let retryEvents = 0;
     let caught = false;

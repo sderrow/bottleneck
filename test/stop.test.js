@@ -1,19 +1,11 @@
-import { describe, it, afterEach, expect } from "vitest";
-import { createJobHarness } from "./helpers/job-tracking.js";
-import { waitForState } from "./helpers/wait-for-state.js";
-const makeLimiter = require("./helpers/limiter");
+import { useFakeClock } from "./helpers/clock.js";
+import { test, describe, expect, waitForState } from "./helpers/test-api.js";
 
-describe("Stop", function () {
-  let limiter;
+useFakeClock();
 
-  afterEach(function () {
-    if (limiter == null) return;
-    return limiter.disconnect(false);
-  });
-
-  it("Should stop and drop the queue", async function () {
-    const h = createJobHarness();
-    limiter = makeLimiter({
+describe("Stop", () => {
+  test("Should stop and drop the queue", async function ({ harness: h, makeLimiter }) {
+    const limiter = makeLimiter({
       maxConcurrent: 2,
       minTime: 100,
       trackDoneStatus: true,
@@ -61,12 +53,11 @@ describe("Stop", function () {
     expect(counts.EXECUTING).toEqual(0);
     expect(counts.DONE).toEqual(2);
 
-    h.checkResultsOrder([[0], [1]]);
+    expect(h.log).toHaveCallOrder([[0], [1]]);
   });
 
-  it("Should stop and let the queue finish", async function () {
-    const h = createJobHarness();
-    limiter = makeLimiter({
+  test("Should stop and let the queue finish", async function ({ harness: h, makeLimiter }) {
+    const limiter = makeLimiter({
       maxConcurrent: 1,
       minTime: 100,
       trackDoneStatus: true,
@@ -105,12 +96,11 @@ describe("Stop", function () {
     expect(counts.EXECUTING).toEqual(0);
     expect(counts.DONE).toEqual(4);
 
-    h.checkResultsOrder([[1], [2], [3]]);
+    expect(h.log).toHaveCallOrder([[1], [2], [3]]);
   });
 
-  it("Should still resolve when rejectOnDrop is false", function () {
-    const h = createJobHarness();
-    limiter = makeLimiter({
+  test("Should still resolve when rejectOnDrop is false", function ({ harness: h, makeLimiter }) {
+    const limiter = makeLimiter({
       maxConcurrent: 1,
       minTime: 100,
       rejectOnDrop: false,
@@ -133,9 +123,11 @@ describe("Stop", function () {
       });
   });
 
-  it("Should not allow calling stop() twice when dropWaitingJobs=true", function () {
-    const h = createJobHarness();
-    limiter = makeLimiter({
+  test("Should not allow calling stop() twice when dropWaitingJobs=true", function ({
+    harness: h,
+    makeLimiter,
+  }) {
+    const limiter = makeLimiter({
       maxConcurrent: 1,
       minTime: 100,
     });
@@ -163,9 +155,11 @@ describe("Stop", function () {
       });
   });
 
-  it("Should not allow calling stop() twice when dropWaitingJobs=false", function () {
-    const h = createJobHarness();
-    limiter = makeLimiter({
+  test("Should not allow calling stop() twice when dropWaitingJobs=false", function ({
+    harness: h,
+    makeLimiter,
+  }) {
+    const limiter = makeLimiter({
       maxConcurrent: 1,
       minTime: 100,
     });
