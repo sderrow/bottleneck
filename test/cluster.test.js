@@ -1,5 +1,5 @@
 import { describe, expect } from "vitest";
-import { test, waitForState, deferred } from "./helpers/test-api.js";
+import { test, waitForState, deferred, enqueued } from "./helpers/test-api.js";
 const Bottleneck = require("./bottleneck");
 const Scripts = require("../src/cluster/Scripts.js");
 const assert = require("assert");
@@ -380,16 +380,13 @@ describe("Cluster-only", () => {
     const job0 = deferred();
 
     const p0 = rootLimiter.schedule({ id: 0 }, h.deferredPromise, job0.signal, null, 0);
-    await rootLimiter._submitLock.schedule(() => Promise.resolve());
+    await enqueued(rootLimiter);
 
     const p1 = rootLimiter.schedule({ id: 1 }, h.promise, null, 1);
     const p2 = rootLimiter.schedule({ id: 2 }, h.promise, null, 2);
     const p3 = limiter2.schedule({ id: 3 }, h.promise, null, 3);
 
-    await Promise.all([
-      rootLimiter._submitLock.schedule(() => Promise.resolve()),
-      limiter2._submitLock.schedule(() => Promise.resolve()),
-    ]);
+    await Promise.all([enqueued(rootLimiter), enqueued(limiter2)]);
 
     const queuedA = await runCommand(rootLimiter, "hgetall", [client_num_queued_key]);
     expect(rootLimiter.counts().QUEUED).toEqual(2);
@@ -434,12 +431,12 @@ describe("Cluster-only", () => {
     rootLimiter.schedule({ id: 2 }, h.deferredPromise, jobs.signal, null, 2);
 
     await rootLimiter.schedule({ id: 0, weight: 0 }, h.promise, null, 0);
-    await rootLimiter._submitLock.schedule(() => Promise.resolve());
+    await enqueued(rootLimiter);
     expect(rootLimiter.counts().EXECUTING).toEqual(2);
     const p3 = limiter2.schedule({ id: 3 }, h.promise, null, 3);
     // Drain limiter2's lock — job 3 was submitted on limiter2, so only
-    // its own _submitLock guarantees the registration reached redis.
-    await limiter2._submitLock.schedule(() => Promise.resolve());
+    // its own enqueued() barrier guarantees the registration reached redis.
+    await enqueued(limiter2);
     expect(limiter2.counts().EXECUTING).toEqual(0);
     jobs.release();
     await p3;
@@ -558,7 +555,7 @@ describe("Cluster-only", () => {
       .schedule({ expiration: 50, weight: 5 }, h.deferredPromise, never, null, 5)
       .catch(errorHandler);
 
-    await rootLimiter._submitLock.schedule(() => Promise.resolve(true));
+    await enqueued(rootLimiter);
     await rootLimiter._drainAll();
     await rootLimiter.disconnect(false);
     job1.release();

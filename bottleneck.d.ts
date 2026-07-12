@@ -129,7 +129,6 @@ declare module "bottleneck" {
        */
       readonly enqueueErrorMessage?: string | null;
     };
-    type Callback<T> = (err: any, result: T) => void;
     type ClientsList = { client?: any; subscriber?: any };
     type GroupLimiterPair = { key: string; limiter: Bottleneck };
     type Strategy = number & { readonly __brand: "BottleneckStrategy" };
@@ -596,16 +595,6 @@ declare module "bottleneck" {
     ): ((...args: Args) => Promise<R>) & {
       withOptions: (options: Bottleneck.JobOptions, ...args: Args) => Promise<R>;
     };
-
-    submit<R, Args extends any[]>(
-      fn: (...args: [...Args, Bottleneck.Callback<R>]) => void,
-      ...args: [...Args, Bottleneck.Callback<R>]
-    ): void;
-    submit<R, Args extends any[]>(
-      options: Bottleneck.JobOptions,
-      fn: (...args: [...Args, Bottleneck.Callback<R>]) => void,
-      ...args: [...Args, Bottleneck.Callback<R>]
-    ): void;
 
     schedule<R, Args extends any[]>(
       fn: (...args: Args) => PromiseLike<R>,

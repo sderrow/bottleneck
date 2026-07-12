@@ -70,8 +70,7 @@
           "expectTypeOf",
           "assert",
           "assertType",
-          "assert.**",
-          "**.noErrVal"
+          "assert.**"
         ]
       }
     ]
