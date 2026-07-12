@@ -1,6 +1,5 @@
 import { describe, expect } from "vitest";
 import { test, waitForState, deferred, enqueued } from "./helpers/test-api.js";
-const Bottleneck = require("./bottleneck");
 const Scripts = require("../src/cluster/Scripts.js");
 const assert = require("assert");
 
@@ -46,16 +45,13 @@ describe("Cluster-only", () => {
   test("Should allow passing a limiter's connection to a new limiter", async ({
     harness: h,
     makeLimiter,
-    track,
   }) => {
     const rootLimiter = makeLimiter();
     rootLimiter.connection.id = "some-id";
-    const limiter = track(
-      new Bottleneck({
-        minTime: 50,
-        connection: rootLimiter.connection,
-      }),
-    );
+    const limiter = makeLimiter({
+      minTime: 50,
+      connection: rootLimiter.connection,
+    });
 
     await Promise.all([rootLimiter.ready(), limiter.ready()]);
     expect(limiter.connection.id).toEqual("some-id");
@@ -72,16 +68,14 @@ describe("Cluster-only", () => {
   test("Should allow passing a limiter's connection to a new Group", async ({
     harness: h,
     makeLimiter,
-    track,
+    makeGroup,
   }) => {
     const rootLimiter = makeLimiter();
     rootLimiter.connection.id = "some-id";
-    const group = track(
-      new Bottleneck.Group({
-        minTime: 50,
-        connection: rootLimiter.connection,
-      }),
-    );
+    const group = makeGroup({
+      minTime: 50,
+      connection: rootLimiter.connection,
+    });
     const limiter1 = group.key("A");
     const limiter2 = group.key("B");
 
@@ -103,25 +97,21 @@ describe("Cluster-only", () => {
   test("Should allow passing a Group's connection to a new limiter", async ({
     harness: h,
     makeLimiter,
-    track,
+    makeGroup,
   }) => {
     const rootLimiter = makeLimiter();
-    const group = track(
-      new Bottleneck.Group({
-        minTime: 50,
-        datastore: process.env.DATASTORE,
-        clearDatastore: true,
-      }),
-    );
+    const group = makeGroup({
+      minTime: 50,
+      datastore: process.env.DATASTORE,
+      clearDatastore: true,
+    });
     group.connection.id = "some-id";
 
     const limiter1 = group.key("A");
-    const limiter2 = track(
-      new Bottleneck({
-        minTime: 50,
-        connection: group.connection,
-      }),
-    );
+    const limiter2 = makeLimiter({
+      minTime: 50,
+      connection: group.connection,
+    });
 
     await Promise.all([limiter1.ready(), limiter2.ready()]);
     expect(limiter1.connection.id).toEqual("some-id");
@@ -140,25 +130,21 @@ describe("Cluster-only", () => {
   test("Should allow passing a Group's connection to a new Group", async ({
     harness: h,
     makeLimiter,
-    track,
+    makeGroup,
   }) => {
     const rootLimiter = makeLimiter();
-    const group1 = track(
-      new Bottleneck.Group({
-        minTime: 50,
-        datastore: process.env.DATASTORE,
-        clearDatastore: true,
-      }),
-    );
+    const group1 = makeGroup({
+      minTime: 50,
+      datastore: process.env.DATASTORE,
+      clearDatastore: true,
+    });
     group1.connection.id = "some-id";
 
-    const group2 = track(
-      new Bottleneck.Group({
-        minTime: 50,
-        connection: group1.connection,
-        clearDatastore: true,
-      }),
-    );
+    const group2 = makeGroup({
+      minTime: 50,
+      connection: group1.connection,
+      clearDatastore: true,
+    });
 
     const limiter1 = group1.key("AAA");
     const limiter2 = group1.key("BBB");
@@ -245,7 +231,6 @@ describe("Cluster-only", () => {
 
   test("Should compute reservoir increased based on number of missed intervals", async ({
     makeLimiter,
-    track,
   }) => {
     const settings = {
       id: "missed-intervals",
@@ -270,7 +255,7 @@ describe("Cluster-only", () => {
     // duration. By doing the hset and the read back-to-back as the very
     // last steps, the only Δ between shift-time and read-time is one hset
     // round trip (typically <10ms, well under the 100ms interval).
-    const limiter2 = track(new Bottleneck({ ...settings, datastore: process.env.DATASTORE }));
+    const limiter2 = makeLimiter({ ...settings });
     await limiter2.ready();
 
     // process_tick uses Date.now() from JS (see RedisDatastore.runScript),
@@ -294,7 +279,7 @@ describe("Cluster-only", () => {
     expect(reservoir).toBeLessThanOrEqual(64);
   });
 
-  test("Should migrate from 2.8.0", async ({ makeLimiter, track }) => {
+  test("Should migrate from 2.8.0", async ({ makeLimiter }) => {
     // Bound the expected timestamps to the test window — not a wall-clock-from-now
     // window that depends on test runtime under load. lastReservoirIncrease is
     // preserved from rootLimiter's init (hsetnx), so the bound must precede that too.
@@ -313,12 +298,9 @@ describe("Cluster-only", () => {
       ]),
       runCommand(rootLimiter, "hset", [settings_key, "lastReservoirRefresh", ""]),
     ]);
-    const limiter2 = track(
-      new Bottleneck({
-        id: "migrate",
-        datastore: process.env.DATASTORE,
-      }),
-    );
+    const limiter2 = makeLimiter({
+      id: "migrate",
+    });
     await limiter2.ready();
     const values = await runCommand(rootLimiter, "hmget", [
       settings_key,
@@ -352,24 +334,17 @@ describe("Cluster-only", () => {
     ]);
   });
 
-  test("Should keep track of each client's queue length", async ({
-    harness: h,
-    makeLimiter,
-    track,
-  }) => {
+  test("Should keep track of each client's queue length", async ({ harness: h, makeLimiter }) => {
     const rootLimiter = makeLimiter({
       id: "queues",
       maxConcurrent: 1,
       trackDoneStatus: true,
     });
-    const limiter2 = track(
-      new Bottleneck({
-        datastore: process.env.DATASTORE,
-        id: "queues",
-        maxConcurrent: 1,
-        trackDoneStatus: true,
-      }),
-    );
+    const limiter2 = makeLimiter({
+      id: "queues",
+      maxConcurrent: 1,
+      trackDoneStatus: true,
+    });
     const client_num_queued_key = limiterKeys(rootLimiter)[5];
     const clientId1 = rootLimiter._store.clientId;
     const clientId2 = limiter2._store.clientId;
@@ -409,11 +384,11 @@ describe("Cluster-only", () => {
     expect(await rootLimiter.clusterQueued()).toEqual(0);
   });
 
-  test("Should publish capacity increases", async ({ harness: h, makeLimiter, track }) => {
+  test("Should publish capacity increases", async ({ harness: h, makeLimiter }) => {
     const rootLimiter = makeLimiter({ maxConcurrent: 2 });
 
     await rootLimiter.ready();
-    const limiter2 = track(new Bottleneck({ datastore: process.env.DATASTORE }));
+    const limiter2 = makeLimiter();
     await limiter2.ready();
 
     // Use deferredPromise instead of slowPromise(100) for jobs 1 and 2.
@@ -447,7 +422,6 @@ describe("Cluster-only", () => {
   test("Should publish capacity changes on reservoir changes", async ({
     harness: h,
     makeLimiter,
-    track,
   }) => {
     const rootLimiter = makeLimiter({
       maxConcurrent: 2,
@@ -455,11 +429,7 @@ describe("Cluster-only", () => {
     });
 
     await rootLimiter.ready();
-    const limiter2 = track(
-      new Bottleneck({
-        datastore: process.env.DATASTORE,
-      }),
-    );
+    const limiter2 = makeLimiter();
     await limiter2.ready();
 
     const held = deferred();
@@ -482,24 +452,17 @@ describe("Cluster-only", () => {
     expect(h.log).toHaveCallOrder([[0], [1], [2], [3]]);
   });
 
-  test("Should remove track job data and remove lost jobs", async ({
-    harness: h,
-    makeLimiter,
-    track,
-  }) => {
+  test("Should remove track job data and remove lost jobs", async ({ harness: h, makeLimiter }) => {
     // Capture before any limiter is constructed; redis-side timestamps may be
     // assigned during rootLimiter's init via hsetnx (see init.lua).
     const testStart = Date.now();
     const rootLimiter = makeLimiter({ id: "lost" }, { expectErrors: true });
     const clientId = rootLimiter._store.clientId;
-    const limiter1 = track(new Bottleneck({ datastore: process.env.DATASTORE }));
-    const limiter2 = track(
-      new Bottleneck({
-        id: "lost",
-        datastore: process.env.DATASTORE,
-        heartbeatInterval: 150,
-      }),
-    );
+    const limiter1 = makeLimiter();
+    const limiter2 = makeLimiter({
+      id: "lost",
+      heartbeatInterval: 150,
+    });
     const getData = (limiter) => {
       expect(limiterKeys(limiter).length).toEqual(8); // Asserting, to remember to edit this test when keys change
       const [
@@ -601,7 +564,7 @@ describe("Cluster-only", () => {
     expect(numExpirations).toEqual(4);
   });
 
-  test("Should clear unresponsive clients", async ({ makeLimiter, track }) => {
+  test("Should clear unresponsive clients", async ({ makeLimiter }) => {
     const rootLimiter = makeLimiter({
       id: "unresponsive",
       maxConcurrent: 1,
@@ -619,12 +582,9 @@ describe("Cluster-only", () => {
     // default options, clientTimeout=10000 and process_tick can't clean
     // up within the 5s test window.
     await rootLimiter.ready();
-    const limiter2 = track(
-      new Bottleneck({
-        id: "unresponsive",
-        datastore: process.env.DATASTORE,
-      }),
-    );
+    const limiter2 = makeLimiter({
+      id: "unresponsive",
+    });
     await limiter2.ready();
     await Promise.all([rootLimiter.running(), limiter2.running()]);
 
@@ -661,7 +621,6 @@ describe("Cluster-only", () => {
   test("Should not clear unresponsive clients with unexpired running jobs", async ({
     harness: h,
     makeLimiter,
-    track,
   }) => {
     const rootLimiter = makeLimiter({
       id: "unresponsive-unexpired",
@@ -674,12 +633,9 @@ describe("Cluster-only", () => {
     // limiter2's defaults. Constructing limiter2 up-front races init.lua and
     // settings can adopt the wrong values.
     await rootLimiter.ready();
-    const limiter2 = track(
-      new Bottleneck({
-        id: "unresponsive-unexpired",
-        datastore: process.env.DATASTORE,
-      }),
-    );
+    const limiter2 = makeLimiter({
+      id: "unresponsive-unexpired",
+    });
     await limiter2.ready();
 
     const client_running_key = limiterKeys(limiter2)[4];
@@ -724,7 +680,6 @@ describe("Cluster-only", () => {
   test("Should clear unresponsive clients after last jobs are expired", async ({
     harness: h,
     makeLimiter,
-    track,
   }) => {
     const rootLimiter = makeLimiter({
       id: "unresponsive-expired",
@@ -736,12 +691,9 @@ describe("Cluster-only", () => {
     // Sequence init so rootLimiter's clientTimeout/heartbeatInterval win over
     // limiter2's defaults.
     await rootLimiter.ready();
-    const limiter2 = track(
-      new Bottleneck({
-        id: "unresponsive-expired",
-        datastore: process.env.DATASTORE,
-      }),
-    );
+    const limiter2 = makeLimiter({
+      id: "unresponsive-expired",
+    });
     await limiter2.ready();
 
     const client_running_key = limiterKeys(limiter2)[4];
@@ -793,7 +745,7 @@ describe("Cluster-only", () => {
     expect(await numClients()).toEqual([1, 1, 1, 1]);
   });
 
-  test("Should use shared settings", async ({ harness: h, makeLimiter, track }) => {
+  test("Should use shared settings", async ({ harness: h, makeLimiter }) => {
     const rootLimiter = makeLimiter({ maxConcurrent: 2 });
     const settings_key = limiterKeys(rootLimiter)[0];
 
@@ -803,7 +755,7 @@ describe("Cluster-only", () => {
     // both up-front and awaiting them together races init.lua executions and
     // produces flaky reads.
     await rootLimiter.ready();
-    const limiter2 = track(new Bottleneck({ maxConcurrent: 1, datastore: process.env.DATASTORE }));
+    const limiter2 = makeLimiter({ maxConcurrent: 1 });
     await limiter2.ready();
     const maxConcurrent = await runCommand(rootLimiter, "hget", [settings_key, "maxConcurrent"]);
     expect(maxConcurrent).toEqual("2");
@@ -816,18 +768,15 @@ describe("Cluster-only", () => {
     expect(h.log).toHaveCallOrder([[1], [2]]);
   });
 
-  test("Should clear previous settings", async ({ harness: h, makeLimiter, track }) => {
+  test("Should clear previous settings", async ({ harness: h, makeLimiter }) => {
     const rootLimiter = makeLimiter({ maxConcurrent: 2 });
     const settings_key = limiterKeys(rootLimiter)[0];
 
     await rootLimiter.ready();
-    const limiter2 = track(
-      new Bottleneck({
-        maxConcurrent: 1,
-        datastore: process.env.DATASTORE,
-        clearDatastore: true,
-      }),
-    );
+    const limiter2 = makeLimiter({
+      maxConcurrent: 1,
+      clearDatastore: true,
+    });
     await limiter2.ready();
     // Verify the actual cleared setting in redis directly — this is the
     // contract being tested. Avoids dependence on slowPromise wall-clock

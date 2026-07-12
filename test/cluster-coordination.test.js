@@ -51,11 +51,10 @@ describe("Cluster coordination", () => {
   test("Should chain local and distributed limiters (total concurrency)", async ({
     harness: h,
     makeLimiter,
-    track,
   }) => {
     const rootLimiter = makeLimiter({ id: "limiter1", maxConcurrent: 3 });
-    const limiter2 = track(new Bottleneck({ id: "limiter2", maxConcurrent: 1 }));
-    const limiter3 = track(new Bottleneck({ id: "limiter3", maxConcurrent: 2 }));
+    const limiter2 = makeLimiter({ id: "limiter2", maxConcurrent: 1, datastore: "local" });
+    const limiter3 = makeLimiter({ id: "limiter3", maxConcurrent: 2, datastore: "local" });
 
     limiter2.on("error", (err) => console.log(err));
     limiter2.chain(rootLimiter);
@@ -105,11 +104,10 @@ describe("Cluster coordination", () => {
   test("Should chain local and distributed limiters (partial concurrency)", async ({
     harness: h,
     makeLimiter,
-    track,
   }) => {
     const rootLimiter = makeLimiter({ maxConcurrent: 2 });
-    const limiter2 = track(new Bottleneck({ maxConcurrent: 1 }));
-    const limiter3 = track(new Bottleneck({ maxConcurrent: 2 }));
+    const limiter2 = makeLimiter({ maxConcurrent: 1, datastore: "local" });
+    const limiter3 = makeLimiter({ maxConcurrent: 2, datastore: "local" });
 
     limiter2.chain(rootLimiter);
     limiter3.chain(rootLimiter);
@@ -155,16 +153,13 @@ describe("Cluster coordination", () => {
     expect(h.log).toHaveCallOrder([[1], [4], [5], [2], [6], [3]]);
   });
 
-  test("Should use the limiter ID to build Redis keys", async ({ makeLimiter, track }) => {
+  test("Should use the limiter ID to build Redis keys", async ({ makeLimiter }) => {
     const rootLimiter = makeLimiter();
     const randomId = rootLimiter._randomIndex();
-    const limiter = track(
-      new Bottleneck({
-        id: randomId,
-        datastore: process.env.DATASTORE,
-        clearDatastore: true,
-      }),
-    );
+    const limiter = makeLimiter({
+      id: randomId,
+      clearDatastore: true,
+    });
 
     await limiter.ready();
     const keys = limiterKeys(limiter);
@@ -173,10 +168,8 @@ describe("Cluster coordination", () => {
     expect(deleted).toEqual(5);
   });
 
-  test("Should not fail when Redis data is missing", async ({ track }) => {
-    const limiter = track(
-      new Bottleneck({ datastore: process.env.DATASTORE, clearDatastore: true }),
-    );
+  test("Should not fail when Redis data is missing", async ({ makeLimiter }) => {
+    const limiter = makeLimiter({ clearDatastore: true });
 
     const runningBefore = await limiter.running();
     expect(runningBefore).toEqual(0);
@@ -190,10 +183,8 @@ describe("Cluster coordination", () => {
     expect(countRecreated).toBeGreaterThan(0);
   });
 
-  test("Should parse SETTINGS_KEY_NOT_FOUND from Redis", async ({ track }) => {
-    const limiter = track(
-      new Bottleneck({ datastore: process.env.DATASTORE, clearDatastore: true }),
-    );
+  test("Should parse SETTINGS_KEY_NOT_FOUND from Redis", async ({ makeLimiter }) => {
+    const limiter = makeLimiter({ clearDatastore: true });
 
     await limiter.ready();
     await deleteKeys(limiter);
@@ -204,10 +195,10 @@ describe("Cluster coordination", () => {
     expect(err.message).toMatch(SETTINGS_KEY_NOT_FOUND);
   });
 
-  test("Should re-register when client registration is missing in Redis", async ({ track }) => {
-    const limiter = track(
-      new Bottleneck({ datastore: process.env.DATASTORE, clearDatastore: true }),
-    );
+  test("Should re-register when client registration is missing in Redis", async ({
+    makeLimiter,
+  }) => {
+    const limiter = makeLimiter({ clearDatastore: true });
 
     await limiter.ready();
     const clientLastSeenKey = limiterKeys(limiter)[7];
@@ -218,10 +209,8 @@ describe("Cluster coordination", () => {
     expect(await runCommand(limiter, "zscore", [clientLastSeenKey, clientId])).not.toBeNull();
   });
 
-  test("Should parse UNKNOWN_CLIENT from Redis", async ({ track }) => {
-    const limiter = track(
-      new Bottleneck({ datastore: process.env.DATASTORE, clearDatastore: true }),
-    );
+  test("Should parse UNKNOWN_CLIENT from Redis", async ({ makeLimiter }) => {
+    const limiter = makeLimiter({ clearDatastore: true });
 
     await limiter.ready();
     const clientLastSeenKey = limiterKeys(limiter)[7];
@@ -236,33 +225,25 @@ describe("Cluster coordination", () => {
   test("Should drop all jobs in the Cluster when entering blocked mode", async ({
     harness: h,
     makeLimiter,
-    track,
   }) => {
     const rootLimiter = makeLimiter();
-    const limiter1 = track(
-      new Bottleneck({
-        id: "blocked",
-        trackDoneStatus: true,
-        datastore: process.env.DATASTORE,
-        clearDatastore: true,
-
-        maxConcurrent: 1,
-        minTime: 50,
-        highWater: 2,
-        strategy: Bottleneck.strategy.BLOCK,
-      }),
-    );
+    const limiter1 = makeLimiter({
+      id: "blocked",
+      trackDoneStatus: true,
+      clearDatastore: true,
+      maxConcurrent: 1,
+      minTime: 50,
+      highWater: 2,
+      strategy: Bottleneck.strategy.BLOCK,
+    });
     const client_num_queued_key = limiterKeys(limiter1)[5];
 
     await limiter1.ready();
-    const limiter2 = track(
-      new Bottleneck({
-        id: "blocked",
-        trackDoneStatus: true,
-        datastore: process.env.DATASTORE,
-        clearDatastore: false,
-      }),
-    );
+    const limiter2 = makeLimiter({
+      id: "blocked",
+      trackDoneStatus: true,
+      clearDatastore: false,
+    });
     await limiter2.ready();
 
     // Fire jobs 1-2 on limiter1, then wait for enqueued(limiter1) so both
@@ -340,28 +321,22 @@ describe("Cluster coordination", () => {
     expect(h.log).toHaveCallOrder([[1]]);
   });
 
-  test("Should pass messages to all limiters in Cluster", async ({ makeLimiter, track }) => {
+  test("Should pass messages to all limiters in Cluster", async ({ makeLimiter }) => {
     const rootLimiter = makeLimiter({
       maxConcurrent: 1,
       minTime: 100,
       id: "super-duper",
     });
-    const limiter1 = track(
-      new Bottleneck({
-        maxConcurrent: 1,
-        minTime: 100,
-        id: "super-duper",
-        datastore: process.env.DATASTORE,
-      }),
-    );
-    const limiter2 = track(
-      new Bottleneck({
-        maxConcurrent: 1,
-        minTime: 100,
-        id: "nope",
-        datastore: process.env.DATASTORE,
-      }),
-    );
+    const limiter1 = makeLimiter({
+      maxConcurrent: 1,
+      minTime: 100,
+      id: "super-duper",
+    });
+    const limiter2 = makeLimiter({
+      maxConcurrent: 1,
+      minTime: 100,
+      id: "nope",
+    });
     const received = [];
 
     rootLimiter.on("message", (msg) => {
@@ -387,15 +362,13 @@ describe("Cluster coordination", () => {
   });
 
   test("Should pass messages to correct limiter after Group re-instantiations", async ({
-    track,
+    makeGroup,
   }) => {
-    const group = track(
-      new Bottleneck.Group({
-        maxConcurrent: 1,
-        minTime: 100,
-        datastore: process.env.DATASTORE,
-      }),
-    );
+    const group = makeGroup({
+      maxConcurrent: 1,
+      minTime: 100,
+      datastore: process.env.DATASTORE,
+    });
     const received = [];
 
     await new Promise((resolve, _reject) => {
@@ -432,17 +405,15 @@ describe("Cluster coordination", () => {
 
     expect(received).toEqual(["1", "Bonjour!", "2", "Comment allez-vous?", "3", "Au revoir!"]);
     // Semantic, not cleanup: flush=true gracefully drains the un-awaited
-    // "Au revoir!" PUBLISH reply before closing. track's disconnect(false)
-    // would destroy the socket mid-flight and reject that pending command.
+    // "Au revoir!" PUBLISH reply before closing. makeGroup's teardown
+    // disconnect(false) would destroy the socket mid-flight and reject that pending command.
     group.disconnect();
   });
 
-  test("Should have a default key TTL when using Groups", async ({ track }) => {
-    const group = track(
-      new Bottleneck.Group({
-        datastore: process.env.DATASTORE,
-      }),
-    );
+  test("Should have a default key TTL when using Groups", async ({ makeGroup }) => {
+    const group = makeGroup({
+      datastore: process.env.DATASTORE,
+    });
 
     await group.key("one").ready();
     const limiter = group.key("one");
@@ -452,16 +423,14 @@ describe("Cluster coordination", () => {
     expect(ttl).toBeLessThanOrEqual(305);
   });
 
-  test("Should support Groups and expire Redis keys", async ({ makeLimiter, track }) => {
+  test("Should support Groups and expire Redis keys", async ({ makeLimiter, makeGroup }) => {
     const rootLimiter = makeLimiter();
-    const group = track(
-      new Bottleneck.Group({
-        datastore: process.env.DATASTORE,
-        clearDatastore: true,
-        minTime: 50,
-        timeout: 200,
-      }),
-    );
+    const group = makeGroup({
+      datastore: process.env.DATASTORE,
+      clearDatastore: true,
+      minTime: 50,
+      timeout: 200,
+    });
 
     const t0 = Date.now();
     const results = {};
@@ -538,17 +507,15 @@ describe("Cluster coordination", () => {
     expect(Object.keys(group.connection.limiters).length).toEqual(0);
   });
 
-  test("Should not recreate a key when running heartbeat", async ({ harness: h, track }) => {
-    const group = track(
-      new Bottleneck.Group({
-        datastore: process.env.DATASTORE,
-        clearDatastore: true,
-        maxConcurrent: 50,
-        minTime: 50,
-        timeout: 300,
-        heartbeatInterval: 5,
-      }),
-    );
+  test("Should not recreate a key when running heartbeat", async ({ harness: h, makeGroup }) => {
+    const group = makeGroup({
+      datastore: process.env.DATASTORE,
+      clearDatastore: true,
+      maxConcurrent: 50,
+      minTime: 50,
+      timeout: 300,
+      heartbeatInterval: 5,
+    });
     const key = "heartbeat";
 
     const limiter = group.key(key);
@@ -562,31 +529,27 @@ describe("Cluster coordination", () => {
 
   test("Should delete Redis key when manually deleting a group key", async ({
     harness: h,
-    track,
+    makeGroup,
   }) => {
     // Bump timeout (and the corresponding waitForState below) so autocleanup
     // doesn't race with the initial schedule under stress. Original 300ms
     // gave a 150ms autocleanup interval that could fire before init.lua
     // settled when redis was slow.
     const groupTimeout = 5000;
-    const group1 = track(
-      new Bottleneck.Group({
-        datastore: process.env.DATASTORE,
-        clearDatastore: true,
-        maxConcurrent: 50,
-        minTime: 50,
-        timeout: groupTimeout,
-      }),
-    );
-    const group2 = track(
-      new Bottleneck.Group({
-        datastore: process.env.DATASTORE,
-        clearDatastore: true,
-        maxConcurrent: 50,
-        minTime: 50,
-        timeout: groupTimeout,
-      }),
-    );
+    const group1 = makeGroup({
+      datastore: process.env.DATASTORE,
+      clearDatastore: true,
+      maxConcurrent: 50,
+      minTime: 50,
+      timeout: groupTimeout,
+    });
+    const group2 = makeGroup({
+      datastore: process.env.DATASTORE,
+      clearDatastore: true,
+      maxConcurrent: 50,
+      minTime: 50,
+      timeout: groupTimeout,
+    });
     const key = "deleted";
     const limiter = group1.key(key); // only for countKeys() use
 
@@ -623,7 +586,7 @@ describe("Cluster coordination", () => {
 
   test("Should delete Redis keys from a group even when the local limiter is not present", async ({
     harness: h,
-    track,
+    makeGroup,
   }) => {
     // groupTimeout pulls double duty here: it sets the redis-side TTL
     // (must not expire before group2.deleteKey runs), and it gates
@@ -632,24 +595,20 @@ describe("Cluster coordination", () => {
     // the keys could TTL-expire before deleteKey ran. Refreshing the TTL
     // explicitly via running() right before deleteKey decouples the two.
     const groupTimeout = 5000;
-    const group1 = track(
-      new Bottleneck.Group({
-        datastore: process.env.DATASTORE,
-        clearDatastore: true,
-        maxConcurrent: 50,
-        minTime: 50,
-        timeout: groupTimeout,
-      }),
-    );
-    const group2 = track(
-      new Bottleneck.Group({
-        datastore: process.env.DATASTORE,
-        clearDatastore: true,
-        maxConcurrent: 50,
-        minTime: 50,
-        timeout: groupTimeout,
-      }),
-    );
+    const group1 = makeGroup({
+      datastore: process.env.DATASTORE,
+      clearDatastore: true,
+      maxConcurrent: 50,
+      minTime: 50,
+      timeout: groupTimeout,
+    });
+    const group2 = makeGroup({
+      datastore: process.env.DATASTORE,
+      clearDatastore: true,
+      maxConcurrent: 50,
+      minTime: 50,
+      timeout: groupTimeout,
+    });
     const key = "deleted-cluster-wide";
     const limiter = group1.key(key); // only for countKeys() use
 
@@ -688,27 +647,23 @@ describe("Cluster coordination", () => {
     expect(group2.keys().length).toEqual(0);
   });
 
-  test("Should returns all Group keys in the cluster", async ({ track }) => {
+  test("Should returns all Group keys in the cluster", async ({ makeGroup }) => {
     // Use a long timeout so redis-side TTLs cannot expire mid-test under load.
     // Original 3000ms was tight enough that a slow run (cumulative redis latency)
     // could let keys expire before the assertions, then autocleanup would prune
     // them from instances and group.keys() would surprisingly return [].
-    const group1 = track(
-      new Bottleneck.Group({
-        datastore: process.env.DATASTORE,
-        clearDatastore: true,
-        id: "same",
-        timeout: 30000,
-      }),
-    );
-    const group2 = track(
-      new Bottleneck.Group({
-        datastore: process.env.DATASTORE,
-        clearDatastore: true,
-        id: "same",
-        timeout: 30000,
-      }),
-    );
+    const group1 = makeGroup({
+      datastore: process.env.DATASTORE,
+      clearDatastore: true,
+      id: "same",
+      timeout: 30000,
+    });
+    const group2 = makeGroup({
+      datastore: process.env.DATASTORE,
+      clearDatastore: true,
+      id: "same",
+      timeout: 30000,
+    });
     const keys1 = ["lorem", "ipsum", "dolor", "sit", "amet", "consectetur"];
     const keys2 = ["adipiscing", "elit"];
     const both = keys1.concat(keys2);
@@ -721,51 +676,22 @@ describe("Cluster coordination", () => {
     expect((await group1.clusterKeys()).sort()).toEqual(both.sort());
     expect((await group1.clusterKeys()).sort()).toEqual(both.sort());
 
-    const group3 = track(new Bottleneck.Group({ datastore: "local" }));
+    const group3 = makeGroup({ datastore: "local" });
     expect(await group3.clusterKeys()).toEqual([]);
   });
 
-  test("Should queue up the least busy limiter", async ({ harness: h, track }) => {
-    const limiter1 = track(
-      new Bottleneck({
-        datastore: process.env.DATASTORE,
-        clearDatastore: true,
-        id: "busy",
-        timeout: 3000,
-        maxConcurrent: 3,
-        trackDoneStatus: true,
-      }),
-    );
-    const limiter2 = track(
-      new Bottleneck({
-        datastore: process.env.DATASTORE,
-        clearDatastore: true,
-        id: "busy",
-        timeout: 3000,
-        maxConcurrent: 3,
-        trackDoneStatus: true,
-      }),
-    );
-    const limiter3 = track(
-      new Bottleneck({
-        datastore: process.env.DATASTORE,
-        clearDatastore: true,
-        id: "busy",
-        timeout: 3000,
-        maxConcurrent: 3,
-        trackDoneStatus: true,
-      }),
-    );
-    const limiter4 = track(
-      new Bottleneck({
-        datastore: process.env.DATASTORE,
-        clearDatastore: true,
-        id: "busy",
-        timeout: 3000,
-        maxConcurrent: 3,
-        trackDoneStatus: true,
-      }),
-    );
+  test("Should queue up the least busy limiter", async ({ harness: h, makeLimiter }) => {
+    const busyOpts = {
+      clearDatastore: true,
+      id: "busy",
+      timeout: 3000,
+      maxConcurrent: 3,
+      trackDoneStatus: true,
+    };
+    const limiter1 = makeLimiter(busyOpts);
+    const limiter2 = makeLimiter(busyOpts);
+    const limiter3 = makeLimiter(busyOpts);
+    const limiter4 = makeLimiter(busyOpts);
 
     await limiter1.schedule({ id: "1" }, h.promise, null, "A");
     await limiter2.schedule({ id: "2" }, h.promise, null, "B");
@@ -836,47 +762,21 @@ describe("Cluster coordination", () => {
     expect(calls.slice(9, 11).sort()).toEqual([2, 3]);
   });
 
-  test("Should pass the remaining capacity to other limiters", async ({ harness: h, track }) => {
-    const limiter1 = track(
-      new Bottleneck({
-        datastore: process.env.DATASTORE,
-        clearDatastore: true,
-        id: "busy",
-        timeout: 3000,
-        maxConcurrent: 3,
-        trackDoneStatus: true,
-      }),
-    );
-    const limiter2 = track(
-      new Bottleneck({
-        datastore: process.env.DATASTORE,
-        clearDatastore: true,
-        id: "busy",
-        timeout: 3000,
-        maxConcurrent: 3,
-        trackDoneStatus: true,
-      }),
-    );
-    const limiter3 = track(
-      new Bottleneck({
-        datastore: process.env.DATASTORE,
-        clearDatastore: true,
-        id: "busy",
-        timeout: 3000,
-        maxConcurrent: 3,
-        trackDoneStatus: true,
-      }),
-    );
-    const limiter4 = track(
-      new Bottleneck({
-        datastore: process.env.DATASTORE,
-        clearDatastore: true,
-        id: "busy",
-        timeout: 3000,
-        maxConcurrent: 3,
-        trackDoneStatus: true,
-      }),
-    );
+  test("Should pass the remaining capacity to other limiters", async ({
+    harness: h,
+    makeLimiter,
+  }) => {
+    const busyOpts = {
+      clearDatastore: true,
+      id: "busy",
+      timeout: 3000,
+      maxConcurrent: 3,
+      trackDoneStatus: true,
+    };
+    const limiter1 = makeLimiter(busyOpts);
+    const limiter2 = makeLimiter(busyOpts);
+    const limiter3 = makeLimiter(busyOpts);
+    const limiter4 = makeLimiter(busyOpts);
     let t3, t4;
 
     await limiter1.schedule({ id: "1" }, h.promise, null, "A");
@@ -950,38 +850,18 @@ describe("Cluster coordination", () => {
 
   test("Should take the capacity and blacklist if the priority limiter is not responding", async ({
     harness: h,
-    track,
+    makeLimiter,
   }) => {
-    const limiter1 = track(
-      new Bottleneck({
-        datastore: process.env.DATASTORE,
-        clearDatastore: true,
-        id: "crash",
-        timeout: 3000,
-        maxConcurrent: 1,
-        trackDoneStatus: true,
-      }),
-    );
-    const limiter2 = track(
-      new Bottleneck({
-        datastore: process.env.DATASTORE,
-        clearDatastore: true,
-        id: "crash",
-        timeout: 3000,
-        maxConcurrent: 1,
-        trackDoneStatus: true,
-      }),
-    );
-    const limiter3 = track(
-      new Bottleneck({
-        datastore: process.env.DATASTORE,
-        clearDatastore: true,
-        id: "crash",
-        timeout: 3000,
-        maxConcurrent: 1,
-        trackDoneStatus: true,
-      }),
-    );
+    const crashOpts = {
+      clearDatastore: true,
+      id: "crash",
+      timeout: 3000,
+      maxConcurrent: 1,
+      trackDoneStatus: true,
+    };
+    const limiter1 = makeLimiter(crashOpts);
+    const limiter2 = makeLimiter(crashOpts);
+    const limiter3 = makeLimiter(crashOpts);
 
     await limiter1.schedule({ id: "1" }, h.promise, null, "A");
     await limiter2.schedule({ id: "2" }, h.promise, null, "B");

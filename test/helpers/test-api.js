@@ -3,6 +3,8 @@ import { isFakeClock } from "./clock.js";
 import { createTaskFns } from "./job-tasks.js";
 import makeLimiterHelper from "./limiter.js";
 
+const Bottleneck = require("../bottleneck");
+
 export { waitForState } from "./wait-for-state.js";
 export { deferred } from "./job-tasks.js";
 
@@ -161,6 +163,18 @@ export const test = baseTest.extend({
   },
   async makeLimiter({ track }, use) {
     await use((opts, meta) => track(makeLimiterHelper(opts, meta)));
+  },
+  async makeGroup({ track }, use) {
+    await use((opts) => track(new Bottleneck.Group(opts ?? {})));
+  },
+  async makeConnection({ track }, use) {
+    await use((opts) => {
+      const Connection =
+        process.env.DATASTORE === "ioredis"
+          ? Bottleneck.IORedisConnection
+          : Bottleneck.RedisConnection;
+      return track(new Connection(opts));
+    });
   },
   async limiter({ makeLimiter, limiterOptions, limiterMeta }, use) {
     await use(makeLimiter(limiterOptions, limiterMeta));

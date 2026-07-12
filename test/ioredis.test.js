@@ -1,6 +1,5 @@
 import { describe, expect } from "vitest";
 import { test } from "./helpers/test-api.js";
-const Bottleneck = require("./bottleneck");
 const Redis = require("ioredis");
 const buildClientOptions = require("./redis-client-options");
 
@@ -37,9 +36,12 @@ describe("ioredis-only", () => {
     expect(limiter._store.connection.client.nodes().length).toBeGreaterThanOrEqual(0);
   });
 
-  test("Should connect in Redis Cluster mode with premade client", ({ makeLimiter, track }) => {
+  test("Should connect in Redis Cluster mode with premade client", ({
+    makeLimiter,
+    makeConnection,
+  }) => {
     const client = new Redis.Cluster("");
-    track(new Bottleneck.IORedisConnection({ client }));
+    makeConnection({ client });
     const limiter = makeLimiter({
       maxConcurrent: 2,
       clientOptions: {},
@@ -55,13 +57,15 @@ describe("ioredis-only", () => {
     expect(limiter._store.connection.client.nodes().length).toBeGreaterThanOrEqual(0);
   });
 
-  test("Should accept existing connections", async ({ harness: h, makeLimiter, track }) => {
-    const connection = track(
-      new Bottleneck.IORedisConnection({
-        Redis,
-        clientOptions: buildClientOptions("ioredis"),
-      }),
-    );
+  test("Should accept existing connections", async ({
+    harness: h,
+    makeLimiter,
+    makeConnection,
+  }) => {
+    const connection = makeConnection({
+      Redis,
+      clientOptions: buildClientOptions("ioredis"),
+    });
     connection.id = "super-connection";
     const limiter = makeLimiter({
       minTime: 50,
@@ -82,11 +86,15 @@ describe("ioredis-only", () => {
     await Promise.all([expect(p1).resolves.toEqual([1]), expect(p2).resolves.toEqual([2])]);
   });
 
-  test("Should accept existing redis clients", async ({ harness: h, makeLimiter, track }) => {
+  test("Should accept existing redis clients", async ({
+    harness: h,
+    makeLimiter,
+    makeConnection,
+  }) => {
     const client = new Redis(buildClientOptions("ioredis"));
     client.id = "super-client";
 
-    const connection = track(new Bottleneck.IORedisConnection({ client }));
+    const connection = makeConnection({ client });
     connection.id = "super-connection";
     const limiter = makeLimiter({
       minTime: 50,
@@ -108,17 +116,18 @@ describe("ioredis-only", () => {
     await Promise.all([expect(p1).resolves.toEqual([1]), expect(p2).resolves.toEqual([2])]);
   });
 
-  test("Should trigger error events on the shared connection", ({ makeLimiter, track }) => {
+  test("Should trigger error events on the shared connection", ({
+    makeLimiter,
+    makeConnection,
+  }) => {
     expect.hasAssertions();
     return new Promise((resolve, reject) => {
-      const connection = track(
-        new Bottleneck.IORedisConnection({
-          Redis,
-          clientOptions: {
-            port: 1,
-          },
-        }),
-      );
+      const connection = makeConnection({
+        Redis,
+        clientOptions: {
+          port: 1,
+        },
+      });
       let fired = false;
       const limiter = makeLimiter({ connection });
       connection.on("error", (_err) => {
