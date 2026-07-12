@@ -90,7 +90,7 @@ jobs:
           cluster_matrix_result="${{ needs.cluster-matrix.result }}"
           failed=0
           for r in "$test_no_cluster_result" "$cluster_matrix_result"; do
-            if [[ "$r" != "success" && "$r" != "skipped" ]]; then
+            if [[ "$r" != "success" ]]; then
               failed=1
             fi
           done
