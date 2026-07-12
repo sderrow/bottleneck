@@ -48,6 +48,9 @@ function makeLimiter(options, meta) {
     });
   }
 
+  // makeLimiter is synchronous; suppress the unhandled-rejection from ready()
+  // for tests that never await it (connection-failure tests assert via the
+  // "error" event instead).
   limiter.ready().catch(() => {});
 
   return limiter;

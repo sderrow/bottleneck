@@ -1,5 +1,5 @@
 import { describe, expect } from "vitest";
-import { useFakeClock, useRealClockForThisTest } from "./helpers/clock.js";
+import { sleep, useFakeClock, useRealClockForThisTest } from "./helpers/clock.js";
 import { test, waitForState, deferred } from "./helpers/test-api.js";
 
 const path = require("path");
@@ -10,7 +10,7 @@ useFakeClock();
 
 describe("General traffic", () => {
   describe("High water limit", () => {
-    test("Should support highWater set to 0", ({ harness: h, makeLimiter }) => {
+    test("Should support highWater set to 0", async ({ harness: h, makeLimiter }) => {
       const limiter = makeLimiter({
         maxConcurrent: 1,
         minTime: 0,
@@ -27,13 +27,10 @@ describe("General traffic", () => {
       limiter.schedule(h.slowPromise, 50, null, 3);
       limiter.schedule(h.slowPromise, 50, null, 4);
 
-      return expect(first)
-        .resolves.toEqual([1])
-        .then(() => h.flushLimiter(limiter, { weight: 0 }))
-        .then((_results) => {
-          expect(h).toHaveFinalCallAt(50);
-          expect(h.log).toHaveCallOrder([[1]]);
-        });
+      await expect(first).resolves.toEqual([1]);
+      await h.flushLimiter(limiter, { weight: 0 });
+      expect(h).toHaveFinalCallAt(50);
+      expect(h.log).toHaveCallOrder([[1]]);
     });
 
     test("Should support highWater set to 1", async ({ harness: h, makeLimiter }) => {
@@ -98,7 +95,7 @@ describe("General traffic", () => {
   });
 
   describe("Weight", () => {
-    test("Should not add jobs with a weight above the maxConcurrent", ({
+    test("Should not add jobs with a weight above the maxConcurrent", async ({
       harness: h,
       makeLimiter,
     }) => {
@@ -107,21 +104,13 @@ describe("General traffic", () => {
       const p1 = limiter.schedule({ weight: 1 }, h.promise, null, 1);
       const p2 = limiter.schedule({ weight: 2 }, h.promise, null, 2);
 
-      return limiter
-        .schedule({ weight: 3 }, h.promise, null, 3)
-        .catch((err) => {
-          expect(err.message).toEqual(
-            "Impossible to add a job having a weight of 3 to a limiter having a maxConcurrent setting of 2",
-          );
-          return h.flushLimiter(limiter);
-        })
-        .then(() =>
-          Promise.all([expect(p1).resolves.toEqual([1]), expect(p2).resolves.toEqual([2])]),
-        )
-        .then((_results) => {
-          expect(h).toHaveFinalCallAt(0);
-          expect(h.log).toHaveCallOrder([[1], [2]]);
-        });
+      await expect(limiter.schedule({ weight: 3 }, h.promise, null, 3)).rejects.toThrow(
+        "Impossible to add a job having a weight of 3 to a limiter having a maxConcurrent setting of 2",
+      );
+      await h.flushLimiter(limiter);
+      await Promise.all([expect(p1).resolves.toEqual([1]), expect(p2).resolves.toEqual([2])]);
+      expect(h).toHaveFinalCallAt(0);
+      expect(h.log).toHaveCallOrder([[1], [2]]);
     });
 
     test("Should support custom job weights", async ({ harness: h, makeLimiter }) => {
@@ -142,7 +131,7 @@ describe("General traffic", () => {
       expect(h.log).toHaveCallOrder([[1], [2], [3], [4], [5]]);
     });
 
-    test("Should overflow at the correct rate", ({ harness: h, makeLimiter }) => {
+    test("Should overflow at the correct rate", async ({ harness: h, makeLimiter }) => {
       const limiter = makeLimiter({
         maxConcurrent: 2,
         reservoir: 3,
@@ -160,41 +149,32 @@ describe("General traffic", () => {
       const p3 = limiter.schedule({ weight: 1, id: 3 }, h.slowPromise, 100, null, 3);
       const p4 = limiter.schedule({ weight: 1, id: 4 }, h.slowPromise, 100, null, 4);
 
-      return expect(Promise.all([p1, p2]))
-        .resolves.toEqual([[1], [2]])
-        .then(() => {
-          expect(limiter.queued()).toEqual(2);
-          return limiter.currentReservoir();
-        })
-        .then((reservoir) => {
-          expect(reservoir).toEqual(0);
-          expect(calledDepleted).toEqual(1);
-          return limiter.incrementReservoir(1);
-        })
-        .then((reservoir) => {
-          expect(reservoir).toEqual(1);
-          return h.flushLimiter(limiter, { priority: 1, weight: 0 });
-        })
-        .then((_results) => {
-          expect(calledDepleted).toEqual(3);
-          expect(limiter.queued()).toEqual(1);
-          expect(h).toHaveFinalCallAt(250);
-          expect(h.log).toHaveCallOrder([[1], [2]]);
-          return limiter.currentReservoir();
-        })
-        .then((reservoir) => {
-          expect(reservoir).toEqual(0);
-          return limiter.updateSettings({ reservoir: 1 });
-        })
-        .then(() =>
-          Promise.all([expect(p3).resolves.toEqual([3]), expect(p4).resolves.toEqual([4])]),
-        )
-        .then(() => limiter.currentReservoir())
-        .then((reservoir) => {
-          expect(reservoir).toEqual(0);
-          expect(calledDepleted).toEqual(4);
-          expect(emptyArguments).toEqual([false, false, false, true]);
-        });
+      await expect(Promise.all([p1, p2])).resolves.toEqual([[1], [2]]);
+
+      expect(limiter.queued()).toEqual(2);
+      const reservoirAfterFirstPair = await limiter.currentReservoir();
+      expect(reservoirAfterFirstPair).toEqual(0);
+      expect(calledDepleted).toEqual(1);
+
+      const incrementedReservoir = await limiter.incrementReservoir(1);
+      expect(incrementedReservoir).toEqual(1);
+
+      await h.flushLimiter(limiter, { priority: 1, weight: 0 });
+      expect(calledDepleted).toEqual(3);
+      expect(limiter.queued()).toEqual(1);
+      expect(h).toHaveFinalCallAt(250);
+      expect(h.log).toHaveCallOrder([[1], [2]]);
+
+      const reservoirAfterFlush = await limiter.currentReservoir();
+      expect(reservoirAfterFlush).toEqual(0);
+
+      await limiter.updateSettings({ reservoir: 1 });
+      await Promise.all([expect(p3).resolves.toEqual([3]), expect(p4).resolves.toEqual([4])]);
+
+      const finalReservoir = await limiter.currentReservoir();
+      expect(finalReservoir).toEqual(0);
+      expect(calledDepleted).toEqual(4);
+      expect(emptyArguments).toEqual([false, false, false, true]);
     });
   });
 
@@ -209,7 +189,7 @@ describe("General traffic", () => {
       // same tick — j1's 150ms resolution timer can fire BEFORE j2's
       // expiration catch runs the running===1 assertion, making running===0
       // (because j1 was freed too). With a deferredPromise we release j1
-      // explicitly inside the catch chain, after verifying running===1.
+      // explicitly in j2's expiration branch, after verifying running===1.
       const holdJ1 = deferred();
 
       await Promise.all([
@@ -223,30 +203,30 @@ describe("General traffic", () => {
           ),
         ).resolves.toEqual([1]),
 
-        limiter
-          .schedule({ expiration: 50, id: "slow-with-expiration" }, h.slowPromise, 75, null, 2)
-          .then(() => {
-            throw new Error("Should have timed out.");
-          })
-          .catch((err) => {
-            expect(err.message).toEqual("This job timed out after 50 ms.");
-            // Lower bound proves expiration didn't fire instantly; the error
-            // message itself proves it didn't fire after slowPromise(75).
-            expect(Date.now() - t0).toBeGreaterThan(45);
+        (async () => {
+          await expect(
+            limiter.schedule(
+              { expiration: 50, id: "slow-with-expiration" },
+              h.slowPromise,
+              75,
+              null,
+              2,
+            ),
+          ).rejects.toThrow("This job timed out after 50 ms.");
+          // Lower bound proves expiration didn't fire instantly; the error
+          // message itself proves it didn't fire after slowPromise(75).
+          expect(Date.now() - t0).toBeGreaterThan(45);
 
-            return Promise.all([limiter.running(), limiter.done()]);
-          })
-          .then(([running, done]) => {
-            expect(running).toEqual(1);
-            expect(done).toEqual(1);
-            // Hold j1 for ≥100ms more so the post-Promise.all assertion
-            // (`Date.now() - t0 > 145`) verifies j1 actually ran a
-            // meaningful interval, without depending on a fixed timer that
-            // can race event-loop jitter.
-            return sleep(100).then(() => {
-              holdJ1.release();
-            });
-          }),
+          const [running, doneCount] = await Promise.all([limiter.running(), limiter.done()]);
+          expect(running).toEqual(1);
+          expect(doneCount).toEqual(1);
+          // Hold j1 for ≥100ms more so the post-Promise.all assertion
+          // (`Date.now() - t0 > 145`) verifies j1 actually ran a
+          // meaningful interval, without depending on a fixed timer that
+          // can race event-loop jitter.
+          await sleep(100);
+          holdJ1.release();
+        })(),
       ]);
 
       // Lower bound proves the unexpired job wasn't aborted early by
@@ -260,42 +240,33 @@ describe("General traffic", () => {
   });
 
   describe("Pubsub", () => {
-    test("Should pass strings", ({ makeLimiter }) => {
+    test("Should pass strings", async ({ makeLimiter }) => {
       const limiter = makeLimiter({ maxConcurrent: 2 });
 
-      return new Promise((resolve, reject) => {
-        limiter.on("message", (msg) => {
-          try {
-            expect(msg).toEqual("hello");
-            resolve();
-          } catch (e) {
-            reject(e);
-          }
-        });
-
-        limiter.publish("hello").catch(reject);
+      // Register the listener before publishing so the message can't be missed.
+      const received = new Promise((resolve) => {
+        limiter.on("message", resolve);
       });
+
+      await limiter.publish("hello");
+      await expect(received).resolves.toEqual("hello");
     });
 
-    test("Should pass objects", ({ makeLimiter }) => {
+    test("Should pass objects", async ({ makeLimiter }) => {
       const limiter = makeLimiter({ maxConcurrent: 2 });
       const obj = {
         array: ["abc", true],
         num: 235.59,
       };
 
-      return new Promise((resolve, reject) => {
-        limiter.on("message", (msg) => {
-          try {
-            expect(JSON.parse(msg)).toEqual(obj);
-            resolve();
-          } catch (e) {
-            reject(e);
-          }
-        });
-
-        limiter.publish(JSON.stringify(obj)).catch(reject);
+      // Register the listener before publishing so the message can't be missed.
+      const received = new Promise((resolve) => {
+        limiter.on("message", resolve);
       });
+
+      await limiter.publish(JSON.stringify(obj));
+      const msg = await received;
+      expect(JSON.parse(msg)).toEqual(obj);
     });
   });
 

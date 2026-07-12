@@ -108,7 +108,7 @@ describe("Stop", () => {
     expect(h.log).toHaveCallOrder([[1], [2], [3]]);
   });
 
-  test("Should still resolve when rejectOnDrop is false", ({ harness: h, makeLimiter }) => {
+  test("Should still resolve when rejectOnDrop is false", async ({ harness: h, makeLimiter }) => {
     const limiter = makeLimiter({
       maxConcurrent: 1,
       minTime: 100,
@@ -123,18 +123,11 @@ describe("Stop", () => {
     limiter.schedule({ id: "2" }, h.promise, null, 2);
     limiter.schedule({ id: "3" }, h.slowPromise, 100, null, 3);
 
-    return limiter
-      .stop()
-      .then(() => limiter.stop())
-      .then(() => {
-        throw new Error("Should not be here");
-      })
-      .catch((err) => {
-        expect(err.message).toEqual("stop() has already been called");
-      });
+    await limiter.stop();
+    await expect(limiter.stop()).rejects.toThrow("stop() has already been called");
   });
 
-  test("Should not allow calling stop() twice when dropWaitingJobs=true", ({
+  test("Should not allow calling stop() twice when dropWaitingJobs=true", async ({
     harness: h,
     makeLimiter,
   }) => {
@@ -150,21 +143,16 @@ describe("Stop", () => {
       limiter.schedule({ id: "3" }, h.slowPromise, 100, null, 3),
     ];
 
-    return limiter
-      .stop({ dropWaitingJobs: true })
-      .then(() => limiter.stop({ dropWaitingJobs: true }))
-      .then(() => {
-        throw new Error("Should not be here");
-      })
-      .catch((err) => {
-        expect(err.message).toEqual("stop() has already been called");
-        return Promise.all(
-          dropped.map((p) => expect(p).rejects.toThrow("This limiter has been stopped.")),
-        );
-      });
+    await limiter.stop({ dropWaitingJobs: true });
+    await expect(limiter.stop({ dropWaitingJobs: true })).rejects.toThrow(
+      "stop() has already been called",
+    );
+    await Promise.all(
+      dropped.map((p) => expect(p).rejects.toThrow("This limiter has been stopped.")),
+    );
   });
 
-  test("Should not allow calling stop() twice when dropWaitingJobs=false", ({
+  test("Should not allow calling stop() twice when dropWaitingJobs=false", async ({
     harness: h,
     makeLimiter,
   }) => {
@@ -177,19 +165,14 @@ describe("Stop", () => {
     const p2 = limiter.schedule({ id: "2" }, h.promise, null, 2);
     const p3 = limiter.schedule({ id: "3" }, h.slowPromise, 100, null, 3);
 
-    return limiter
-      .stop({ dropWaitingJobs: false })
-      .then(() => limiter.stop({ dropWaitingJobs: false }))
-      .then(() => {
-        throw new Error("Should not be here");
-      })
-      .catch((err) => {
-        expect(err.message).toEqual("stop() has already been called");
-        return Promise.all([
-          expect(p1).resolves.toEqual([1]),
-          expect(p2).resolves.toEqual([2]),
-          expect(p3).resolves.toEqual([3]),
-        ]);
-      });
+    await limiter.stop({ dropWaitingJobs: false });
+    await expect(limiter.stop({ dropWaitingJobs: false })).rejects.toThrow(
+      "stop() has already been called",
+    );
+    await Promise.all([
+      expect(p1).resolves.toEqual([1]),
+      expect(p2).resolves.toEqual([2]),
+      expect(p3).resolves.toEqual([3]),
+    ]);
   });
 });

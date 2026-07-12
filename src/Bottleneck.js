@@ -422,9 +422,13 @@ class Bottleneck {
       this.Events,
       this._states,
     );
+    // Promise-to-callback bridge for the dual submit()/schedule() API: submit()
+    // is synchronous and pipes the job's eventual outcome into the Node-style
+    // callback. The chain form IS the bridge — an async wrapper would just add
+    // a floating promise around the same pipe.
     job.promise
       .then((args) => (typeof cb === "function" ? cb(...(args || [])) : undefined))
-      .catch(function (args) {
+      .catch((args) => {
         if (Array.isArray(args)) {
           return typeof cb === "function" ? cb(...args) : undefined;
         } else {

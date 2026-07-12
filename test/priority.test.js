@@ -53,10 +53,9 @@ describe("Priority", () => {
     await Promise.all(subs);
     first.release();
 
-    return h.flushLimiter(limiter, { weight: 0 }).then((_results) => {
-      expect(h.log).toHaveCallOrder([[1], [6], [5]]);
-      expect(called).toEqual(true);
-    });
+    await h.flushLimiter(limiter, { weight: 0 });
+    expect(h.log).toHaveCallOrder([[1], [6], [5]]);
+    expect(called).toEqual(true);
   });
 
   test("Should support OVERFLOW", async ({ harness: h, makeLimiter }) => {
@@ -89,13 +88,10 @@ describe("Priority", () => {
     await Promise.all(subs);
     first.release();
 
-    return limiter
-      .updateSettings({ highWater: null })
-      .then(() => h.flushLimiter(limiter))
-      .then((_results) => {
-        expect(h.log).toHaveCallOrder([[1], [2], [3]]);
-        expect(called).toEqual(true);
-      });
+    await limiter.updateSettings({ highWater: null });
+    await h.flushLimiter(limiter);
+    expect(h.log).toHaveCallOrder([[1], [2], [3]]);
+    expect(called).toEqual(true);
   });
 
   test("Should support OVERFLOW_PRIORITY", async ({ harness: h, makeLimiter }) => {
@@ -128,13 +124,10 @@ describe("Priority", () => {
     await Promise.all(subs);
     first.release();
 
-    return limiter
-      .updateSettings({ highWater: null })
-      .then(() => h.flushLimiter(limiter))
-      .then((_results) => {
-        expect(h.log).toHaveCallOrder([[1], [5], [6]]);
-        expect(called).toEqual(true);
-      });
+    await limiter.updateSettings({ highWater: null });
+    await h.flushLimiter(limiter);
+    expect(h.log).toHaveCallOrder([[1], [5], [6]]);
+    expect(called).toEqual(true);
   });
 
   test("Should support BLOCK", ({ harness: h, makeLimiter }) => {
@@ -157,16 +150,20 @@ describe("Priority", () => {
         expect(dropped.promise).toBeTruthy();
         called++;
         if (called === 3) {
-          limiter
-            .updateSettings({ highWater: null })
-            .then(() => limiter.schedule(h.job, null, 8))
-            .catch((err) => {
+          // Fire-and-forget: the outer Promise only resolves via resolve()
+          // in the catch below, exactly as the former .catch chain did.
+          (async () => {
+            try {
+              await limiter.updateSettings({ highWater: null });
+              await limiter.schedule(h.job, null, 8);
+            } catch (err) {
               expect(err).toBeInstanceOf(Bottleneck.BottleneckError);
               expect(err.message).toEqual("This job has been dropped by Bottleneck");
               limiter.removeAllListeners("error");
               first.release();
               resolve();
-            });
+            }
+          })();
         }
       });
 

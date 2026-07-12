@@ -101,7 +101,7 @@ describe("Group", () => {
     expect(ids.sort()).toStrictEqual(["custom-id-A", "custom-id-B", "custom-id-XYZ"]);
   });
 
-  test("Should pass new limiter to 'created' event", ({ makeLimiter, track }) => {
+  test("Should pass new limiter to 'created' event", async ({ makeLimiter, track }) => {
     const limiter = makeLimiter();
     const group = track(
       new Bottleneck.Group({
@@ -113,13 +113,13 @@ describe("Group", () => {
     const keys = [];
     const ids = [];
     const promises = [];
+    const recordId = async (created, key) => {
+      const lim = await created.updateSettings({ id: key });
+      ids.push(lim.id);
+    };
     group.on("created", (created, key) => {
       keys.push(key);
-      promises.push(
-        created.updateSettings({ id: key }).then((lim) => {
-          ids.push(lim.id);
-        }),
-      );
+      promises.push(recordId(created, key));
     });
 
     group.key("A");
@@ -131,10 +131,9 @@ describe("Group", () => {
     group.key("C");
     group.key("A");
 
-    return Promise.all(promises).then(() => {
-      expect(keys).toStrictEqual(ids);
-      return limiter.ready();
-    });
+    await Promise.all(promises);
+    expect(keys).toStrictEqual(ids);
+    await limiter.ready();
   });
 
   test("Should pass error on failure", ({ track }) => {
@@ -159,12 +158,16 @@ describe("Group", () => {
     group.key("A").schedule(job, 1, 2);
     group.key("A").schedule(job, 3);
     group.key("A").schedule(job, 4);
-    group
-      .key("B")
-      .schedule(() => Promise.reject(new Error(failureMessage)))
-      .catch((err) => {
+    // Fire-and-forget: the rejection must be recorded concurrently with the
+    // other scheduled jobs; awaiting it inline would delay the schedules below
+    // and change the ordering under test.
+    (async () => {
+      try {
+        await group.key("B").schedule(() => Promise.reject(new Error(failureMessage)));
+      } catch (err) {
         results.push(["CAUGHT", err.message]);
-      });
+      }
+    })();
     setTimeout(() => {
       group.key("C").schedule(job, 6);
       group.key("C").schedule(job, 7);
@@ -183,7 +186,7 @@ describe("Group", () => {
     });
   });
 
-  test("Should update its timeout", ({ track }) => {
+  test("Should update its timeout", async ({ track }) => {
     const group1 = track(
       new Bottleneck.Group({
         maxConcurrent: 1,
@@ -203,10 +206,9 @@ describe("Group", () => {
 
     const p1 = group1.updateSettings({ timeout: 123 });
     const p2 = group2.updateSettings({ timeout: 456 });
-    return Promise.all([p1, p2]).then(() => {
-      expect(group1.timeout).toStrictEqual(123);
-      expect(group2.timeout).toStrictEqual(456);
-    });
+    await Promise.all([p1, p2]);
+    expect(group1.timeout).toStrictEqual(123);
+    expect(group2.timeout).toStrictEqual(456);
   });
 
   test("Should update its limiter options", ({ track }) => {
@@ -251,20 +253,16 @@ describe("Group", () => {
       expect(entry.limiter).toBeInstanceOf(Bottleneck);
     });
 
-    return group1
-      .deleteKey(KEY_A)
-      .then((deleted) => {
-        expect(deleted).toStrictEqual(true);
-        expect(group1.keys().length).toStrictEqual(1);
-        return group1.deleteKey(KEY_A);
-      })
-      .then((deleted) => {
-        expect(deleted).toStrictEqual(false);
-        expect(group1.keys().length).toStrictEqual(1);
-      });
+    const deleted = await group1.deleteKey(KEY_A);
+    expect(deleted).toStrictEqual(true);
+    expect(group1.keys().length).toStrictEqual(1);
+
+    const deletedAgain = await group1.deleteKey(KEY_A);
+    expect(deletedAgain).toStrictEqual(false);
+    expect(group1.keys().length).toStrictEqual(1);
   });
 
-  test("Should call autocleanup", ({ makeLimiter, track }) => {
+  test("Should call autocleanup", async ({ makeLimiter, track }) => {
     const KEY = "test-key";
     const group = track(
       new Bottleneck.Group({
@@ -275,17 +273,11 @@ describe("Group", () => {
     const limiter = makeLimiter({ id: "something", timeout: group.timeout });
 
     group.instances[KEY] = limiter;
-    return group
-      .key(KEY)
-      .schedule(() => Promise.resolve())
-      .then(() => {
-        expect(group.instances[KEY]).toBeDefined();
-        return waitForState(() => {
-          expect(group.instances[KEY]).toBeUndefined();
-        });
-      })
-      .then(() => {
-        expect(group.instances[KEY]).toBeUndefined();
-      });
+    await group.key(KEY).schedule(() => Promise.resolve());
+    expect(group.instances[KEY]).toBeDefined();
+    await waitForState(() => {
+      expect(group.instances[KEY]).toBeUndefined();
+    });
+    expect(group.instances[KEY]).toBeUndefined();
   });
 });

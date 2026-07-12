@@ -55,7 +55,7 @@ describe("ioredis-only", () => {
     expect(limiter._store.connection.client.nodes().length).toBeGreaterThanOrEqual(0);
   });
 
-  test("Should accept existing connections", ({ harness: h, makeLimiter, track }) => {
+  test("Should accept existing connections", async ({ harness: h, makeLimiter, track }) => {
     const connection = track(
       new Bottleneck.IORedisConnection({
         Redis,
@@ -71,23 +71,18 @@ describe("ioredis-only", () => {
     const p1 = limiter.schedule(h.promise, null, 1);
     const p2 = limiter.schedule(h.promise, null, 2);
 
-    return h
-      .flushLimiter(limiter)
-      .then((_results) => {
-        expect(h.log).toHaveCallOrder([[1], [2]]);
-        expect(h).toHaveFinalCallAt(50);
-        expect(limiter.connection.id).toStrictEqual("super-connection");
-        expect(limiter.datastore).toStrictEqual("ioredis");
+    await h.flushLimiter(limiter);
+    expect(h.log).toHaveCallOrder([[1], [2]]);
+    expect(h).toHaveFinalCallAt(50);
+    expect(limiter.connection.id).toStrictEqual("super-connection");
+    expect(limiter.datastore).toStrictEqual("ioredis");
 
-        return limiter.disconnect();
-      })
-      .then(() => {
-        expect(limiter.clients().client.status).toStrictEqual("ready");
-        return Promise.all([expect(p1).resolves.toEqual([1]), expect(p2).resolves.toEqual([2])]);
-      });
+    await limiter.disconnect();
+    expect(limiter.clients().client.status).toStrictEqual("ready");
+    await Promise.all([expect(p1).resolves.toEqual([1]), expect(p2).resolves.toEqual([2])]);
   });
 
-  test("Should accept existing redis clients", ({ harness: h, makeLimiter, track }) => {
+  test("Should accept existing redis clients", async ({ harness: h, makeLimiter, track }) => {
     const client = new Redis(buildClientOptions("ioredis"));
     client.id = "super-client";
 
@@ -101,21 +96,16 @@ describe("ioredis-only", () => {
     const p1 = limiter.schedule(h.promise, null, 1);
     const p2 = limiter.schedule(h.promise, null, 2);
 
-    return h
-      .flushLimiter(limiter)
-      .then((_results) => {
-        expect(h.log).toHaveCallOrder([[1], [2]]);
-        expect(h).toHaveFinalCallAt(50);
-        expect(limiter.clients().client.id).toStrictEqual("super-client");
-        expect(limiter.connection.id).toStrictEqual("super-connection");
-        expect(limiter.datastore).toStrictEqual("ioredis");
+    await h.flushLimiter(limiter);
+    expect(h.log).toHaveCallOrder([[1], [2]]);
+    expect(h).toHaveFinalCallAt(50);
+    expect(limiter.clients().client.id).toStrictEqual("super-client");
+    expect(limiter.connection.id).toStrictEqual("super-connection");
+    expect(limiter.datastore).toStrictEqual("ioredis");
 
-        return limiter.disconnect();
-      })
-      .then(() => {
-        expect(limiter.clients().client.status).toStrictEqual("ready");
-        return Promise.all([expect(p1).resolves.toEqual([1]), expect(p2).resolves.toEqual([2])]);
-      });
+    await limiter.disconnect();
+    expect(limiter.clients().client.status).toStrictEqual("ready");
+    await Promise.all([expect(p1).resolves.toEqual([1]), expect(p2).resolves.toEqual([2])]);
   });
 
   test("Should trigger error events on the shared connection", ({ makeLimiter, track }) => {

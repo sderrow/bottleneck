@@ -33,12 +33,11 @@ export function createTaskFns(log) {
     }, duration);
   }
 
-  function deferredJob(signal, err, ...result) {
+  async function deferredJob(signal, err, ...result) {
     const cb = result.pop();
-    signal.then(() => {
-      log.record(err, result);
-      cb.apply(null, [err].concat(result));
-    });
+    await signal;
+    log.record(err, result);
+    cb.apply(null, [err].concat(result));
   }
 
   function promise(err, ...result) {
@@ -63,16 +62,13 @@ export function createTaskFns(log) {
     });
   }
 
-  function deferredPromise(signal, err, ...result) {
-    return new Promise((resolve, reject) => {
-      signal.then(() => {
-        log.record(err, result);
-        if (err === null) {
-          return resolve(result);
-        }
-        return reject(err);
-      });
-    });
+  async function deferredPromise(signal, err, ...result) {
+    await signal;
+    log.record(err, result);
+    if (err === null) {
+      return result;
+    }
+    throw err;
   }
 
   return {

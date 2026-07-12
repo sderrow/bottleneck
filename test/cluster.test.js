@@ -27,26 +27,23 @@ describe("Cluster-only", () => {
     return ready;
   });
 
-  test("Should return clients", ({ makeLimiter }) => {
+  test("Should return clients", async ({ makeLimiter }) => {
     const rootLimiter = makeLimiter({ maxConcurrent: 2 });
 
-    return rootLimiter.ready().then((clients) => {
-      expect(Object.keys(clients)).toEqual(["client", "subscriber"]);
-      expect(Object.keys(rootLimiter.clients())).toEqual(["client", "subscriber"]);
-    });
+    const clients = await rootLimiter.ready();
+    expect(Object.keys(clients)).toEqual(["client", "subscriber"]);
+    expect(Object.keys(rootLimiter.clients())).toEqual(["client", "subscriber"]);
   });
 
-  test("Should return a promise when disconnecting", ({ makeLimiter }) => {
+  test("Should return a promise when disconnecting", async ({ makeLimiter }) => {
     const rootLimiter = makeLimiter({ maxConcurrent: 2 });
 
     const disconnected = rootLimiter.disconnect();
     expect(disconnected).toBeInstanceOf(Promise);
-    return disconnected.then(() => {
-      // do nothing
-    });
+    await disconnected;
   });
 
-  test("Should allow passing a limiter's connection to a new limiter", ({
+  test("Should allow passing a limiter's connection to a new limiter", async ({
     harness: h,
     makeLimiter,
     track,
@@ -60,23 +57,19 @@ describe("Cluster-only", () => {
       }),
     );
 
-    return Promise.all([rootLimiter.ready(), limiter.ready()])
-      .then(() => {
-        expect(limiter.connection.id).toEqual("some-id");
-        expect(limiter.datastore).toEqual(process.env.DATASTORE);
+    await Promise.all([rootLimiter.ready(), limiter.ready()]);
+    expect(limiter.connection.id).toEqual("some-id");
+    expect(limiter.datastore).toEqual(process.env.DATASTORE);
 
-        return Promise.all([
-          expect(rootLimiter.schedule(h.promise, null, 1)).resolves.toEqual([1]),
-          expect(limiter.schedule(h.promise, null, 2)).resolves.toEqual([2]),
-        ]);
-      })
-      .then(() => h.flushLimiter(rootLimiter))
-      .then((_results) => {
-        expect(h.log).toHaveCallOrder([[1], [2]]);
-      });
+    await Promise.all([
+      expect(rootLimiter.schedule(h.promise, null, 1)).resolves.toEqual([1]),
+      expect(limiter.schedule(h.promise, null, 2)).resolves.toEqual([2]),
+    ]);
+    await h.flushLimiter(rootLimiter);
+    expect(h.log).toHaveCallOrder([[1], [2]]);
   });
 
-  test("Should allow passing a limiter's connection to a new Group", ({
+  test("Should allow passing a limiter's connection to a new Group", async ({
     harness: h,
     makeLimiter,
     track,
@@ -92,26 +85,22 @@ describe("Cluster-only", () => {
     const limiter1 = group.key("A");
     const limiter2 = group.key("B");
 
-    return Promise.all([rootLimiter.ready(), limiter1.ready(), limiter2.ready()])
-      .then(() => {
-        expect(limiter1.connection.id).toEqual("some-id");
-        expect(limiter2.connection.id).toEqual("some-id");
-        expect(limiter1.datastore).toEqual(process.env.DATASTORE);
-        expect(limiter2.datastore).toEqual(process.env.DATASTORE);
+    await Promise.all([rootLimiter.ready(), limiter1.ready(), limiter2.ready()]);
+    expect(limiter1.connection.id).toEqual("some-id");
+    expect(limiter2.connection.id).toEqual("some-id");
+    expect(limiter1.datastore).toEqual(process.env.DATASTORE);
+    expect(limiter2.datastore).toEqual(process.env.DATASTORE);
 
-        return Promise.all([
-          expect(rootLimiter.schedule(h.promise, null, 1)).resolves.toEqual([1]),
-          expect(limiter1.schedule(h.promise, null, 2)).resolves.toEqual([2]),
-          expect(limiter2.schedule(h.promise, null, 3)).resolves.toEqual([3]),
-        ]);
-      })
-      .then(() => h.flushLimiter(rootLimiter))
-      .then((_results) => {
-        expect(h.log).toHaveCallOrder([[1], [2], [3]]);
-      });
+    await Promise.all([
+      expect(rootLimiter.schedule(h.promise, null, 1)).resolves.toEqual([1]),
+      expect(limiter1.schedule(h.promise, null, 2)).resolves.toEqual([2]),
+      expect(limiter2.schedule(h.promise, null, 3)).resolves.toEqual([3]),
+    ]);
+    await h.flushLimiter(rootLimiter);
+    expect(h.log).toHaveCallOrder([[1], [2], [3]]);
   });
 
-  test("Should allow passing a Group's connection to a new limiter", ({
+  test("Should allow passing a Group's connection to a new limiter", async ({
     harness: h,
     makeLimiter,
     track,
@@ -134,25 +123,21 @@ describe("Cluster-only", () => {
       }),
     );
 
-    return Promise.all([limiter1.ready(), limiter2.ready()])
-      .then(() => {
-        expect(limiter1.connection.id).toEqual("some-id");
-        expect(limiter2.connection.id).toEqual("some-id");
-        expect(limiter1.datastore).toEqual(process.env.DATASTORE);
-        expect(limiter2.datastore).toEqual(process.env.DATASTORE);
+    await Promise.all([limiter1.ready(), limiter2.ready()]);
+    expect(limiter1.connection.id).toEqual("some-id");
+    expect(limiter2.connection.id).toEqual("some-id");
+    expect(limiter1.datastore).toEqual(process.env.DATASTORE);
+    expect(limiter2.datastore).toEqual(process.env.DATASTORE);
 
-        return Promise.all([
-          expect(limiter1.schedule(h.promise, null, 1)).resolves.toEqual([1]),
-          expect(limiter2.schedule(h.promise, null, 2)).resolves.toEqual([2]),
-        ]);
-      })
-      .then(() => h.flushLimiter(rootLimiter))
-      .then((_results) => {
-        expect(h.log).toHaveCallOrder([[1], [2]]);
-      });
+    await Promise.all([
+      expect(limiter1.schedule(h.promise, null, 1)).resolves.toEqual([1]),
+      expect(limiter2.schedule(h.promise, null, 2)).resolves.toEqual([2]),
+    ]);
+    await h.flushLimiter(rootLimiter);
+    expect(h.log).toHaveCallOrder([[1], [2]]);
   });
 
-  test("Should allow passing a Group's connection to a new Group", ({
+  test("Should allow passing a Group's connection to a new Group", async ({
     harness: h,
     makeLimiter,
     track,
@@ -180,59 +165,45 @@ describe("Cluster-only", () => {
     const limiter3 = group1.key("CCC");
     const limiter4 = group1.key("DDD");
 
-    return Promise.all([limiter1.ready(), limiter2.ready(), limiter3.ready(), limiter4.ready()])
-      .then(() => {
-        expect(group1.connection.id).toEqual("some-id");
-        expect(group2.connection.id).toEqual("some-id");
-        expect(limiter1.connection.id).toEqual("some-id");
-        expect(limiter2.connection.id).toEqual("some-id");
-        expect(limiter3.connection.id).toEqual("some-id");
-        expect(limiter4.connection.id).toEqual("some-id");
-        expect(limiter1.datastore).toEqual(process.env.DATASTORE);
-        expect(limiter2.datastore).toEqual(process.env.DATASTORE);
-        expect(limiter3.datastore).toEqual(process.env.DATASTORE);
-        expect(limiter4.datastore).toEqual(process.env.DATASTORE);
+    await Promise.all([limiter1.ready(), limiter2.ready(), limiter3.ready(), limiter4.ready()]);
+    expect(group1.connection.id).toEqual("some-id");
+    expect(group2.connection.id).toEqual("some-id");
+    expect(limiter1.connection.id).toEqual("some-id");
+    expect(limiter2.connection.id).toEqual("some-id");
+    expect(limiter3.connection.id).toEqual("some-id");
+    expect(limiter4.connection.id).toEqual("some-id");
+    expect(limiter1.datastore).toEqual(process.env.DATASTORE);
+    expect(limiter2.datastore).toEqual(process.env.DATASTORE);
+    expect(limiter3.datastore).toEqual(process.env.DATASTORE);
+    expect(limiter4.datastore).toEqual(process.env.DATASTORE);
 
-        return Promise.all([
-          expect(limiter1.schedule(h.promise, null, 1)).resolves.toEqual([1]),
-          expect(limiter2.schedule(h.promise, null, 2)).resolves.toEqual([2]),
-          expect(limiter3.schedule(h.promise, null, 3)).resolves.toEqual([3]),
-          expect(limiter4.schedule(h.promise, null, 4)).resolves.toEqual([4]),
-        ]);
-      })
-      .then(() => h.flushLimiter(rootLimiter))
-      .then((_results) => {
-        expect(h.log).toHaveCallOrder([[1], [2], [3], [4]]);
-      });
+    await Promise.all([
+      expect(limiter1.schedule(h.promise, null, 1)).resolves.toEqual([1]),
+      expect(limiter2.schedule(h.promise, null, 2)).resolves.toEqual([2]),
+      expect(limiter3.schedule(h.promise, null, 3)).resolves.toEqual([3]),
+      expect(limiter4.schedule(h.promise, null, 4)).resolves.toEqual([4]),
+    ]);
+    await h.flushLimiter(rootLimiter);
+    expect(h.log).toHaveCallOrder([[1], [2], [3], [4]]);
   });
 
-  test("Should not have a key TTL by default for standalone limiters", ({ makeLimiter }) => {
+  test("Should not have a key TTL by default for standalone limiters", async ({ makeLimiter }) => {
     const rootLimiter = makeLimiter();
 
-    return rootLimiter
-      .ready()
-      .then(() => {
-        const settings_key = limiterKeys(rootLimiter)[0];
-        return runCommand(rootLimiter, "ttl", [settings_key]);
-      })
-      .then((ttl) => {
-        expect(ttl).toBeLessThan(0);
-      });
+    await rootLimiter.ready();
+    const settings_key = limiterKeys(rootLimiter)[0];
+    const ttl = await runCommand(rootLimiter, "ttl", [settings_key]);
+    expect(ttl).toBeLessThan(0);
   });
 
-  test("Should allow timeout setting for standalone limiters", ({ makeLimiter }) => {
+  test("Should allow timeout setting for standalone limiters", async ({ makeLimiter }) => {
     const rootLimiter = makeLimiter({ timeout: 5 * 60 * 1000 });
 
-    return rootLimiter
-      .ready()
-      .then(() => {
-        const settings_key = limiterKeys(rootLimiter)[0];
-        return runCommand(rootLimiter, "ttl", [settings_key]);
-      })
-      .then((ttl) => {
-        expect(ttl).toBeGreaterThanOrEqual(290);
-        expect(ttl).toBeLessThanOrEqual(305);
-      });
+    await rootLimiter.ready();
+    const settings_key = limiterKeys(rootLimiter)[0];
+    const ttl = await runCommand(rootLimiter, "ttl", [settings_key]);
+    expect(ttl).toBeGreaterThanOrEqual(290);
+    expect(ttl).toBeLessThanOrEqual(305);
   });
 
   test("Should set TTL on all keys including client_* keys after register_client", async ({
@@ -323,72 +294,62 @@ describe("Cluster-only", () => {
     expect(reservoir).toBeLessThanOrEqual(64);
   });
 
-  test("Should migrate from 2.8.0", ({ makeLimiter, track }) => {
+  test("Should migrate from 2.8.0", async ({ makeLimiter, track }) => {
     // Bound the expected timestamps to the test window — not a wall-clock-from-now
     // window that depends on test runtime under load. lastReservoirIncrease is
     // preserved from rootLimiter's init (hsetnx), so the bound must precede that too.
     const testStart = Date.now();
     const rootLimiter = makeLimiter({ id: "migrate" });
     const settings_key = limiterKeys(rootLimiter)[0];
-    let limiter2;
 
-    return rootLimiter
-      .ready()
-      .then(() =>
-        Promise.all([
-          runCommand(rootLimiter, "hset", [settings_key, "version", "2.8.0"]),
-          runCommand(rootLimiter, "hdel", [
-            settings_key,
-            "done",
-            "capacityPriorityCounter",
-            "clientTimeout",
-          ]),
-          runCommand(rootLimiter, "hset", [settings_key, "lastReservoirRefresh", ""]),
-        ]),
-      )
-      .then(() => {
-        limiter2 = track(
-          new Bottleneck({
-            id: "migrate",
-            datastore: process.env.DATASTORE,
-          }),
-        );
-        return limiter2.ready();
-      })
-      .then(() =>
-        runCommand(rootLimiter, "hmget", [
-          settings_key,
-          "version",
-          "done",
-          "reservoirRefreshInterval",
-          "reservoirRefreshAmount",
-          "capacityPriorityCounter",
-          "clientTimeout",
-          "reservoirIncreaseAmount",
-          "reservoirIncreaseMaximum",
-          // Add new values here, before these 2 timestamps
-          "lastReservoirRefresh",
-          "lastReservoirIncrease",
-        ]),
-      )
-      .then((values) => {
-        const timestamps = values.slice(-2);
-        timestamps.forEach((t) => {
-          const num = parseInt(t);
-          expect(num).toBeGreaterThanOrEqual(testStart); // timestamp written during this test
-          expect(num).toBeLessThanOrEqual(Date.now()); // not somehow in the future
-        });
-        expect(values.slice(0, -timestamps.length)).toEqual([
-          "2.18.0",
-          "0",
-          "",
-          "",
-          "0",
-          "10000",
-          "",
-          "",
-        ]);
-      });
+    await rootLimiter.ready();
+    await Promise.all([
+      runCommand(rootLimiter, "hset", [settings_key, "version", "2.8.0"]),
+      runCommand(rootLimiter, "hdel", [
+        settings_key,
+        "done",
+        "capacityPriorityCounter",
+        "clientTimeout",
+      ]),
+      runCommand(rootLimiter, "hset", [settings_key, "lastReservoirRefresh", ""]),
+    ]);
+    const limiter2 = track(
+      new Bottleneck({
+        id: "migrate",
+        datastore: process.env.DATASTORE,
+      }),
+    );
+    await limiter2.ready();
+    const values = await runCommand(rootLimiter, "hmget", [
+      settings_key,
+      "version",
+      "done",
+      "reservoirRefreshInterval",
+      "reservoirRefreshAmount",
+      "capacityPriorityCounter",
+      "clientTimeout",
+      "reservoirIncreaseAmount",
+      "reservoirIncreaseMaximum",
+      // Add new values here, before these 2 timestamps
+      "lastReservoirRefresh",
+      "lastReservoirIncrease",
+    ]);
+    const timestamps = values.slice(-2);
+    timestamps.forEach((t) => {
+      const num = parseInt(t);
+      expect(num).toBeGreaterThanOrEqual(testStart); // timestamp written during this test
+      expect(num).toBeLessThanOrEqual(Date.now()); // not somehow in the future
+    });
+    expect(values.slice(0, -timestamps.length)).toEqual([
+      "2.18.0",
+      "0",
+      "",
+      "",
+      "0",
+      "10000",
+      "",
+      "",
+    ]);
   });
 
   test("Should keep track of each client's queue length", async ({
@@ -451,55 +412,42 @@ describe("Cluster-only", () => {
     expect(await rootLimiter.clusterQueued()).toEqual(0);
   });
 
-  test("Should publish capacity increases", ({ harness: h, makeLimiter, track }) => {
+  test("Should publish capacity increases", async ({ harness: h, makeLimiter, track }) => {
     const rootLimiter = makeLimiter({ maxConcurrent: 2 });
-    let limiter2;
-    let p3;
 
-    return rootLimiter
-      .ready()
-      .then(() => {
-        limiter2 = track(new Bottleneck({ datastore: process.env.DATASTORE }));
-        return limiter2.ready();
-      })
-      .then(() => {
-        // Use deferredPromise instead of slowPromise(100) for jobs 1 and 2.
-        // With slowPromise, the 100ms setTimeout starts at *dispatch* time.
-        // Under load, queueing job 0 (and waiting for its dispatch+resolve)
-        // can take >100ms — by which point job 1's setTimeout has already
-        // fired and pushed [1] before job 0 could push [0]. The expected
-        // [[0],[1],[2],[3]] order then flips to [[1],...]. With
-        // deferredPromise we hold jobs 1/2 explicitly until job 0 has run,
-        // then release them (after a fixed wait that preserves the
-        // original ~200ms total duration so capacity-published-to-limiter2
-        // semantics are still exercised end-to-end).
-        const jobs = deferred();
-        rootLimiter.schedule({ id: 1 }, h.deferredPromise, jobs.signal, null, 1);
-        rootLimiter.schedule({ id: 2 }, h.deferredPromise, jobs.signal, null, 2);
+    await rootLimiter.ready();
+    const limiter2 = track(new Bottleneck({ datastore: process.env.DATASTORE }));
+    await limiter2.ready();
 
-        return rootLimiter
-          .schedule({ id: 0, weight: 0 }, h.promise, null, 0)
-          .then(() => rootLimiter._submitLock.schedule(() => Promise.resolve()))
-          .then(() => {
-            expect(rootLimiter.counts().EXECUTING).toEqual(2);
-            p3 = limiter2.schedule({ id: 3 }, h.promise, null, 3);
-            // Drain limiter2's lock — job 3 was submitted on limiter2, so only
-            // its own _submitLock guarantees the registration reached redis.
-            return limiter2._submitLock.schedule(() => Promise.resolve());
-          })
-          .then(() => {
-            expect(limiter2.counts().EXECUTING).toEqual(0);
-            jobs.release();
-          });
-      })
-      .then(() => p3)
-      .then(() => h.flushLimiter(rootLimiter))
-      .then((_results) => {
-        expect(h.log).toHaveCallOrder([[0], [1], [2], [3]]);
-      });
+    // Use deferredPromise instead of slowPromise(100) for jobs 1 and 2.
+    // With slowPromise, the 100ms setTimeout starts at *dispatch* time.
+    // Under load, queueing job 0 (and waiting for its dispatch+resolve)
+    // can take >100ms — by which point job 1's setTimeout has already
+    // fired and pushed [1] before job 0 could push [0]. The expected
+    // [[0],[1],[2],[3]] order then flips to [[1],...]. With
+    // deferredPromise we hold jobs 1/2 explicitly until job 0 has run,
+    // then release them (after a fixed wait that preserves the
+    // original ~200ms total duration so capacity-published-to-limiter2
+    // semantics are still exercised end-to-end).
+    const jobs = deferred();
+    rootLimiter.schedule({ id: 1 }, h.deferredPromise, jobs.signal, null, 1);
+    rootLimiter.schedule({ id: 2 }, h.deferredPromise, jobs.signal, null, 2);
+
+    await rootLimiter.schedule({ id: 0, weight: 0 }, h.promise, null, 0);
+    await rootLimiter._submitLock.schedule(() => Promise.resolve());
+    expect(rootLimiter.counts().EXECUTING).toEqual(2);
+    const p3 = limiter2.schedule({ id: 3 }, h.promise, null, 3);
+    // Drain limiter2's lock — job 3 was submitted on limiter2, so only
+    // its own _submitLock guarantees the registration reached redis.
+    await limiter2._submitLock.schedule(() => Promise.resolve());
+    expect(limiter2.counts().EXECUTING).toEqual(0);
+    jobs.release();
+    await p3;
+    await h.flushLimiter(rootLimiter);
+    expect(h.log).toHaveCallOrder([[0], [1], [2], [3]]);
   });
 
-  test("Should publish capacity changes on reservoir changes", ({
+  test("Should publish capacity changes on reservoir changes", async ({
     harness: h,
     makeLimiter,
     track,
@@ -508,53 +456,36 @@ describe("Cluster-only", () => {
       maxConcurrent: 2,
       reservoir: 2,
     });
-    let limiter2;
-    let p3;
 
-    return rootLimiter
-      .ready()
-      .then(() => {
-        limiter2 = track(
-          new Bottleneck({
-            datastore: process.env.DATASTORE,
-          }),
-        );
-        return limiter2.ready();
-      })
-      .then(() => {
-        const held = deferred();
-        rootLimiter.schedule({ id: 1 }, h.deferredPromise, held.signal, null, 1);
-        rootLimiter.schedule({ id: 2 }, h.deferredPromise, held.signal, null, 2);
+    await rootLimiter.ready();
+    const limiter2 = track(
+      new Bottleneck({
+        datastore: process.env.DATASTORE,
+      }),
+    );
+    await limiter2.ready();
 
-        return rootLimiter
-          .schedule({ id: 0, weight: 0 }, h.promise, null, 0)
-          .then(() => rootLimiter.currentReservoir())
-          .then((reservoir) => {
-            expect(reservoir).toEqual(0);
-            p3 = limiter2.schedule({ id: 3, weight: 2 }, h.promise, null, 3);
-            return rootLimiter.updateSettings({ reservoir: 1 });
-          })
-          .then(() => rootLimiter.incrementReservoir(1))
-          .then((reservoir) => {
-            expect(reservoir).toEqual(2);
-            held.release();
-            return p3;
-          });
-      })
-      .then((result) => {
-        expect(result).toEqual([3]);
-        return rootLimiter.currentReservoir();
-      })
-      .then((reservoir) => {
-        expect(reservoir).toEqual(0);
-        return h.flushLimiter(rootLimiter, { weight: 0 });
-      })
-      .then((_results) => {
-        expect(h.log).toHaveCallOrder([[0], [1], [2], [3]]);
-      });
+    const held = deferred();
+    rootLimiter.schedule({ id: 1 }, h.deferredPromise, held.signal, null, 1);
+    rootLimiter.schedule({ id: 2 }, h.deferredPromise, held.signal, null, 2);
+
+    await rootLimiter.schedule({ id: 0, weight: 0 }, h.promise, null, 0);
+    const drainedReservoir = await rootLimiter.currentReservoir();
+    expect(drainedReservoir).toEqual(0);
+    const p3 = limiter2.schedule({ id: 3, weight: 2 }, h.promise, null, 3);
+    await rootLimiter.updateSettings({ reservoir: 1 });
+    const incrementedReservoir = await rootLimiter.incrementReservoir(1);
+    expect(incrementedReservoir).toEqual(2);
+    held.release();
+    const result = await p3;
+    expect(result).toEqual([3]);
+    const finalReservoir = await rootLimiter.currentReservoir();
+    expect(finalReservoir).toEqual(0);
+    await h.flushLimiter(rootLimiter, { weight: 0 });
+    expect(h.log).toHaveCallOrder([[0], [1], [2], [3]]);
   });
 
-  test("Should remove track job data and remove lost jobs", ({
+  test("Should remove track job data and remove lost jobs", async ({
     harness: h,
     makeLimiter,
     track,
@@ -597,7 +528,6 @@ describe("Cluster-only", () => {
       ]);
     };
     const job1 = deferred();
-    let p1;
     let numExpirations = 0;
     const errorHandler = (err) => {
       if (err.message.indexOf("This job timed out") === 0) {
@@ -605,83 +535,73 @@ describe("Cluster-only", () => {
       }
     };
 
-    return (
-      Promise.all([rootLimiter.ready(), limiter1.ready(), limiter2.ready()])
-        .then(() => {
-          const never = new Promise(() => {});
-          // No expiration, it should not be removed. Held until after the
-          // disconnect below, then released so we keep the completion-with-value
-          // coverage: the task resolves locally (free.lua fails post-disconnect
-          // and is swallowed), so redis still shows it as running.
-          p1 = rootLimiter.schedule({ weight: 1 }, h.deferredPromise, job1.signal, null, 1);
-          // Expiration present, these jobs should be removed automatically
-          rootLimiter
-            .schedule({ expiration: 50, weight: 2 }, h.deferredPromise, never, null, 2)
-            .catch(errorHandler);
-          rootLimiter
-            .schedule({ expiration: 50, weight: 3 }, h.deferredPromise, never, null, 3)
-            .catch(errorHandler);
-          rootLimiter
-            .schedule({ expiration: 50, weight: 4 }, h.deferredPromise, never, null, 4)
-            .catch(errorHandler);
-          rootLimiter
-            .schedule({ expiration: 50, weight: 5 }, h.deferredPromise, never, null, 5)
-            .catch(errorHandler);
+    await Promise.all([rootLimiter.ready(), limiter1.ready(), limiter2.ready()]);
+    const never = new Promise(() => {});
+    // No expiration, it should not be removed. Held until after the
+    // disconnect below, then released so we keep the completion-with-value
+    // coverage: the task resolves locally (free.lua fails post-disconnect
+    // and is swallowed), so redis still shows it as running.
+    const p1 = rootLimiter.schedule({ weight: 1 }, h.deferredPromise, job1.signal, null, 1);
+    // Expiration present, these jobs should be removed automatically. The
+    // errorHandler must attach at schedule time — the expirations fire
+    // concurrently later in the test, so these are not awaited here.
+    rootLimiter
+      .schedule({ expiration: 50, weight: 2 }, h.deferredPromise, never, null, 2)
+      .catch(errorHandler);
+    rootLimiter
+      .schedule({ expiration: 50, weight: 3 }, h.deferredPromise, never, null, 3)
+      .catch(errorHandler);
+    rootLimiter
+      .schedule({ expiration: 50, weight: 4 }, h.deferredPromise, never, null, 4)
+      .catch(errorHandler);
+    rootLimiter
+      .schedule({ expiration: 50, weight: 5 }, h.deferredPromise, never, null, 5)
+      .catch(errorHandler);
 
-          return rootLimiter._submitLock.schedule(() => Promise.resolve(true));
-        })
-        .then(() => rootLimiter._drainAll())
-        .then(() => rootLimiter.disconnect(false))
-        .then(() => {
-          job1.release();
-          return expect(p1).resolves.toEqual([1]);
-        })
-        // Poll for the post-cleanup state instead of asserting an intermediate
-        // snapshot in the narrow window between dispatch and the 50ms expiration
-        // timers firing — under event-loop stress that window can effectively
-        // vanish, with expirations firing before the snapshot read completes.
-        .then(() =>
-          waitForState(async () => {
-            const [s, je] = await Promise.all([
-              runCommand(limiter1, "hmget", [limiterKeys(rootLimiter)[0], "running", "done"]),
-              runCommand(limiter1, "zcard", [limiterKeys(rootLimiter)[2]]),
-            ]);
-            expect(s[0]).toBe("1");
-            expect(s[1]).toBe("14");
-            expect(je).toBe(0);
-            expect(numExpirations).toBe(4);
-          }),
-        )
-        .then(() => getData(rootLimiter))
-        .then(
-          ([
-            settings,
-            job_weights,
-            job_expirations,
-            job_clients,
-            client_running,
-            client_num_queued,
-            client_last_registered,
-            client_last_seen,
-          ]) => {
-            expect(settings).toEqual(["1", "14"]);
-            expect(sumWeights(job_weights)).toEqual(1);
-            expect(job_expirations).toEqual(0);
-            expect(job_clients.length).toEqual(1);
-            job_clients.forEach((id) => expect(id).toEqual(clientId));
-            expect(sumWeights(client_running)).toEqual(1);
-            expect(client_num_queued).toEqual(["0", "0"]);
-            expect(client_last_registered[1]).toEqual("0");
-            expect(parseFloat(client_last_seen[1])).toBeGreaterThanOrEqual(testStart);
-            expect(parseFloat(client_last_seen[1])).toBeLessThanOrEqual(Date.now());
-            // Limiter2's registration timestamp falls within the test window.
-            expect(parseFloat(client_last_registered[3])).toBeGreaterThanOrEqual(testStart);
-            expect(parseFloat(client_last_registered[3])).toBeLessThanOrEqual(Date.now());
+    await rootLimiter._submitLock.schedule(() => Promise.resolve(true));
+    await rootLimiter._drainAll();
+    await rootLimiter.disconnect(false);
+    job1.release();
+    await expect(p1).resolves.toEqual([1]);
+    // Poll for the post-cleanup state instead of asserting an intermediate
+    // snapshot in the narrow window between dispatch and the 50ms expiration
+    // timers firing — under event-loop stress that window can effectively
+    // vanish, with expirations firing before the snapshot read completes.
+    await waitForState(async () => {
+      const [s, je] = await Promise.all([
+        runCommand(limiter1, "hmget", [limiterKeys(rootLimiter)[0], "running", "done"]),
+        runCommand(limiter1, "zcard", [limiterKeys(rootLimiter)[2]]),
+      ]);
+      expect(s[0]).toBe("1");
+      expect(s[1]).toBe("14");
+      expect(je).toBe(0);
+      expect(numExpirations).toBe(4);
+    });
+    const [
+      settings,
+      job_weights,
+      job_expirations,
+      job_clients,
+      client_running,
+      client_num_queued,
+      client_last_registered,
+      client_last_seen,
+    ] = await getData(rootLimiter);
+    expect(settings).toEqual(["1", "14"]);
+    expect(sumWeights(job_weights)).toEqual(1);
+    expect(job_expirations).toEqual(0);
+    expect(job_clients.length).toEqual(1);
+    job_clients.forEach((id) => expect(id).toEqual(clientId));
+    expect(sumWeights(client_running)).toEqual(1);
+    expect(client_num_queued).toEqual(["0", "0"]);
+    expect(client_last_registered[1]).toEqual("0");
+    expect(parseFloat(client_last_seen[1])).toBeGreaterThanOrEqual(testStart);
+    expect(parseFloat(client_last_seen[1])).toBeLessThanOrEqual(Date.now());
+    // Limiter2's registration timestamp falls within the test window.
+    expect(parseFloat(client_last_registered[3])).toBeGreaterThanOrEqual(testStart);
+    expect(parseFloat(client_last_registered[3])).toBeLessThanOrEqual(Date.now());
 
-            expect(numExpirations).toEqual(4);
-          },
-        )
-    );
+    expect(numExpirations).toEqual(4);
   });
 
   test("Should clear unresponsive clients", async ({ makeLimiter, track }) => {
@@ -876,77 +796,58 @@ describe("Cluster-only", () => {
     expect(await numClients()).toEqual([1, 1, 1, 1]);
   });
 
-  test("Should use shared settings", ({ harness: h, makeLimiter, track }) => {
+  test("Should use shared settings", async ({ harness: h, makeLimiter, track }) => {
     const rootLimiter = makeLimiter({ maxConcurrent: 2 });
-    let limiter2;
     const settings_key = limiterKeys(rootLimiter)[0];
 
     // rootLimiter must finish init.lua first so it owns the initial settings;
     // limiter2 then attaches without `clearDatastore`, so its constructor
     // values must be ignored in favor of the shared settings. Constructing
-    // both up-front and using Promise.all races init.lua executions and
+    // both up-front and awaiting them together races init.lua executions and
     // produces flaky reads.
-    return rootLimiter
-      .ready()
-      .then(() => {
-        limiter2 = track(new Bottleneck({ maxConcurrent: 1, datastore: process.env.DATASTORE }));
-        return limiter2.ready();
-      })
-      .then(() => runCommand(rootLimiter, "hget", [settings_key, "maxConcurrent"]))
-      .then((maxConcurrent) => {
-        expect(maxConcurrent).toEqual("2");
-        return Promise.all([
-          limiter2.schedule(h.promise, null, 1),
-          limiter2.schedule(h.promise, null, 2),
-        ]);
-      })
-      .then(() => limiter2.disconnect(false))
-      .then(() => h.flushLimiter(rootLimiter))
-      .then((_results) => {
-        expect(h.log).toHaveCallOrder([[1], [2]]);
-      });
+    await rootLimiter.ready();
+    const limiter2 = track(new Bottleneck({ maxConcurrent: 1, datastore: process.env.DATASTORE }));
+    await limiter2.ready();
+    const maxConcurrent = await runCommand(rootLimiter, "hget", [settings_key, "maxConcurrent"]);
+    expect(maxConcurrent).toEqual("2");
+    await Promise.all([
+      limiter2.schedule(h.promise, null, 1),
+      limiter2.schedule(h.promise, null, 2),
+    ]);
+    await limiter2.disconnect(false);
+    await h.flushLimiter(rootLimiter);
+    expect(h.log).toHaveCallOrder([[1], [2]]);
   });
 
-  test("Should clear previous settings", ({ harness: h, makeLimiter, track }) => {
+  test("Should clear previous settings", async ({ harness: h, makeLimiter, track }) => {
     const rootLimiter = makeLimiter({ maxConcurrent: 2 });
-    let limiter2;
     const settings_key = limiterKeys(rootLimiter)[0];
 
-    return rootLimiter
-      .ready()
-      .then(() => {
-        limiter2 = track(
-          new Bottleneck({
-            maxConcurrent: 1,
-            datastore: process.env.DATASTORE,
-            clearDatastore: true,
-          }),
-        );
-        return limiter2.ready();
-      })
-      .then(() =>
-        // Verify the actual cleared setting in redis directly — this is the
-        // contract being tested. Avoids dependence on slowPromise wall-clock
-        // timing which can slip under load (event-loop delay, GC, redis stalls).
-        runCommand(rootLimiter, "hget", [settings_key, "maxConcurrent"]),
-      )
-      .then((maxConcurrent) => {
-        expect(maxConcurrent).toEqual("1");
-        const job1 = deferred();
-        const p1 = rootLimiter.schedule(h.deferredPromise, job1.signal, null, 1);
-        const p2 = rootLimiter.schedule(h.slowPromise, 100, null, 2);
-        return waitForState(() => {
-          expect(rootLimiter.counts().EXECUTING).toEqual(1);
-        }).then(() => {
-          job1.release();
-          return Promise.all([p1, p2]);
-        });
-      })
-      .then(() => limiter2.disconnect(false))
-      .then(() => h.flushLimiter(rootLimiter))
-      .then((_results) => {
-        expect(h.log).toHaveCallOrder([[1], [2]]);
-      });
+    await rootLimiter.ready();
+    const limiter2 = track(
+      new Bottleneck({
+        maxConcurrent: 1,
+        datastore: process.env.DATASTORE,
+        clearDatastore: true,
+      }),
+    );
+    await limiter2.ready();
+    // Verify the actual cleared setting in redis directly — this is the
+    // contract being tested. Avoids dependence on slowPromise wall-clock
+    // timing which can slip under load (event-loop delay, GC, redis stalls).
+    const maxConcurrent = await runCommand(rootLimiter, "hget", [settings_key, "maxConcurrent"]);
+    expect(maxConcurrent).toEqual("1");
+    const job1 = deferred();
+    const p1 = rootLimiter.schedule(h.deferredPromise, job1.signal, null, 1);
+    const p2 = rootLimiter.schedule(h.slowPromise, 100, null, 2);
+    await waitForState(() => {
+      expect(rootLimiter.counts().EXECUTING).toEqual(1);
+    });
+    job1.release();
+    await Promise.all([p1, p2]);
+    await limiter2.disconnect(false);
+    await h.flushLimiter(rootLimiter);
+    expect(h.log).toHaveCallOrder([[1], [2]]);
   });
 
   test("Should safely handle connection failures", ({ makeLimiter }) => {
@@ -964,10 +865,11 @@ describe("Cluster-only", () => {
         resolve();
       });
 
+      // Two-arg .then: the rejection handler must NOT catch the onFulfilled
+      // throw, and this races the "error" event inside the Promise executor —
+      // an await-based rewrite would change those semantics.
       rootLimiter.ready().then(
-        () => {
-          reject(new Error("Should not have connected"));
-        },
+        () => reject(new Error("Should not have connected")),
         () => {
           /* node-redis/ioredis may reject ready(); the limiter "error" event is authoritative */
         },

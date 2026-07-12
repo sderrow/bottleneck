@@ -543,7 +543,7 @@ describe("General", () => {
       expect(returned.id).toEqual(limiter.id);
     });
 
-    test("Should fire events on empty queue", ({ harness: h, makeLimiter }) => {
+    test("Should fire events on empty queue", async ({ harness: h, makeLimiter }) => {
       const limiter = makeLimiter({ maxConcurrent: 1, minTime: 100 });
       let calledEmpty = 0;
       let calledIdle = 0;
@@ -559,28 +559,23 @@ describe("General", () => {
         calledDepleted++;
       });
 
-      return expect(limiter.schedule({ id: 1 }, h.slowPromise, 50, null, 1))
-        .resolves.toEqual([1])
-        .then(() => {
-          expect(calledEmpty).toEqual(1);
-          expect(calledIdle).toEqual(1);
-          return Promise.all([
-            expect(limiter.schedule({ id: 2 }, h.slowPromise, 50, null, 2)).resolves.toEqual([2]),
-            expect(limiter.schedule({ id: 3 }, h.slowPromise, 50, null, 3)).resolves.toEqual([3]),
-          ]);
-        })
-        .then(() => limiter.submit({ id: 4 }, h.slowJob, 50, null, 4, null))
-        .then(() => {
-          expect(h).toHaveFinalCallAt(250);
-          expect(h.log).toHaveCallOrder([[1], [2], [3]]);
-          expect(calledEmpty).toEqual(3);
-          expect(calledIdle).toEqual(2);
-          expect(calledDepleted).toEqual(0);
-          return h.flushLimiter(limiter);
-        });
+      await expect(limiter.schedule({ id: 1 }, h.slowPromise, 50, null, 1)).resolves.toEqual([1]);
+      expect(calledEmpty).toEqual(1);
+      expect(calledIdle).toEqual(1);
+      await Promise.all([
+        expect(limiter.schedule({ id: 2 }, h.slowPromise, 50, null, 2)).resolves.toEqual([2]),
+        expect(limiter.schedule({ id: 3 }, h.slowPromise, 50, null, 3)).resolves.toEqual([3]),
+      ]);
+      await limiter.submit({ id: 4 }, h.slowJob, 50, null, 4, null);
+      expect(h).toHaveFinalCallAt(250);
+      expect(h.log).toHaveCallOrder([[1], [2], [3]]);
+      expect(calledEmpty).toEqual(3);
+      expect(calledIdle).toEqual(2);
+      expect(calledDepleted).toEqual(0);
+      await h.flushLimiter(limiter);
     });
 
-    test("Should fire events once", ({ harness: h, makeLimiter }) => {
+    test("Should fire events once", async ({ harness: h, makeLimiter }) => {
       const limiter = makeLimiter({ maxConcurrent: 1, minTime: 100 });
       let calledEmptyOnce = 0;
       let calledIdleOnce = 0;
@@ -606,25 +601,20 @@ describe("General", () => {
 
       const p1 = limiter.schedule(h.slowPromise, 50, null, 1);
 
-      return expect(limiter.schedule(h.promise, null, 2))
-        .resolves.toEqual([2])
-        .then(() => expect(p1).resolves.toEqual([1]))
-        .then(() => {
-          expect(calledEmptyOnce).toEqual(1);
-          expect(calledIdleOnce).toEqual(1);
-          expect(calledEmpty).toEqual(1);
-          expect(calledIdle).toEqual(1);
-          return expect(limiter.schedule(h.promise, null, 3)).resolves.toEqual([3]);
-        })
-        .then(() => {
-          expect(h).toHaveFinalCallAt(200);
-          expect(h.log).toHaveCallOrder([[1], [2], [3]]);
-          expect(calledEmptyOnce).toEqual(1);
-          expect(calledIdleOnce).toEqual(1);
-          expect(calledEmpty).toEqual(2);
-          expect(calledIdle).toEqual(2);
-          expect(calledDepleted).toEqual(0);
-        });
+      await expect(limiter.schedule(h.promise, null, 2)).resolves.toEqual([2]);
+      await expect(p1).resolves.toEqual([1]);
+      expect(calledEmptyOnce).toEqual(1);
+      expect(calledIdleOnce).toEqual(1);
+      expect(calledEmpty).toEqual(1);
+      expect(calledIdle).toEqual(1);
+      await expect(limiter.schedule(h.promise, null, 3)).resolves.toEqual([3]);
+      expect(h).toHaveFinalCallAt(200);
+      expect(h.log).toHaveCallOrder([[1], [2], [3]]);
+      expect(calledEmptyOnce).toEqual(1);
+      expect(calledIdleOnce).toEqual(1);
+      expect(calledEmpty).toEqual(2);
+      expect(calledIdle).toEqual(2);
+      expect(calledDepleted).toEqual(0);
     });
 
     test("Should support faulty event listeners", ({ harness: h, makeLimiter }) => {
@@ -666,12 +656,11 @@ describe("General", () => {
           }
         });
       });
-      limiter.on("empty", () =>
-        h.slowPromise(100, null, 1, 2).then((x) => {
-          expect(x).toEqual([1, 2]);
-          throw new Error("It broke!");
-        }),
-      );
+      limiter.on("empty", async () => {
+        const x = await h.slowPromise(100, null, 1, 2);
+        expect(x).toEqual([1, 2]);
+        throw new Error("It broke!");
+      });
 
       return Promise.all([
         expect(limiter.schedule(h.promise, null, 1)).resolves.toEqual([1]),

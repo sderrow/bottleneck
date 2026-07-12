@@ -1,6 +1,6 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["typescript", "unicorn", "oxc", "eslint", "vitest", "node"],
+  "plugins": ["typescript", "unicorn", "oxc", "eslint", "vitest", "node", "promise"],
   "env": {
     "builtin": true,
     "node": true
@@ -39,6 +39,9 @@
     "typescript/ban-ts-comment": "error",
     "typescript/no-empty-object-type": "error",
     "typescript/no-namespace": "error",
+    // Bottleneck bridges promises to Node-style callbacks by design (the
+    // submit()/schedule() dual API in src/Bottleneck.js).
+    "promise/no-callback-in-promise": "off",
     "unicorn/no-array-reverse": "off",
     "unicorn/no-array-sort": "off",
     "vitest/valid-describe-callback": "off",
