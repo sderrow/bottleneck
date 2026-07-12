@@ -118,7 +118,7 @@ class Job {
   }
 
   doExpire(clearGlobalState, run, free) {
-    if (this._states.jobStatus(this.options.id === "RUNNING")) {
+    if (this._states.jobStatus(this.options.id) === "RUNNING") {
       this._states.next(this.options.id);
     }
     this._assertStatus("EXECUTING");
