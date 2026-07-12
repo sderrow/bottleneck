@@ -21,7 +21,15 @@ let stop: (() => Promise<unknown>) | undefined;
 const START_ATTEMPTS = 3;
 const RETRY_DELAY_MS = 2_000;
 
+// The redis-compatible server image under test. Local runs default to the
+// newest entry in the supported matrix; CI runs every entry (see ci.yaml):
+//   redis:6-alpine, redis:7-alpine, valkey/valkey:8-alpine, valkey/valkey:9-alpine
+const REDIS_IMAGE = process.env.REDIS_IMAGE ?? "valkey/valkey:9-alpine";
+
 export async function setup(): Promise<void> {
+  // Redis-free runs (the CI test:no-cluster job) skip the container entirely.
+  if (process.env.SKIP_REDIS_CONTAINER) return;
+
   const { RedisContainer } = await import("@testcontainers/redis");
 
   // testcontainers hardcodes a 10s port-bind-inspection timeout that
@@ -33,7 +41,9 @@ export async function setup(): Promise<void> {
   let container: StartedRedisContainer | undefined;
   for (let attempt = 1; attempt <= START_ATTEMPTS; attempt++) {
     try {
-      container = await new RedisContainer("redis:7-alpine")
+      // valkey images ship redis-* compatibility symlinks, so the command
+      // works across the whole image matrix.
+      container = await new RedisContainer(REDIS_IMAGE)
         .withStartupTimeout(30_000)
         .withCommand(["redis-server", "--save", "", "--appendonly", "no"])
         .start();

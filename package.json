@@ -65,6 +65,7 @@
     "test:light": "pnpm exec vitest run --project light-smoke",
     "test:local": "pnpm exec vitest run --project local",
     "test:memory": "pnpm exec vitest run --project memory",
+    "test:no-cluster": "SKIP_REDIS_CONTAINER=1 pnpm exec vitest run --project local --project light-smoke --project memory",
     "test:smoke": "pnpm exec vitest run --project light-smoke --project lib-smoke"
   },
   "devDependencies": {
