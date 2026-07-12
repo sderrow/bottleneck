@@ -1,6 +1,5 @@
 import { describe, expect } from "vitest";
 import { test } from "./helpers/test-api.js";
-const Bottleneck = require("./bottleneck");
 const Redis = require("redis");
 const buildClientOptions = require("./redis-client-options");
 
@@ -14,13 +13,15 @@ describe("node_redis-only", () => {
     expect(limiter.datastore).toStrictEqual("redis");
   });
 
-  test("Should accept existing connections", async ({ harness: h, makeLimiter, track }) => {
-    const connection = track(
-      new Bottleneck.RedisConnection({
-        Redis,
-        clientOptions: buildClientOptions("redis"),
-      }),
-    );
+  test("Should accept existing connections", async ({
+    harness: h,
+    makeLimiter,
+    makeConnection,
+  }) => {
+    const connection = makeConnection({
+      Redis,
+      clientOptions: buildClientOptions("redis"),
+    });
     connection.id = "super-connection";
     const limiter = makeLimiter({
       minTime: 50,
@@ -41,12 +42,16 @@ describe("node_redis-only", () => {
     await Promise.all([expect(p1).resolves.toEqual([1]), expect(p2).resolves.toEqual([2])]);
   });
 
-  test("Should accept existing redis clients", async ({ harness: h, makeLimiter, track }) => {
+  test("Should accept existing redis clients", async ({
+    harness: h,
+    makeLimiter,
+    makeConnection,
+  }) => {
     const client = Redis.createClient(buildClientOptions("redis"));
     client.id = "super-client";
     await client.connect();
 
-    const connection = track(new Bottleneck.RedisConnection({ client }));
+    const connection = makeConnection({ client });
     connection.id = "super-connection";
     const limiter = makeLimiter({
       minTime: 50,
@@ -68,20 +73,21 @@ describe("node_redis-only", () => {
     await Promise.all([expect(p1).resolves.toEqual([1]), expect(p2).resolves.toEqual([2])]);
   });
 
-  test("Should trigger error events on the shared connection", ({ makeLimiter, track }) => {
+  test("Should trigger error events on the shared connection", ({
+    makeLimiter,
+    makeConnection,
+  }) => {
     expect.hasAssertions();
     return new Promise((resolve, reject) => {
-      const connection = track(
-        new Bottleneck.RedisConnection({
-          Redis,
-          clientOptions: {
-            socket: {
-              port: 1,
-              reconnectStrategy: () => false,
-            },
+      const connection = makeConnection({
+        Redis,
+        clientOptions: {
+          socket: {
+            port: 1,
+            reconnectStrategy: () => false,
           },
-        }),
-      );
+        },
+      });
       connection.ready.catch(() => {});
       let fired = false;
       const limiter = makeLimiter({ connection }, { expectErrors: true });
