@@ -38,6 +38,5 @@ export function useRealClockForThisTest() {
   vi.useRealTimers();
 }
 
-// Shared with src (LocalDatastore's yieldLoop uses the same delay): reads the
-// global setTimeout at call time, so it respects fake timers when installed.
+// Shared with src: reads the global setTimeout at call time, so it respects fake timers when installed.
 export { default as sleep } from "../../src/sleep.js";
