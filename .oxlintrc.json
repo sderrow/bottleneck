@@ -32,6 +32,7 @@
     "no-await-in-loop": "off",
     "no-underscore-dangle": "off", // Disabled because it's a common pattern in the codebase
     "no-array-constructor": "error",
+    "prefer-arrow-callback": "error",
     "typescript/no-explicit-any": "off", // Disabled because it's a common pattern in the codebase
     "typescript/no-require-imports": "off", // Disabled because it's a common pattern in the codebase
     "typescript/no-unsafe-function-type": "error",

@@ -37,6 +37,3 @@ export function useFakeClock() {
 export function useRealClockForThisTest() {
   vi.useRealTimers();
 }
-
-// Shared with src: reads the global setTimeout at call time, so it respects fake timers when installed.
-export { default as sleep } from "../../src/sleep.js";

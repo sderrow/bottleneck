@@ -3,6 +3,7 @@ const DEFAULT_PRIORITY = 5;
 
 const parser = require("./parser");
 const BottleneckError = require("./BottleneckError");
+const randomIndex = require("./random-index");
 
 class Job {
   constructor(task, args, options, jobDefaults, rejectOnDrop, Events, _states) {
@@ -14,7 +15,7 @@ class Job {
     this.options = parser.load(options, jobDefaults);
     this.options.priority = this._sanitizePriority(this.options.priority);
     if (this.options.id === jobDefaults.id) {
-      this.options.id = `${this.options.id}-${this._randomIndex()}`;
+      this.options.id = `${this.options.id}-${randomIndex()}`;
     }
     this.promise = new Promise((_resolve, _reject) => {
       this._resolve = _resolve;
@@ -32,10 +33,6 @@ class Job {
     } else {
       return sProperty;
     }
-  }
-
-  _randomIndex() {
-    return Math.random().toString(36).slice(2);
   }
 
   doDrop(params) {

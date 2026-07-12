@@ -10,6 +10,7 @@ const Events = require("./Events");
 const States = require("./States");
 const Sync = require("./Sync");
 const BottleneckError = require("./BottleneckError");
+const randomIndex = require("./random-index");
 const Group = require("./Group");
 const RedisConnection = require("./cluster/RedisConnection");
 const IORedisConnection = require("./cluster/IORedisConnection");
@@ -179,7 +180,7 @@ class Bottleneck {
   }
 
   _randomIndex() {
-    return Math.random().toString(36).slice(2);
+    return randomIndex();
   }
 
   check(weight = 1) {

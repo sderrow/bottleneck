@@ -1,5 +1,6 @@
 import { describe, expect } from "vitest";
-import { sleep, useFakeClock, useRealClockForThisTest } from "./helpers/clock.js";
+import sleep from "../src/sleep.js";
+import { useFakeClock, useRealClockForThisTest } from "./helpers/clock.js";
 import { test, waitForState, deferred } from "./helpers/test-api.js";
 
 const path = require("path");

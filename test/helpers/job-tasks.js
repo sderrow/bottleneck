@@ -1,4 +1,4 @@
-import { sleep } from "./clock.js";
+import sleep from "../../src/sleep.js";
 
 /**
  * Manually-released signal for {@link createTaskFns}'s deferredJob/deferredPromise.
