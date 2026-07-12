@@ -6,8 +6,7 @@ const Bottleneck = require("./bottleneck");
 useFakeClock();
 
 describe("General", () => {
-  test("Should prompt to upgrade", ({ makeLimiter }) => {
-    const limiter = makeLimiter();
+  test("Should prompt to upgrade", () => {
     expect(() => {
       const _limiter = new Bottleneck(1, 250);
     }).toThrow(/Bottleneck v2 takes a single object argument/);
@@ -56,9 +55,7 @@ describe("General", () => {
     });
   });
 
-  test("Should expose the Events library", ({ makeLimiter }) => {
-    const limiter = makeLimiter();
-
+  test("Should expose the Events library", () => {
     class Hello {
       constructor() {
         this.emitter = new Bottleneck.Events(this);

@@ -339,9 +339,8 @@ describe("General traffic", () => {
       expect(results).toHaveCallAt(3, 150);
     });
 
-    test("Should keep process alive until queue is empty", async ({ makeLimiter }) => {
+    test("Should keep process alive until queue is empty", async () => {
       useRealClockForThisTest();
-      const limiter = makeLimiter();
       const fixturePath = path.resolve(__dirname, "fixtures/keep-alive/refreshKeepAlive.mjs");
       const { stdout, stderr } = await execFile(process.execPath, [fixturePath], {
         timeout: 10000,
@@ -468,9 +467,8 @@ describe("General traffic", () => {
       expect(results).toHaveCallAt(3, 150);
     });
 
-    test("Should keep process alive until queue is empty", async ({ makeLimiter }) => {
+    test("Should keep process alive until queue is empty", async () => {
       useRealClockForThisTest();
-      const limiter = makeLimiter();
       const fixturePath = path.resolve(__dirname, "fixtures/keep-alive/increaseKeepAlive.mjs");
       const { stdout, stderr } = await execFile(process.execPath, [fixturePath], {
         timeout: 10000,
