@@ -151,19 +151,17 @@ describe("Priority", () => {
         called++;
         if (called === 3) {
           // Fire-and-forget: the outer Promise only resolves via resolve()
-          // in the catch below, exactly as the former .catch chain did.
-          (async () => {
-            try {
-              await limiter.updateSettings({ highWater: null });
-              await limiter.schedule(h.job, null, 8);
-            } catch (err) {
+          // in the catch below.
+          limiter
+            .updateSettings({ highWater: null })
+            .then(() => limiter.schedule(h.job, null, 8))
+            .catch((err) => {
               expect(err).toBeInstanceOf(Bottleneck.BottleneckError);
               expect(err.message).toEqual("This job has been dropped by Bottleneck");
               limiter.removeAllListeners("error");
               first.release();
               resolve();
-            }
-          })();
+            });
         }
       });
 

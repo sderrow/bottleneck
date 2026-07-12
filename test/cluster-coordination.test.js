@@ -16,6 +16,19 @@ const runningOrExecuting = (limiter) => {
   const counts = limiter.counts();
   return counts.RUNNING + counts.EXECUTING;
 };
+// Promisify a submit() callback: pass `cb` to limiter.submit and await
+// `promise` for the job's result value. `onCall` runs at completion time
+// (e.g. to timestamp it).
+const submitResult = (onCall) => {
+  const d = deferred();
+  return {
+    promise: d.signal,
+    cb: (_err, n) => {
+      onCall?.();
+      d.release(n);
+    },
+  };
+};
 
 describe("Cluster coordination", () => {
   if (process.env.DATASTORE !== "redis" && process.env.DATASTORE !== "ioredis") {
@@ -677,42 +690,13 @@ describe("Cluster coordination", () => {
       }),
     );
 
-    let resolve1, resolve2, resolve3, resolve4, resolve5, resolve6, resolve7;
-    const p1 = new Promise((resolve, _reject) => {
-      resolve1 = (_err, n) => {
-        resolve(n);
-      };
-    });
-    const p2 = new Promise((resolve, _reject) => {
-      resolve2 = (_err, n) => {
-        resolve(n);
-      };
-    });
-    const p3 = new Promise((resolve, _reject) => {
-      resolve3 = (_err, n) => {
-        resolve(n);
-      };
-    });
-    const p4 = new Promise((resolve, _reject) => {
-      resolve4 = (_err, n) => {
-        resolve(n);
-      };
-    });
-    const p5 = new Promise((resolve, _reject) => {
-      resolve5 = (_err, n) => {
-        resolve(n);
-      };
-    });
-    const p6 = new Promise((resolve, _reject) => {
-      resolve6 = (_err, n) => {
-        resolve(n);
-      };
-    });
-    const p7 = new Promise((resolve, _reject) => {
-      resolve7 = (_err, n) => {
-        resolve(n);
-      };
-    });
+    const r1 = submitResult();
+    const r2 = submitResult();
+    const r3 = submitResult();
+    const r4 = submitResult();
+    const r5 = submitResult();
+    const r6 = submitResult();
+    const r7 = submitResult();
 
     await limiter1.schedule({ id: "1" }, h.promise, null, "A");
     await limiter2.schedule({ id: "2" }, h.promise, null, "B");
@@ -725,26 +709,34 @@ describe("Cluster coordination", () => {
     // preserving the original [1, 4, 5, 6, 7, 2, 3] completion order.
     const sigA = deferred();
 
-    await limiter1.submit({ id: "A" }, h.deferredJob, sigA.signal, null, 1, resolve1);
+    await limiter1.submit({ id: "A" }, h.deferredJob, sigA.signal, null, 1, r1.cb);
     // B and C must finish after D/E/F/G. Use generous durations so the test
     // is robust to redis round-trip delays between releaseA() and G's completion.
-    await limiter1.submit({ id: "B" }, h.slowJob, 1000, null, 2, resolve2);
-    await limiter2.submit({ id: "C" }, h.slowJob, 1050, null, 3, resolve3);
+    await limiter1.submit({ id: "B" }, h.slowJob, 1000, null, 2, r2.cb);
+    await limiter2.submit({ id: "C" }, h.slowJob, 1050, null, 3, r3.cb);
 
     expect(runningOrExecuting(limiter1)).toEqual(2);
     expect(runningOrExecuting(limiter2)).toEqual(1);
 
-    await limiter3.submit({ id: "D" }, h.slowJob, 50, null, 4, resolve4);
-    await limiter4.submit({ id: "E" }, h.slowJob, 50, null, 5, resolve5);
-    await limiter3.submit({ id: "F" }, h.slowJob, 50, null, 6, resolve6);
-    await limiter4.submit({ id: "G" }, h.slowJob, 50, null, 7, resolve7);
+    await limiter3.submit({ id: "D" }, h.slowJob, 50, null, 4, r4.cb);
+    await limiter4.submit({ id: "E" }, h.slowJob, 50, null, 5, r5.cb);
+    await limiter3.submit({ id: "F" }, h.slowJob, 50, null, 6, r6.cb);
+    await limiter4.submit({ id: "G" }, h.slowJob, 50, null, 7, r7.cb);
 
     expect(limiter3.counts().QUEUED).toEqual(2);
     expect(limiter4.counts().QUEUED).toEqual(2);
 
     sigA.release();
 
-    await Promise.all([p1, p2, p3, p4, p5, p6, p7]);
+    await Promise.all([
+      r1.promise,
+      r2.promise,
+      r3.promise,
+      r4.promise,
+      r5.promise,
+      r6.promise,
+      r7.promise,
+    ]);
 
     // The CONTRACT here is "Bottleneck distributes cluster capacity to the
     // least-busy limiter" — i.e. D/E spread to limiter3/limiter4 (instead of
@@ -814,34 +806,15 @@ describe("Cluster coordination", () => {
     );
     let t3, t4;
 
-    let resolve1, resolve2, resolve3, resolve4, resolve5;
-    const p1 = new Promise((resolve, _reject) => {
-      resolve1 = (_err, n) => {
-        resolve(n);
-      };
+    const r1 = submitResult();
+    const r2 = submitResult();
+    const r3 = submitResult(() => {
+      t3 = Date.now();
     });
-    const p2 = new Promise((resolve, _reject) => {
-      resolve2 = (_err, n) => {
-        resolve(n);
-      };
+    const r4 = submitResult(() => {
+      t4 = Date.now();
     });
-    const p3 = new Promise((resolve, _reject) => {
-      resolve3 = (_err, n) => {
-        t3 = Date.now();
-        resolve(n);
-      };
-    });
-    const p4 = new Promise((resolve, _reject) => {
-      resolve4 = (_err, n) => {
-        t4 = Date.now();
-        resolve(n);
-      };
-    });
-    const p5 = new Promise((resolve, _reject) => {
-      resolve5 = (_err, n) => {
-        resolve(n);
-      };
-    });
+    const r5 = submitResult();
 
     await limiter1.schedule({ id: "1" }, h.promise, null, "A");
     await limiter2.schedule({ id: "2" }, h.promise, null, "B");
@@ -855,22 +828,15 @@ describe("Cluster coordination", () => {
     // before the asserts ran — capacity freed, limiter3's queued job
     // dispatched, and `limiter3.counts().QUEUED` flipped from 1 to 0.
     const sigFirst = deferred();
-    await limiter1.submit(
-      { id: "A", weight: 2 },
-      h.deferredJob,
-      sigFirst.signal,
-      null,
-      1,
-      resolve1,
-    );
-    await limiter2.submit({ id: "C" }, h.slowJob, 550, null, 2, resolve2);
+    await limiter1.submit({ id: "A", weight: 2 }, h.deferredJob, sigFirst.signal, null, 1, r1.cb);
+    await limiter2.submit({ id: "C" }, h.slowJob, 550, null, 2, r2.cb);
 
     expect(runningOrExecuting(limiter1)).toEqual(1);
     expect(runningOrExecuting(limiter2)).toEqual(1);
 
-    await limiter3.submit({ id: "D" }, h.slowJob, 50, null, 3, resolve3);
-    await limiter4.submit({ id: "E" }, h.slowJob, 50, null, 4, resolve4);
-    await limiter4.submit({ id: "G" }, h.slowJob, 50, null, 5, resolve5);
+    await limiter3.submit({ id: "D" }, h.slowJob, 50, null, 3, r3.cb);
+    await limiter4.submit({ id: "E" }, h.slowJob, 50, null, 4, r4.cb);
+    await limiter4.submit({ id: "G" }, h.slowJob, 50, null, 5, r5.cb);
 
     expect(limiter3.counts().QUEUED).toEqual(1);
     expect(limiter4.counts().QUEUED).toEqual(2);
@@ -880,7 +846,7 @@ describe("Cluster coordination", () => {
     // signal resolves (matching slowJob's timing semantics).
     sigFirst.release();
 
-    await Promise.all([p1, p2, p3, p4, p5]);
+    await Promise.all([r1.promise, r2.promise, r3.promise, r4.promise, r5.promise]);
 
     // Capacity-priority (process_tick.lua): among clients tied on minimum running
     // load with queued>0, Redis picks the one with the smallest client_last_registered
@@ -936,29 +902,16 @@ describe("Cluster coordination", () => {
     await limiter2.schedule({ id: "2" }, h.promise, null, "B");
     await limiter3.schedule({ id: "3" }, h.promise, null, "C");
 
-    let resolve1, resolve2, resolve3;
-    const p1 = new Promise((resolve, _reject) => {
-      resolve1 = (_err, n) => {
-        resolve(n);
-      };
-    });
-    const _p2 = new Promise((resolve, _reject) => {
-      resolve2 = (_err, n) => {
-        resolve(n);
-      };
-    });
-    const p3 = new Promise((resolve, _reject) => {
-      resolve3 = (_err, n) => {
-        resolve(n);
-      };
-    });
+    const r1 = submitResult();
+    const r2 = submitResult(); // never completes: limiter2 disconnects below
+    const r3 = submitResult();
 
-    await limiter1.submit({ id: "4" }, h.slowJob, 100, null, 4, resolve1);
-    await limiter2.submit({ id: "5" }, h.slowJob, 100, null, 5, resolve2);
-    await limiter3.submit({ id: "6" }, h.slowJob, 100, null, 6, resolve3);
+    await limiter1.submit({ id: "4" }, h.slowJob, 100, null, 4, r1.cb);
+    await limiter2.submit({ id: "5" }, h.slowJob, 100, null, 5, r2.cb);
+    await limiter3.submit({ id: "6" }, h.slowJob, 100, null, 6, r3.cb);
     await limiter2.disconnect(false);
 
-    await Promise.all([p1, p3]);
+    await Promise.all([r1.promise, r3.promise]);
     expect(h.log).toHaveCallOrder([["A"], ["B"], ["C"], [4], [6]]);
   });
 });

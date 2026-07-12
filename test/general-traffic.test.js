@@ -192,6 +192,33 @@ describe("General traffic", () => {
       // explicitly in j2's expiration branch, after verifying running===1.
       const holdJ1 = deferred();
 
+      // Runs concurrently with j1 below: after j2 expires, verify the
+      // mid-flight state, keep j1 held ≥100ms more, then release it.
+      const expireJ2ThenReleaseJ1 = async () => {
+        await expect(
+          limiter.schedule(
+            { expiration: 50, id: "slow-with-expiration" },
+            h.slowPromise,
+            75,
+            null,
+            2,
+          ),
+        ).rejects.toThrow("This job timed out after 50 ms.");
+        // Lower bound proves expiration didn't fire instantly; the error
+        // message itself proves it didn't fire after slowPromise(75).
+        expect(Date.now() - t0).toBeGreaterThan(45);
+
+        const [running, doneCount] = await Promise.all([limiter.running(), limiter.done()]);
+        expect(running).toEqual(1);
+        expect(doneCount).toEqual(1);
+        // Hold j1 for ≥100ms more so the post-Promise.all assertion
+        // (`Date.now() - t0 > 145`) verifies j1 actually ran a
+        // meaningful interval, without depending on a fixed timer that
+        // can race event-loop jitter.
+        await sleep(100);
+        holdJ1.release();
+      };
+
       await Promise.all([
         expect(
           limiter.schedule(
@@ -202,31 +229,7 @@ describe("General traffic", () => {
             1,
           ),
         ).resolves.toEqual([1]),
-
-        (async () => {
-          await expect(
-            limiter.schedule(
-              { expiration: 50, id: "slow-with-expiration" },
-              h.slowPromise,
-              75,
-              null,
-              2,
-            ),
-          ).rejects.toThrow("This job timed out after 50 ms.");
-          // Lower bound proves expiration didn't fire instantly; the error
-          // message itself proves it didn't fire after slowPromise(75).
-          expect(Date.now() - t0).toBeGreaterThan(45);
-
-          const [running, doneCount] = await Promise.all([limiter.running(), limiter.done()]);
-          expect(running).toEqual(1);
-          expect(doneCount).toEqual(1);
-          // Hold j1 for ≥100ms more so the post-Promise.all assertion
-          // (`Date.now() - t0 > 145`) verifies j1 actually ran a
-          // meaningful interval, without depending on a fixed timer that
-          // can race event-loop jitter.
-          await sleep(100);
-          holdJ1.release();
-        })(),
+        expireJ2ThenReleaseJ1(),
       ]);
 
       // Lower bound proves the unexpired job wasn't aborted early by

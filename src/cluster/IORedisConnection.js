@@ -87,13 +87,10 @@ class IORedisConnection {
 
   async __addLimiter__(instance) {
     await Promise.all(
-      [instance.channel(), instance.channel_client()].map((channel) => {
-        return new Promise((resolve) => {
-          this.subscriber.subscribe(channel, () => {
-            this.limiters[channel] = instance;
-            resolve();
-          });
-        });
+      [instance.channel(), instance.channel_client()].map(async (channel) => {
+        // ioredis returns a promise when subscribe is called without a callback.
+        await this.subscriber.subscribe(channel);
+        this.limiters[channel] = instance;
       }),
     );
   }

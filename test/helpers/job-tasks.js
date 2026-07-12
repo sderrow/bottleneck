@@ -41,14 +41,12 @@ export function createTaskFns(log) {
     cb.apply(null, [err].concat(result));
   }
 
-  function promise(err, ...result) {
-    return new Promise((resolve, reject) => {
-      log.record(err, result);
-      if (err === null) {
-        return resolve(result);
-      }
-      return reject(err);
-    });
+  async function promise(err, ...result) {
+    log.record(err, result);
+    if (err === null) {
+      return result;
+    }
+    throw err;
   }
 
   async function slowPromise(duration, err, ...result) {

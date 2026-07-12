@@ -157,13 +157,12 @@ describe("Group", () => {
     // Fire-and-forget: the rejection must be recorded concurrently with the
     // other scheduled jobs; awaiting it inline would delay the schedules below
     // and change the ordering under test.
-    (async () => {
-      try {
-        await group.key("B").schedule(() => Promise.reject(new Error(failureMessage)));
-      } catch (err) {
+    group
+      .key("B")
+      .schedule(() => Promise.reject(new Error(failureMessage)))
+      .catch((err) => {
         results.push(["CAUGHT", err.message]);
-      }
-    })();
+      });
     setTimeout(() => {
       group.key("C").schedule(job, 6);
       group.key("C").schedule(job, 7);
