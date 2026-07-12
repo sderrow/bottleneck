@@ -34,8 +34,8 @@ jobs:
       - name: Run build
         run: pnpm run build
 
-  test:
-    name: Test
+  test-no-cluster:
+    name: Test (no cluster)
     runs-on: ubuntu-latest
     needs: checks
     steps:
@@ -45,5 +45,35 @@ jobs:
       - name: Setup
         uses: ./.github/actions/setup
 
+      # Redis-free projects only; every redis-backed project runs in the
+      # cluster-matrix job below (including against the newest image).
       - name: Run tests
-        run: pnpm run test
+        run: pnpm run test:no-cluster
+
+  cluster-matrix:
+    name: Cluster (${{ matrix.image }})
+    runs-on: ubuntu-latest
+    needs: checks
+    strategy:
+      fail-fast: false
+      matrix:
+        image:
+          - redis:6-alpine
+          - redis:7-alpine
+          - valkey/valkey:8-alpine
+          - valkey/valkey:9-alpine
+    env:
+      REDIS_IMAGE: ${{ matrix.image }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup
+        uses: ./.github/actions/setup
+
+      # Only the redis-backed projects vary by server image: the two cluster
+      # projects plus the lib smoke test (which exercises the built bundle
+      # against redis). The local/memory/light projects are covered by `test`,
+      # which runs the full suite against the default (newest) matrix image.
+      - name: Run cluster tests
+        run: pnpm run test:cluster && pnpm run test:lib

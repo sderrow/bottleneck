@@ -1171,19 +1171,40 @@ Vitest projects:
 You need a container runtime (Docker Desktop, Colima, OrbStack, …) for the Redis-backed projects.
 
 ```bash
-pnpm run test                # default CI-fast loop (no memory project)
+pnpm run test                # all projects against the default server image
+pnpm run test:no-cluster       # local + light-smoke + memory; no container needed
 pnpm run test:memory         # memory project only
-pnpm run test:all            # everything including memory (same as CI `pnpm run test:all`)
+```
+
+### Redis server matrix
+
+The redis-backed projects run against any Redis-compatible server via the
+`REDIS_IMAGE` env var. Local runs default to the newest supported image; CI
+runs the whole matrix (the `cluster-matrix` job):
+
+```bash
+REDIS_IMAGE=redis:6-alpine pnpm run test:cluster
+REDIS_IMAGE=redis:7-alpine pnpm run test:cluster
+REDIS_IMAGE=valkey/valkey:8-alpine pnpm run test:cluster
+pnpm run test:cluster        # valkey/valkey:9-alpine (the default)
 ```
 
 ### Test conventions
 
-- Every test file explicitly imports from `vitest`: `import { describe, it, expect, ... } from "vitest"`.
-- New tests should use `makeLimiter()` from `test/helpers/limiter.js` for env-aware limiter construction with a separate `{ expectErrors }` meta argument.
+- Framework primitives (`describe`, `expect`, `vi`) are imported directly from
+  `vitest`; the fixture-extended `test` (plus `waitForState`, `deferred`, and
+  `enqueued`) comes from `test/helpers/test-api.js`.
+- Tests declare the fixtures they use: `harness` (job task fns + call log),
+  `makeLimiter` (env-aware, auto-disconnected), and `track` (teardown for
+  limiters/groups constructed directly).
 
 ### CI
 
-CI is split into a `checks` job (format, lint, types, build) and a matrixed `test` job that runs each Vitest project independently. See [.github/workflows/ci.yaml](.github/workflows/ci.yaml); please make sure each step passes locally before opening a PR.
+CI is split into a `checks` job (format, lint, types, build), a `test` job
+running the redis-free projects, and a `cluster-matrix` job running the
+redis-backed projects against every supported server image — each project
+runs exactly once per relevant dimension. See [.github/workflows/ci.yaml](.github/workflows/ci.yaml);
+please make sure each step passes locally before opening a PR.
 
 All contributions are appreciated and will be considered.
 
