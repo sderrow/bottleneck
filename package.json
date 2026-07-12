@@ -53,7 +53,7 @@
     "build": "tsdown",
     "build:lib": "tsdown --filter lib",
     "build:light": "tsdown --filter light",
-    "check-types": "tsc --noEmit --strict --ignoreConfig test.ts",
+    "check-types": "tsc --noEmit --strict --ignoreConfig test.ts && tsc --noEmit",
     "format": "oxfmt",
     "format:check": "oxfmt --check",
     "lint": "oxlint --quiet",
