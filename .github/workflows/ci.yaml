@@ -77,3 +77,26 @@ jobs:
       # which runs the full suite against the default (newest) matrix image.
       - name: Run cluster tests
         run: pnpm run test:cluster && pnpm run test:lib
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    needs: [test-no-cluster, cluster-matrix]
+    if: always()
+    steps:
+      - name: Require all test jobs to pass
+        run: |
+          test_no_cluster_result="${{ needs.test-no-cluster.result }}"
+          cluster_matrix_result="${{ needs.cluster-matrix.result }}"
+          failed=0
+          for r in "$test_no_cluster_result" "$cluster_matrix_result"; do
+            if [[ "$r" != "success" && "$r" != "skipped" ]]; then
+              failed=1
+            fi
+          done
+          echo "test-no-cluster: $test_no_cluster_result"
+          echo "cluster-matrix: $cluster_matrix_result"
+          if [[ "$failed" == "1" ]]; then
+            echo "::error::One or more test jobs failed."
+            exit 1
+          fi
