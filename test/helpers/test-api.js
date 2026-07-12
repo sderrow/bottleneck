@@ -1,5 +1,5 @@
 import { test as baseTest, expect as vitestExpect, vi } from "vitest";
-import { wait, isFakeClock } from "./clock.js";
+import { isFakeClock } from "./clock.js";
 import { createTaskFns } from "./job-tasks.js";
 import makeLimiterHelper from "./limiter.js";
 
@@ -64,7 +64,6 @@ function createJobHarness() {
     flushLimiter: flushLimiter,
     pNoErrVal: pNoErrVal,
     noErrVal: noErrVal,
-    wait: wait,
     callTimes: callTimes,
   };
 }

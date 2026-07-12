@@ -1,4 +1,4 @@
-import { useFakeClock, useRealClockForThisTest } from "./helpers/clock.js";
+import { sleep, useFakeClock, useRealClockForThisTest } from "./helpers/clock.js";
 import { test, describe, expect, waitForState, deferred } from "./helpers/test-api.js";
 
 const path = require("path");
@@ -251,7 +251,7 @@ describe("General traffic", () => {
             // (`Date.now() - t0 > 145`) verifies j1 actually ran a
             // meaningful interval, without depending on a fixed timer that
             // can race event-loop jitter.
-            return h.wait(100).then(function () {
+            return sleep(100).then(function () {
               holdJ1.release();
             });
           }),

@@ -1,3 +1,4 @@
+import { sleep } from "./helpers/clock.js";
 import { test, describe, expect, waitForState, deferred } from "./helpers/test-api.js";
 const Bottleneck = require("./bottleneck");
 const Scripts = require("../src/cluster/Scripts.js");
@@ -517,7 +518,7 @@ describe("Cluster coordination", () => {
       })
       .then(function (doneCount) {
         expect(doneCount).toEqual(1);
-        return h.wait(400);
+        return sleep(400);
       })
       .then(function () {
         return countKeys(limiter);

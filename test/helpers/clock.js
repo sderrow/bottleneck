@@ -39,7 +39,7 @@ export function useRealClockForThisTest() {
 }
 
 /** Promise delay via global setTimeout (respects fake timers when installed). */
-export function wait(ms) {
+export function sleep(ms) {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);
   });

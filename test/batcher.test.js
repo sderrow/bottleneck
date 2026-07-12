@@ -1,4 +1,4 @@
-import { useFakeClock, wait } from "./helpers/clock.js";
+import { useFakeClock, sleep } from "./helpers/clock.js";
 import { test, describe, expect } from "./helpers/test-api.js";
 const Bottleneck = require("./bottleneck");
 
@@ -85,7 +85,7 @@ describe("Batcher", () => {
 
     const t0 = Date.now();
     const p1 = batcher.add(1);
-    await wait(50);
+    await sleep(50);
     const p2 = batcher.add(2);
     await Promise.all([p1, p2]);
 
@@ -110,7 +110,7 @@ describe("Batcher", () => {
 
     const t1 = Date.now();
     const p4 = batcher.add(4);
-    await wait(50);
+    await sleep(50);
     const p5 = batcher.add(5);
     await Promise.all([p4, p5]);
 
