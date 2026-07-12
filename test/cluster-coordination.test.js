@@ -1,9 +1,10 @@
-import { describe, it, afterEach, expect } from "vitest";
-import { createJobHarness } from "./helpers/job-tracking.js";
-import { waitForState } from "./helpers/wait-for-state.js";
-const makeLimiter = require("./helpers/limiter");
+import { sleep } from "./helpers/clock.js";
+import { test, describe, expect, waitForState, deferred } from "./helpers/test-api.js";
 const Bottleneck = require("./bottleneck");
 const Scripts = require("../src/cluster/Scripts.js");
+
+// Causality policy (Workstream B): observe product-timer effects via waitForState
+// and state counts — never assert wall-clock bounds around real network time.
 
 const limiterKeys = function (limiter) {
   return Scripts.allKeys(limiter._store.originalId);
@@ -22,122 +23,128 @@ const runningOrExecuting = function (limiter) {
   return counts.RUNNING + counts.EXECUTING;
 };
 
-describe("Cluster coordination", function () {
+describe("Cluster coordination", () => {
   if (process.env.DATASTORE !== "redis" && process.env.DATASTORE !== "ioredis") {
     throw new Error("DATASTORE must be redis or ioredis");
   }
-  let rootLimiter;
 
-  afterEach(function () {
-    return rootLimiter.disconnect(false);
-  });
-
-  it("Should chain local and distributed limiters (total concurrency)", function () {
-    const h = createJobHarness();
-    rootLimiter = makeLimiter({ id: "limiter1", maxConcurrent: 3 });
-    const limiter2 = new Bottleneck({ id: "limiter2", maxConcurrent: 1 });
-    const limiter3 = new Bottleneck({ id: "limiter3", maxConcurrent: 2 });
+  test("Should chain local and distributed limiters (total concurrency)", async function ({
+    harness: h,
+    makeLimiter,
+    track,
+  }) {
+    const rootLimiter = makeLimiter({ id: "limiter1", maxConcurrent: 3 });
+    const limiter2 = track(new Bottleneck({ id: "limiter2", maxConcurrent: 1 }));
+    const limiter3 = track(new Bottleneck({ id: "limiter3", maxConcurrent: 2 }));
 
     limiter2.on("error", (err) => console.log(err));
-
     limiter2.chain(rootLimiter);
     limiter3.chain(rootLimiter);
 
-    return Promise.all([
-      limiter2.schedule(h.slowPromise, 100, null, 1),
-      limiter2.schedule(h.slowPromise, 100, null, 2),
-      limiter2.schedule(h.slowPromise, 100, null, 3),
-      limiter3.schedule(h.slowPromise, 100, null, 4),
-      limiter3.schedule(h.slowPromise, 100, null, 5),
-      limiter3.schedule(h.slowPromise, 100, null, 6),
-    ])
-      .then(function () {
-        return h.flushLimiter(rootLimiter);
-      })
-      .then(function (results) {
-        h.checkDuration(300);
-        h.checkResultsOrder([[1], [4], [5], [2], [6], [3]]);
+    await Promise.all([rootLimiter.ready(), limiter2.ready(), limiter3.ready()]);
 
-        // Lower bounds = real contract (chained gating waited the expected
-        // minimum). Upper bounds catch logic bugs that would over-wait by
-        // multiples of the expected step. The +700ms ceiling above the floor
-        // absorbs a single connectTimeout+retry cycle (~555ms; see
-        // test/redis-client-options.js) plus event-loop / Redis-roundtrip /
-        // Docker-daemon latency under parallel load, while still catching the
-        // previous heartbeat-stall regression which manifested as +5000ms
-        // over the floor.
-        expect(results.calls[0].time).toBeGreaterThanOrEqual(100);
-        expect(results.calls[0].time).toBeLessThan(800);
-        expect(results.calls[1].time).toBeGreaterThanOrEqual(100);
-        expect(results.calls[1].time).toBeLessThan(800);
-        expect(results.calls[2].time).toBeGreaterThanOrEqual(100);
-        expect(results.calls[2].time).toBeLessThan(800);
+    const sig1 = deferred();
+    const sig2 = deferred();
+    const sig3 = deferred();
+    const sig4 = deferred();
+    const sig5 = deferred();
+    const sig6 = deferred();
 
-        expect(results.calls[3].time).toBeGreaterThanOrEqual(200);
-        expect(results.calls[3].time).toBeLessThan(900);
-        expect(results.calls[4].time).toBeGreaterThanOrEqual(200);
-        expect(results.calls[4].time).toBeLessThan(900);
+    const p1 = limiter2.schedule(h.deferredPromise, sig1.signal, null, 1);
+    const p2 = limiter2.schedule(h.deferredPromise, sig2.signal, null, 2);
+    const p3 = limiter2.schedule(h.deferredPromise, sig3.signal, null, 3);
+    const p4 = limiter3.schedule(h.deferredPromise, sig4.signal, null, 4);
+    const p5 = limiter3.schedule(h.deferredPromise, sig5.signal, null, 5);
+    const p6 = limiter3.schedule(h.deferredPromise, sig6.signal, null, 6);
 
-        expect(results.calls[5].time).toBeGreaterThanOrEqual(300);
-        expect(results.calls[5].time).toBeLessThan(1000);
-      });
-  });
-
-  it("Should chain local and distributed limiters (partial concurrency)", function () {
-    const h = createJobHarness();
-    rootLimiter = makeLimiter({ maxConcurrent: 2 });
-    const limiter2 = new Bottleneck({ maxConcurrent: 1 });
-    const limiter3 = new Bottleneck({ maxConcurrent: 2 });
-
-    limiter2.chain(rootLimiter);
-    limiter3.chain(rootLimiter);
-
-    return Promise.all([
-      limiter2.schedule(h.slowPromise, 100, null, 1),
-      limiter2.schedule(h.slowPromise, 100, null, 2),
-      limiter2.schedule(h.slowPromise, 100, null, 3),
-      limiter3.schedule(h.slowPromise, 100, null, 4),
-      limiter3.schedule(h.slowPromise, 100, null, 5),
-      limiter3.schedule(h.slowPromise, 100, null, 6),
-    ])
-      .then(function () {
-        return h.flushLimiter(rootLimiter);
-      })
-      .then(function (results) {
-        h.checkResultsOrder([[1], [4], [5], [2], [6], [3]]);
-
-        // Lower bounds prove the chained gates worked (each wave waits for
-        // the previous to release a slot in rootLimiter). Upper bounds catch
-        // catastrophic stalls but must tolerate event-loop / Redis-roundtrip
-        // jitter under load. +700ms above the floor absorbs a single
-        // connectTimeout+retry cycle (~555ms; see test/redis-client-options.js)
-        // and is wide enough to ignore a one-off connection timeout while
-        // still catching the previous heartbeat-stall regression (+5000ms).
-        expect(results.calls[0].time).toBeGreaterThanOrEqual(100);
-        expect(results.calls[0].time).toBeLessThan(800);
-        expect(results.calls[1].time).toBeGreaterThanOrEqual(100);
-        expect(results.calls[1].time).toBeLessThan(800);
-
-        expect(results.calls[2].time).toBeGreaterThanOrEqual(200);
-        expect(results.calls[2].time).toBeLessThan(900);
-        expect(results.calls[3].time).toBeGreaterThanOrEqual(200);
-        expect(results.calls[3].time).toBeLessThan(900);
-
-        expect(results.calls[4].time).toBeGreaterThanOrEqual(300);
-        expect(results.calls[4].time).toBeLessThan(1000);
-        expect(results.calls[5].time).toBeGreaterThanOrEqual(300);
-        expect(results.calls[5].time).toBeLessThan(1000);
-      });
-  });
-
-  it("Should use the limiter ID to build Redis keys", function () {
-    rootLimiter = makeLimiter();
-    const randomId = rootLimiter._randomIndex();
-    const limiter = new Bottleneck({
-      id: randomId,
-      datastore: process.env.DATASTORE,
-      clearDatastore: true,
+    await waitForState(function () {
+      expect(rootLimiter.counts().EXECUTING).toBe(3);
+      expect(limiter2.counts().QUEUED).toBe(2);
+      expect(limiter3.counts().QUEUED).toBe(1);
     });
+
+    sig1.release();
+    sig4.release();
+    sig5.release();
+    await waitForState(function () {
+      expect(h.log.mock.calls.length).toBe(3);
+    });
+
+    sig2.release();
+    sig6.release();
+    await waitForState(function () {
+      expect(h.log.mock.calls.length).toBe(5);
+    });
+
+    sig3.release();
+    await Promise.all([p1, p2, p3, p4, p5, p6]);
+    await h.flushLimiter(rootLimiter);
+    expect(h.log).toHaveCallOrder([[1], [4], [5], [2], [6], [3]]);
+  });
+
+  test("Should chain local and distributed limiters (partial concurrency)", async function ({
+    harness: h,
+    makeLimiter,
+    track,
+  }) {
+    const rootLimiter = makeLimiter({ maxConcurrent: 2 });
+    const limiter2 = track(new Bottleneck({ maxConcurrent: 1 }));
+    const limiter3 = track(new Bottleneck({ maxConcurrent: 2 }));
+
+    limiter2.chain(rootLimiter);
+    limiter3.chain(rootLimiter);
+
+    await Promise.all([rootLimiter.ready(), limiter2.ready(), limiter3.ready()]);
+
+    const sig1 = deferred();
+    const sig2 = deferred();
+    const sig3 = deferred();
+    const sig4 = deferred();
+    const sig5 = deferred();
+    const sig6 = deferred();
+
+    const p1 = limiter2.schedule(h.deferredPromise, sig1.signal, null, 1);
+    const p2 = limiter2.schedule(h.deferredPromise, sig2.signal, null, 2);
+    const p3 = limiter2.schedule(h.deferredPromise, sig3.signal, null, 3);
+    const p4 = limiter3.schedule(h.deferredPromise, sig4.signal, null, 4);
+    const p5 = limiter3.schedule(h.deferredPromise, sig5.signal, null, 5);
+    const p6 = limiter3.schedule(h.deferredPromise, sig6.signal, null, 6);
+
+    await waitForState(function () {
+      expect(rootLimiter.counts().EXECUTING).toBe(2);
+      expect(limiter2.counts().QUEUED).toBe(2);
+      expect(limiter3.counts().QUEUED).toBe(1);
+    });
+
+    sig1.release();
+    sig4.release();
+    sig5.release();
+    await waitForState(function () {
+      expect(h.log.mock.calls.length).toBe(3);
+    });
+
+    sig2.release();
+    sig6.release();
+    await waitForState(function () {
+      expect(h.log.mock.calls.length).toBe(5);
+    });
+
+    sig3.release();
+    await Promise.all([p1, p2, p3, p4, p5, p6]);
+    await h.flushLimiter(rootLimiter);
+    expect(h.log).toHaveCallOrder([[1], [4], [5], [2], [6], [3]]);
+  });
+
+  test("Should use the limiter ID to build Redis keys", function ({ makeLimiter, track }) {
+    const rootLimiter = makeLimiter();
+    const randomId = rootLimiter._randomIndex();
+    const limiter = track(
+      new Bottleneck({
+        id: randomId,
+        datastore: process.env.DATASTORE,
+        clearDatastore: true,
+      }),
+    );
 
     return limiter
       .ready()
@@ -148,13 +155,13 @@ describe("Cluster coordination", function () {
       })
       .then(function (deleted) {
         expect(deleted).toEqual(5);
-        return limiter.disconnect(false);
       });
   });
 
-  it("Should not fail when Redis data is missing", function () {
-    rootLimiter = makeLimiter();
-    const limiter = new Bottleneck({ datastore: process.env.DATASTORE, clearDatastore: true });
+  test("Should not fail when Redis data is missing", function ({ track }) {
+    const limiter = track(
+      new Bottleneck({ datastore: process.env.DATASTORE, clearDatastore: true }),
+    );
 
     return limiter
       .running()
@@ -176,36 +183,42 @@ describe("Cluster coordination", function () {
       })
       .then(function (count) {
         expect(count).toBeGreaterThan(0);
-        return limiter.disconnect(false);
       });
   });
 
-  it("Should drop all jobs in the Cluster when entering blocked mode", function () {
-    const h = createJobHarness();
-    rootLimiter = makeLimiter();
-    const limiter1 = new Bottleneck({
-      id: "blocked",
-      trackDoneStatus: true,
-      datastore: process.env.DATASTORE,
-      clearDatastore: true,
+  test("Should drop all jobs in the Cluster when entering blocked mode", function ({
+    harness: h,
+    makeLimiter,
+    track,
+  }) {
+    const rootLimiter = makeLimiter();
+    const limiter1 = track(
+      new Bottleneck({
+        id: "blocked",
+        trackDoneStatus: true,
+        datastore: process.env.DATASTORE,
+        clearDatastore: true,
 
-      maxConcurrent: 1,
-      minTime: 50,
-      highWater: 2,
-      strategy: Bottleneck.strategy.BLOCK,
-    });
+        maxConcurrent: 1,
+        minTime: 50,
+        highWater: 2,
+        strategy: Bottleneck.strategy.BLOCK,
+      }),
+    );
     let limiter2;
     const client_num_queued_key = limiterKeys(limiter1)[5];
 
     return limiter1
       .ready()
       .then(function () {
-        limiter2 = new Bottleneck({
-          id: "blocked",
-          trackDoneStatus: true,
-          datastore: process.env.DATASTORE,
-          clearDatastore: false,
-        });
+        limiter2 = track(
+          new Bottleneck({
+            id: "blocked",
+            trackDoneStatus: true,
+            datastore: process.env.DATASTORE,
+            clearDatastore: false,
+          }),
+        );
         return limiter2.ready();
       })
       .then(function () {
@@ -239,17 +252,14 @@ describe("Cluster coordination", function () {
         // connect-retry on the ioredis client adds ~500ms to register;
         // doExecute's setTimeout(0) drifts when the event loop is busy
         // serving other parallel test workers).
-        return waitForState(
-          function () {
-            const c1 = limiter1.counts();
-            expect(c1.RECEIVED).toBe(0);
-            expect(c1.QUEUED).toBe(0);
-            expect(c1.RUNNING).toBe(0);
-            expect(c1.EXECUTING).toBe(0);
-            expect(c1.DONE).toBe(1);
-          },
-          { timeout: 5000 },
-        );
+        return waitForState(function () {
+          const c1 = limiter1.counts();
+          expect(c1.RECEIVED).toBe(0);
+          expect(c1.QUEUED).toBe(0);
+          expect(c1.RUNNING).toBe(0);
+          expect(c1.EXECUTING).toBe(0);
+          expect(c1.DONE).toBe(1);
+        });
       })
       .then(function () {
         const counts1 = limiter1.counts();
@@ -269,30 +279,32 @@ describe("Cluster coordination", function () {
         return h.flushLimiter(rootLimiter);
       })
       .then(function (_results) {
-        h.checkResultsOrder([[1]]);
-
-        return Promise.all([limiter1.disconnect(false), limiter2.disconnect(false)]);
+        expect(h.log).toHaveCallOrder([[1]]);
       });
   });
 
-  it("Should pass messages to all limiters in Cluster", function () {
-    rootLimiter = makeLimiter({
+  test("Should pass messages to all limiters in Cluster", function ({ makeLimiter, track }) {
+    const rootLimiter = makeLimiter({
       maxConcurrent: 1,
       minTime: 100,
       id: "super-duper",
     });
-    const limiter1 = new Bottleneck({
-      maxConcurrent: 1,
-      minTime: 100,
-      id: "super-duper",
-      datastore: process.env.DATASTORE,
-    });
-    const limiter2 = new Bottleneck({
-      maxConcurrent: 1,
-      minTime: 100,
-      id: "nope",
-      datastore: process.env.DATASTORE,
-    });
+    const limiter1 = track(
+      new Bottleneck({
+        maxConcurrent: 1,
+        minTime: 100,
+        id: "super-duper",
+        datastore: process.env.DATASTORE,
+      }),
+    );
+    const limiter2 = track(
+      new Bottleneck({
+        maxConcurrent: 1,
+        minTime: 100,
+        id: "nope",
+        datastore: process.env.DATASTORE,
+      }),
+    );
     const received = [];
 
     rootLimiter.on("message", (msg) => {
@@ -305,11 +317,9 @@ describe("Cluster coordination", function () {
       received.push(3, msg);
     });
 
-    return Promise.all([rootLimiter.ready(), limiter2.ready()])
+    return Promise.all([rootLimiter.ready(), limiter1.ready(), limiter2.ready()])
       .then(function () {
         limiter1.publish(555);
-        // Poll for delivery instead of a fixed setTimeout — pub/sub round-trips
-        // can exceed a tight 150ms window under load.
         return waitForState(function () {
           expect(received.length).toBeGreaterThanOrEqual(4);
         });
@@ -321,13 +331,16 @@ describe("Cluster coordination", function () {
       });
   });
 
-  it("Should pass messages to correct limiter after Group re-instantiations", function () {
-    rootLimiter = makeLimiter();
-    const group = new Bottleneck.Group({
-      maxConcurrent: 1,
-      minTime: 100,
-      datastore: process.env.DATASTORE,
-    });
+  test("Should pass messages to correct limiter after Group re-instantiations", function ({
+    track,
+  }) {
+    const group = track(
+      new Bottleneck.Group({
+        maxConcurrent: 1,
+        minTime: 100,
+        datastore: process.env.DATASTORE,
+      }),
+    );
     const received = [];
 
     return new Promise(function (resolve, _reject) {
@@ -366,15 +379,19 @@ describe("Cluster coordination", function () {
       })
       .then(function () {
         expect(received).toEqual(["1", "Bonjour!", "2", "Comment allez-vous?", "3", "Au revoir!"]);
+        // Semantic, not cleanup: flush=true gracefully drains the un-awaited
+        // "Au revoir!" PUBLISH reply before closing. track's disconnect(false)
+        // would destroy the socket mid-flight and reject that pending command.
         group.disconnect();
       });
   });
 
-  it("Should have a default key TTL when using Groups", function () {
-    rootLimiter = makeLimiter();
-    const group = new Bottleneck.Group({
-      datastore: process.env.DATASTORE,
-    });
+  test("Should have a default key TTL when using Groups", function ({ track }) {
+    const group = track(
+      new Bottleneck.Group({
+        datastore: process.env.DATASTORE,
+      }),
+    );
 
     return group
       .key("one")
@@ -387,20 +404,19 @@ describe("Cluster coordination", function () {
       .then(function (ttl) {
         expect(ttl).toBeGreaterThanOrEqual(290);
         expect(ttl).toBeLessThanOrEqual(305);
-      })
-      .then(function () {
-        return group.disconnect(false);
       });
   });
 
-  it("Should support Groups and expire Redis keys", function () {
-    rootLimiter = makeLimiter();
-    const group = new Bottleneck.Group({
-      datastore: process.env.DATASTORE,
-      clearDatastore: true,
-      minTime: 50,
-      timeout: 200,
-    });
+  test("Should support Groups and expire Redis keys", function ({ makeLimiter, track }) {
+    const rootLimiter = makeLimiter();
+    const group = track(
+      new Bottleneck.Group({
+        datastore: process.env.DATASTORE,
+        clearDatastore: true,
+        minTime: 50,
+        timeout: 200,
+      }),
+    );
     let limiter1;
     let limiter2;
     let limiter3;
@@ -478,21 +494,20 @@ describe("Cluster coordination", function () {
         expect(counts).toEqual([0, 0, 0]);
         expect(group.keys().length).toEqual(0);
         expect(Object.keys(group.connection.limiters).length).toEqual(0);
-        return group.disconnect(false);
       });
   });
 
-  it("Should not recreate a key when running heartbeat", function () {
-    const h = createJobHarness();
-    rootLimiter = makeLimiter();
-    const group = new Bottleneck.Group({
-      datastore: process.env.DATASTORE,
-      clearDatastore: true,
-      maxConcurrent: 50,
-      minTime: 50,
-      timeout: 300,
-      heartbeatInterval: 5,
-    });
+  test("Should not recreate a key when running heartbeat", function ({ harness: h, track }) {
+    const group = track(
+      new Bottleneck.Group({
+        datastore: process.env.DATASTORE,
+        clearDatastore: true,
+        maxConcurrent: 50,
+        minTime: 50,
+        timeout: 300,
+        heartbeatInterval: 5,
+      }),
+    );
     const key = "heartbeat";
 
     const limiter = group.key(key);
@@ -503,39 +518,43 @@ describe("Cluster coordination", function () {
       })
       .then(function (doneCount) {
         expect(doneCount).toEqual(1);
-        return h.wait(400);
+        return sleep(400);
       })
       .then(function () {
         return countKeys(limiter);
       })
       .then(function (count) {
         expect(count).toEqual(0);
-        return group.disconnect(false);
       });
   });
 
-  it("Should delete Redis key when manually deleting a group key", function () {
-    const h = createJobHarness();
-    rootLimiter = makeLimiter();
+  test("Should delete Redis key when manually deleting a group key", function ({
+    harness: h,
+    track,
+  }) {
     // Bump timeout (and the corresponding h.waitFor below) so autocleanup
     // doesn't race with the initial schedule under stress. Original 300ms
     // gave a 150ms autocleanup interval that could fire before init.lua
     // settled when redis was slow.
-    const groupTimeout = 2000;
-    const group1 = new Bottleneck.Group({
-      datastore: process.env.DATASTORE,
-      clearDatastore: true,
-      maxConcurrent: 50,
-      minTime: 50,
-      timeout: groupTimeout,
-    });
-    const group2 = new Bottleneck.Group({
-      datastore: process.env.DATASTORE,
-      clearDatastore: true,
-      maxConcurrent: 50,
-      minTime: 50,
-      timeout: groupTimeout,
-    });
+    const groupTimeout = 5000;
+    const group1 = track(
+      new Bottleneck.Group({
+        datastore: process.env.DATASTORE,
+        clearDatastore: true,
+        maxConcurrent: 50,
+        minTime: 50,
+        timeout: groupTimeout,
+      }),
+    );
+    const group2 = track(
+      new Bottleneck.Group({
+        datastore: process.env.DATASTORE,
+        clearDatastore: true,
+        maxConcurrent: 50,
+        minTime: 50,
+        timeout: groupTimeout,
+      }),
+    );
     const key = "deleted";
     const limiter = group1.key(key); // only for countKeys() use
 
@@ -547,6 +566,13 @@ describe("Cluster coordination", function () {
       .then(function () {
         expect(group1.keys().length).toEqual(1);
         expect(group2.keys().length).toEqual(1);
+        return group1.key(key).running();
+      })
+      .then(function () {
+        // Call deleteKey ONCE and assert its return value — retrying a delete
+        // until it returns true would mask a regression where the first call
+        // wrongly returns false. group1 holds the local instance, so true is
+        // guaranteed structurally (instance != null short-circuits).
         return group1.deleteKey(key);
       })
       .then(function (deleted) {
@@ -569,34 +595,38 @@ describe("Cluster coordination", function () {
       .then(function () {
         expect(group1.keys().length).toEqual(0);
         expect(group2.keys().length).toEqual(0);
-        return Promise.all([group1.disconnect(false), group2.disconnect(false)]);
       });
   });
 
-  it("Should delete Redis keys from a group even when the local limiter is not present", function () {
-    const h = createJobHarness();
-    rootLimiter = makeLimiter();
+  test("Should delete Redis keys from a group even when the local limiter is not present", function ({
+    harness: h,
+    track,
+  }) {
     // groupTimeout pulls double duty here: it sets the redis-side TTL
     // (must not expire before group2.deleteKey runs), and it gates
     // autocleanup interval (timeout/2). 2000ms was enough for autocleanup
     // to fire within the waitFor window, but tight enough that under stress
     // the keys could TTL-expire before deleteKey ran. Refreshing the TTL
     // explicitly via running() right before deleteKey decouples the two.
-    const groupTimeout = 2000;
-    const group1 = new Bottleneck.Group({
-      datastore: process.env.DATASTORE,
-      clearDatastore: true,
-      maxConcurrent: 50,
-      minTime: 50,
-      timeout: groupTimeout,
-    });
-    const group2 = new Bottleneck.Group({
-      datastore: process.env.DATASTORE,
-      clearDatastore: true,
-      maxConcurrent: 50,
-      minTime: 50,
-      timeout: groupTimeout,
-    });
+    const groupTimeout = 5000;
+    const group1 = track(
+      new Bottleneck.Group({
+        datastore: process.env.DATASTORE,
+        clearDatastore: true,
+        maxConcurrent: 50,
+        minTime: 50,
+        timeout: groupTimeout,
+      }),
+    );
+    const group2 = track(
+      new Bottleneck.Group({
+        datastore: process.env.DATASTORE,
+        clearDatastore: true,
+        maxConcurrent: 50,
+        minTime: 50,
+        timeout: groupTimeout,
+      }),
+    );
     const key = "deleted-cluster-wide";
     const limiter = group1.key(key); // only for countKeys() use
 
@@ -605,11 +635,20 @@ describe("Cluster coordination", function () {
       .then(function () {
         expect(group1.keys().length).toEqual(1);
         expect(group2.keys().length).toEqual(0);
-        // Refresh the redis-side TTL before deleteKey. Any operation that
-        // hits refresh_expiration in lua resets the timer to groupTimeout.
         return group1.key(key).running();
       })
       .then(function () {
+        // The keys were written through group1's connection; poll read-only
+        // existence before the cross-group delete so a slow write can't turn
+        // this into a false failure...
+        return waitForState(async function () {
+          expect(await countKeys(limiter)).toBeGreaterThan(0);
+        });
+      })
+      .then(function () {
+        // ...then call deleteKey ONCE and assert its return value. group2 has
+        // no local instance, so the value reflects the redis DEL — retrying
+        // until true would mask a regression where it wrongly returns false.
         return group2.deleteKey(key);
       })
       .then(function (deleted) {
@@ -631,28 +670,30 @@ describe("Cluster coordination", function () {
       .then(function () {
         expect(group1.keys().length).toEqual(0);
         expect(group2.keys().length).toEqual(0);
-        return Promise.all([group1.disconnect(false), group2.disconnect(false)]);
       });
   });
 
-  it("Should returns all Group keys in the cluster", async function () {
-    rootLimiter = makeLimiter();
+  test("Should returns all Group keys in the cluster", async function ({ track }) {
     // Use a long timeout so redis-side TTLs cannot expire mid-test under load.
     // Original 3000ms was tight enough that a slow run (cumulative redis latency)
     // could let keys expire before the assertions, then autocleanup would prune
     // them from instances and group.keys() would surprisingly return [].
-    const group1 = new Bottleneck.Group({
-      datastore: process.env.DATASTORE,
-      clearDatastore: true,
-      id: "same",
-      timeout: 30000,
-    });
-    const group2 = new Bottleneck.Group({
-      datastore: process.env.DATASTORE,
-      clearDatastore: true,
-      id: "same",
-      timeout: 30000,
-    });
+    const group1 = track(
+      new Bottleneck.Group({
+        datastore: process.env.DATASTORE,
+        clearDatastore: true,
+        id: "same",
+        timeout: 30000,
+      }),
+    );
+    const group2 = track(
+      new Bottleneck.Group({
+        datastore: process.env.DATASTORE,
+        clearDatastore: true,
+        id: "same",
+        timeout: 30000,
+      }),
+    );
     const keys1 = ["lorem", "ipsum", "dolor", "sit", "amet", "consectetur"];
     const keys2 = ["adipiscing", "elit"];
     const both = keys1.concat(keys2);
@@ -665,48 +706,51 @@ describe("Cluster coordination", function () {
     expect((await group1.clusterKeys()).sort()).toEqual(both.sort());
     expect((await group1.clusterKeys()).sort()).toEqual(both.sort());
 
-    const group3 = new Bottleneck.Group({ datastore: "local" });
+    const group3 = track(new Bottleneck.Group({ datastore: "local" }));
     expect(await group3.clusterKeys()).toEqual([]);
-
-    await group1.disconnect(false);
-    await group2.disconnect(false);
   });
 
-  it("Should queue up the least busy limiter", async function () {
-    const h = createJobHarness();
-    rootLimiter = makeLimiter();
-    const limiter1 = new Bottleneck({
-      datastore: process.env.DATASTORE,
-      clearDatastore: true,
-      id: "busy",
-      timeout: 3000,
-      maxConcurrent: 3,
-      trackDoneStatus: true,
-    });
-    const limiter2 = new Bottleneck({
-      datastore: process.env.DATASTORE,
-      clearDatastore: true,
-      id: "busy",
-      timeout: 3000,
-      maxConcurrent: 3,
-      trackDoneStatus: true,
-    });
-    const limiter3 = new Bottleneck({
-      datastore: process.env.DATASTORE,
-      clearDatastore: true,
-      id: "busy",
-      timeout: 3000,
-      maxConcurrent: 3,
-      trackDoneStatus: true,
-    });
-    const limiter4 = new Bottleneck({
-      datastore: process.env.DATASTORE,
-      clearDatastore: true,
-      id: "busy",
-      timeout: 3000,
-      maxConcurrent: 3,
-      trackDoneStatus: true,
-    });
+  test("Should queue up the least busy limiter", async function ({ harness: h, track }) {
+    const limiter1 = track(
+      new Bottleneck({
+        datastore: process.env.DATASTORE,
+        clearDatastore: true,
+        id: "busy",
+        timeout: 3000,
+        maxConcurrent: 3,
+        trackDoneStatus: true,
+      }),
+    );
+    const limiter2 = track(
+      new Bottleneck({
+        datastore: process.env.DATASTORE,
+        clearDatastore: true,
+        id: "busy",
+        timeout: 3000,
+        maxConcurrent: 3,
+        trackDoneStatus: true,
+      }),
+    );
+    const limiter3 = track(
+      new Bottleneck({
+        datastore: process.env.DATASTORE,
+        clearDatastore: true,
+        id: "busy",
+        timeout: 3000,
+        maxConcurrent: 3,
+        trackDoneStatus: true,
+      }),
+    );
+    const limiter4 = track(
+      new Bottleneck({
+        datastore: process.env.DATASTORE,
+        clearDatastore: true,
+        id: "busy",
+        timeout: 3000,
+        maxConcurrent: 3,
+        trackDoneStatus: true,
+      }),
+    );
 
     let resolve1, resolve2, resolve3, resolve4, resolve5, resolve6, resolve7;
     const p1 = new Promise(function (resolve, _reject) {
@@ -754,12 +798,9 @@ describe("Cluster coordination", function () {
     // D/E/F/G queue, regardless of how long the submit round-trips take.
     // We release A after the QUEUED assertions so it finishes before B,
     // preserving the original [1, 4, 5, 6, 7, 2, 3] completion order.
-    let releaseA;
-    const aSignal = new Promise(function (r) {
-      releaseA = r;
-    });
+    const sigA = deferred();
 
-    await limiter1.submit({ id: "A" }, h.deferredJob, aSignal, null, 1, resolve1);
+    await limiter1.submit({ id: "A" }, h.deferredJob, sigA.signal, null, 1, resolve1);
     // B and C must finish after D/E/F/G. Use generous durations so the test
     // is robust to redis round-trip delays between releaseA() and G's completion.
     await limiter1.submit({ id: "B" }, h.slowJob, 1000, null, 2, resolve2);
@@ -776,7 +817,7 @@ describe("Cluster coordination", function () {
     expect(limiter3.counts().QUEUED).toEqual(2);
     expect(limiter4.counts().QUEUED).toEqual(2);
 
-    releaseA();
+    sigA.release();
 
     await Promise.all([p1, p2, p3, p4, p5, p6, p7]);
 
@@ -805,48 +846,52 @@ describe("Cluster coordination", function () {
     expect(calls.slice(5, 7).sort()).toEqual([4, 5]);
     expect(calls.slice(7, 9).sort()).toEqual([6, 7]);
     expect(calls.slice(9, 11).sort()).toEqual([2, 3]);
-
-    await limiter1.disconnect(false);
-    await limiter2.disconnect(false);
-    await limiter3.disconnect(false);
-    await limiter4.disconnect(false);
   });
 
-  it("Should pass the remaining capacity to other limiters", async function () {
-    const h = createJobHarness();
-    rootLimiter = makeLimiter();
-    const limiter1 = new Bottleneck({
-      datastore: process.env.DATASTORE,
-      clearDatastore: true,
-      id: "busy",
-      timeout: 3000,
-      maxConcurrent: 3,
-      trackDoneStatus: true,
-    });
-    const limiter2 = new Bottleneck({
-      datastore: process.env.DATASTORE,
-      clearDatastore: true,
-      id: "busy",
-      timeout: 3000,
-      maxConcurrent: 3,
-      trackDoneStatus: true,
-    });
-    const limiter3 = new Bottleneck({
-      datastore: process.env.DATASTORE,
-      clearDatastore: true,
-      id: "busy",
-      timeout: 3000,
-      maxConcurrent: 3,
-      trackDoneStatus: true,
-    });
-    const limiter4 = new Bottleneck({
-      datastore: process.env.DATASTORE,
-      clearDatastore: true,
-      id: "busy",
-      timeout: 3000,
-      maxConcurrent: 3,
-      trackDoneStatus: true,
-    });
+  test("Should pass the remaining capacity to other limiters", async function ({
+    harness: h,
+    track,
+  }) {
+    const limiter1 = track(
+      new Bottleneck({
+        datastore: process.env.DATASTORE,
+        clearDatastore: true,
+        id: "busy",
+        timeout: 3000,
+        maxConcurrent: 3,
+        trackDoneStatus: true,
+      }),
+    );
+    const limiter2 = track(
+      new Bottleneck({
+        datastore: process.env.DATASTORE,
+        clearDatastore: true,
+        id: "busy",
+        timeout: 3000,
+        maxConcurrent: 3,
+        trackDoneStatus: true,
+      }),
+    );
+    const limiter3 = track(
+      new Bottleneck({
+        datastore: process.env.DATASTORE,
+        clearDatastore: true,
+        id: "busy",
+        timeout: 3000,
+        maxConcurrent: 3,
+        trackDoneStatus: true,
+      }),
+    );
+    const limiter4 = track(
+      new Bottleneck({
+        datastore: process.env.DATASTORE,
+        clearDatastore: true,
+        id: "busy",
+        timeout: 3000,
+        maxConcurrent: 3,
+        trackDoneStatus: true,
+      }),
+    );
     let t3, t4;
 
     let resolve1, resolve2, resolve3, resolve4, resolve5;
@@ -889,11 +934,15 @@ describe("Cluster coordination", function () {
     // submits can take >50ms, so limiter1's job sometimes finished
     // before the asserts ran — capacity freed, limiter3's queued job
     // dispatched, and `limiter3.counts().QUEUED` flipped from 1 to 0.
-    let releaseFirst;
-    const firstSignal = new Promise(function (r) {
-      releaseFirst = r;
-    });
-    await limiter1.submit({ id: "A", weight: 2 }, h.deferredJob, firstSignal, null, 1, resolve1);
+    const sigFirst = deferred();
+    await limiter1.submit(
+      { id: "A", weight: 2 },
+      h.deferredJob,
+      sigFirst.signal,
+      null,
+      1,
+      resolve1,
+    );
     await limiter2.submit({ id: "C" }, h.slowJob, 550, null, 2, resolve2);
 
     expect(runningOrExecuting(limiter1)).toEqual(1);
@@ -909,7 +958,7 @@ describe("Cluster coordination", function () {
     // Release limiter1's job; capacity opens up; queued jobs dispatch.
     // Order is preserved because deferredJob's calls.push fires when the
     // signal resolves (matching slowJob's timing semantics).
-    releaseFirst();
+    sigFirst.release();
 
     await Promise.all([p1, p2, p3, p4, p5]);
 
@@ -919,47 +968,49 @@ describe("Cluster coordination", function () {
     // so L3’s score stays strictly below L4’s until work runs — the first grant after
     // releaseFirst() targets L3, then FIFO on L4 gives [4] before [5]. Call-log order
     // must remain [[3],[4],[5]]; this is not the symmetric F/G case in "least busy limiter".
-    h.checkResultsOrder([["A"], ["B"], ["C"], ["D"], [1], [3], [4], [5], [2]]);
+    expect(h.log).toHaveCallOrder([["A"], ["B"], ["C"], ["D"], [1], [3], [4], [5], [2]]);
 
     // limiter3's job 3 and limiter4's job 4 are both 50ms slowJobs that start
     // back-to-back; they should finish near-simultaneously. The 15ms
     // ceiling was too tight under parallel testcontainer load — 100ms
     // still proves "near-simultaneous" while absorbing event-loop jitter.
     expect(Math.abs(t3 - t4)).toBeLessThan(100);
-
-    await limiter1.disconnect(false);
-    await limiter2.disconnect(false);
-    await limiter3.disconnect(false);
-    await limiter4.disconnect(false);
   });
 
-  it("Should take the capacity and blacklist if the priority limiter is not responding", async function () {
-    const h = createJobHarness();
-    rootLimiter = makeLimiter();
-    const limiter1 = new Bottleneck({
-      datastore: process.env.DATASTORE,
-      clearDatastore: true,
-      id: "crash",
-      timeout: 3000,
-      maxConcurrent: 1,
-      trackDoneStatus: true,
-    });
-    const limiter2 = new Bottleneck({
-      datastore: process.env.DATASTORE,
-      clearDatastore: true,
-      id: "crash",
-      timeout: 3000,
-      maxConcurrent: 1,
-      trackDoneStatus: true,
-    });
-    const limiter3 = new Bottleneck({
-      datastore: process.env.DATASTORE,
-      clearDatastore: true,
-      id: "crash",
-      timeout: 3000,
-      maxConcurrent: 1,
-      trackDoneStatus: true,
-    });
+  test("Should take the capacity and blacklist if the priority limiter is not responding", async function ({
+    harness: h,
+    track,
+  }) {
+    const limiter1 = track(
+      new Bottleneck({
+        datastore: process.env.DATASTORE,
+        clearDatastore: true,
+        id: "crash",
+        timeout: 3000,
+        maxConcurrent: 1,
+        trackDoneStatus: true,
+      }),
+    );
+    const limiter2 = track(
+      new Bottleneck({
+        datastore: process.env.DATASTORE,
+        clearDatastore: true,
+        id: "crash",
+        timeout: 3000,
+        maxConcurrent: 1,
+        trackDoneStatus: true,
+      }),
+    );
+    const limiter3 = track(
+      new Bottleneck({
+        datastore: process.env.DATASTORE,
+        clearDatastore: true,
+        id: "crash",
+        timeout: 3000,
+        maxConcurrent: 1,
+        trackDoneStatus: true,
+      }),
+    );
 
     await limiter1.schedule({ id: "1" }, h.promise, null, "A");
     await limiter2.schedule({ id: "2" }, h.promise, null, "B");
@@ -988,10 +1039,6 @@ describe("Cluster coordination", function () {
     await limiter2.disconnect(false);
 
     await Promise.all([p1, p3]);
-    h.checkResultsOrder([["A"], ["B"], ["C"], [4], [6]]);
-
-    await limiter1.disconnect(false);
-    await limiter2.disconnect(false);
-    await limiter3.disconnect(false);
+    expect(h.log).toHaveCallOrder([["A"], ["B"], ["C"], [4], [6]]);
   });
 });

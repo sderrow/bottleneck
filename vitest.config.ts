@@ -7,6 +7,12 @@ const libGlobalSetup = "test/global-setup/lib.ts";
 
 const sourceInclude = ["test/**/*.test.js"];
 const sourceExclude = ["test/smoke/**", "test/memory/**"];
+// Batcher is datastore-independent (its tests never touch Redis), so running it
+// under the redis projects is pure duplication — and worse, it uses fake timers,
+// which must never be installed in a fork holding the long-lived redis flush
+// client (a reconnect timer scheduled on the fake clock is discarded unfired by
+// useRealTimers(), stranding the client).
+const redisExclude = [...sourceExclude, "test/batcher.test.js"];
 
 export default defineConfig({
   test: {
@@ -30,7 +36,7 @@ export default defineConfig({
           root: ".",
           env: { DATASTORE: "ioredis" },
           include: sourceInclude,
-          exclude: [...sourceExclude, "test/node_redis.test.js"],
+          exclude: [...redisExclude, "test/node_redis.test.js"],
           setupFiles: [setupFile],
           testTimeout: 15_000,
           hookTimeout: 30_000,
@@ -42,7 +48,7 @@ export default defineConfig({
           root: ".",
           env: { DATASTORE: "redis" },
           include: sourceInclude,
-          exclude: [...sourceExclude, "test/ioredis.test.js"],
+          exclude: [...redisExclude, "test/ioredis.test.js"],
           setupFiles: [setupFile],
           testTimeout: 15_000,
           hookTimeout: 30_000,

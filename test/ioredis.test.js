@@ -1,22 +1,11 @@
-import { describe, it, afterEach, expect } from "vitest";
-import { createJobHarness } from "./helpers/job-tracking.js";
-const makeLimiter = require("./helpers/limiter");
+import { test, describe, expect } from "./helpers/test-api.js";
 const Bottleneck = require("./bottleneck");
 const Redis = require("ioredis");
 const buildClientOptions = require("./redis-client-options");
 
-describe("ioredis-only", function () {
-  if (process.env.DATASTORE !== "ioredis") {
-    throw new Error("DATASTORE must be ioredis");
-  }
-  let limiter;
-
-  afterEach(function () {
-    return limiter.disconnect(false);
-  });
-
-  it("Should accept ioredis lib override", function () {
-    limiter = makeLimiter({
+describe("ioredis-only", () => {
+  test("Should accept ioredis lib override", function ({ makeLimiter }) {
+    const limiter = makeLimiter({
       maxConcurrent: 2,
       Redis,
       clientOptions: {},
@@ -31,8 +20,8 @@ describe("ioredis-only", function () {
     expect(limiter.datastore).toStrictEqual("ioredis");
   });
 
-  it("Should connect in Redis Cluster mode", function () {
-    limiter = makeLimiter({
+  test("Should connect in Redis Cluster mode", function ({ makeLimiter }) {
+    const limiter = makeLimiter({
       maxConcurrent: 2,
       clientOptions: {},
       clusterNodes: [
@@ -47,10 +36,13 @@ describe("ioredis-only", function () {
     expect(limiter._store.connection.client.nodes().length).toBeGreaterThanOrEqual(0);
   });
 
-  it("Should connect in Redis Cluster mode with premade client", function () {
+  test("Should connect in Redis Cluster mode with premade client", function ({
+    makeLimiter,
+    track,
+  }) {
     const client = new Redis.Cluster("");
-    const connection = new Bottleneck.IORedisConnection({ client });
-    limiter = makeLimiter({
+    track(new Bottleneck.IORedisConnection({ client }));
+    const limiter = makeLimiter({
       maxConcurrent: 2,
       clientOptions: {},
       clusterNodes: [
@@ -63,17 +55,17 @@ describe("ioredis-only", function () {
 
     expect(limiter.datastore).toStrictEqual("ioredis");
     expect(limiter._store.connection.client.nodes().length).toBeGreaterThanOrEqual(0);
-    connection.disconnect(false);
   });
 
-  it("Should accept existing connections", function () {
-    const h = createJobHarness();
-    const connection = new Bottleneck.IORedisConnection({
-      Redis,
-      clientOptions: buildClientOptions("ioredis"),
-    });
+  test("Should accept existing connections", function ({ harness: h, makeLimiter, track }) {
+    const connection = track(
+      new Bottleneck.IORedisConnection({
+        Redis,
+        clientOptions: buildClientOptions("ioredis"),
+      }),
+    );
     connection.id = "super-connection";
-    limiter = makeLimiter({
+    const limiter = makeLimiter({
       minTime: 50,
       connection,
     });
@@ -84,8 +76,8 @@ describe("ioredis-only", function () {
     return h
       .flushLimiter(limiter)
       .then(function (_results) {
-        h.checkResultsOrder([[1], [2]]);
-        h.checkDuration(50);
+        expect(h.log).toHaveCallOrder([[1], [2]]);
+        expect(h).toHaveFinalCallAt(50);
         expect(limiter.connection.id).toStrictEqual("super-connection");
         expect(limiter.datastore).toStrictEqual("ioredis");
 
@@ -93,18 +85,16 @@ describe("ioredis-only", function () {
       })
       .then(function () {
         expect(limiter.clients().client.status).toStrictEqual("ready");
-        return connection.disconnect();
       });
   });
 
-  it("Should accept existing redis clients", function () {
-    const h = createJobHarness();
+  test("Should accept existing redis clients", function ({ harness: h, makeLimiter, track }) {
     const client = new Redis(buildClientOptions("ioredis"));
     client.id = "super-client";
 
-    const connection = new Bottleneck.IORedisConnection({ client });
+    const connection = track(new Bottleneck.IORedisConnection({ client }));
     connection.id = "super-connection";
-    limiter = makeLimiter({
+    const limiter = makeLimiter({
       minTime: 50,
       connection,
     });
@@ -115,8 +105,8 @@ describe("ioredis-only", function () {
     return h
       .flushLimiter(limiter)
       .then(function (_results) {
-        h.checkResultsOrder([[1], [2]]);
-        h.checkDuration(50);
+        expect(h.log).toHaveCallOrder([[1], [2]]);
+        expect(h).toHaveFinalCallAt(50);
         expect(limiter.clients().client.id).toStrictEqual("super-client");
         expect(limiter.connection.id).toStrictEqual("super-connection");
         expect(limiter.datastore).toStrictEqual("ioredis");
@@ -125,21 +115,22 @@ describe("ioredis-only", function () {
       })
       .then(function () {
         expect(limiter.clients().client.status).toStrictEqual("ready");
-        return connection.disconnect();
       });
   });
 
-  it("Should trigger error events on the shared connection", function () {
+  test("Should trigger error events on the shared connection", function ({ makeLimiter, track }) {
     expect.hasAssertions();
     return new Promise(function (resolve, reject) {
-      const connection = new Bottleneck.IORedisConnection({
-        Redis,
-        clientOptions: {
-          port: 1,
-        },
-      });
+      const connection = track(
+        new Bottleneck.IORedisConnection({
+          Redis,
+          clientOptions: {
+            port: 1,
+          },
+        }),
+      );
       let fired = false;
-      limiter = makeLimiter({ connection });
+      const limiter = makeLimiter({ connection });
       connection.on("error", function (_err) {
         if (fired) return;
         fired = true;
