@@ -29,7 +29,7 @@ jobs:
         run: pnpm run lint
 
       - name: Check types
-        run: pnpm run check-types
+        run: pnpm tsc
 
       - name: Run build
         run: pnpm run build
