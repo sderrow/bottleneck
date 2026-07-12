@@ -16,6 +16,33 @@ const runningOrExecuting = (limiter) => {
   const counts = limiter.counts();
   return counts.RUNNING + counts.EXECUTING;
 };
+
+// Error messages changed between redis 6 and 7, with a new ERR prefix
+const SETTINGS_KEY_NOT_FOUND = /^(.*\s)?SETTINGS_KEY_NOT_FOUND$/;
+const UNKNOWN_CLIENT = /^(.*\s)?UNKNOWN_CLIENT$/;
+
+async function captureFirstScriptError(limiter, trigger) {
+  const connection = limiter._store.connection;
+  const original = connection.__runScript__.bind(connection);
+  let captured;
+
+  connection.__runScript__ = async (name, id, args) => {
+    try {
+      return await original(name, id, args);
+    } catch (e) {
+      captured ??= e;
+      throw e;
+    }
+  };
+
+  try {
+    await trigger();
+  } finally {
+    connection.__runScript__ = original;
+  }
+
+  return captured;
+}
 describe("Cluster coordination", () => {
   if (process.env.DATASTORE !== "redis" && process.env.DATASTORE !== "ioredis") {
     throw new Error("DATASTORE must be redis or ioredis");
@@ -161,6 +188,49 @@ describe("Cluster coordination", () => {
     expect(runningAfter).toEqual(0);
     const countRecreated = await countKeys(limiter);
     expect(countRecreated).toBeGreaterThan(0);
+  });
+
+  test("Should parse SETTINGS_KEY_NOT_FOUND from Redis", async ({ track }) => {
+    const limiter = track(
+      new Bottleneck({ datastore: process.env.DATASTORE, clearDatastore: true }),
+    );
+
+    await limiter.ready();
+    await deleteKeys(limiter);
+
+    const err = await captureFirstScriptError(limiter, () => limiter.running());
+
+    expect(err).toBeTruthy();
+    expect(err.message).toMatch(SETTINGS_KEY_NOT_FOUND);
+  });
+
+  test("Should re-register when client registration is missing in Redis", async ({ track }) => {
+    const limiter = track(
+      new Bottleneck({ datastore: process.env.DATASTORE, clearDatastore: true }),
+    );
+
+    await limiter.ready();
+    const clientLastSeenKey = limiterKeys(limiter)[7];
+    const clientId = limiter._store.clientId;
+    await runCommand(limiter, "zrem", [clientLastSeenKey, clientId]);
+
+    expect(await limiter.running()).toEqual(0);
+    expect(await runCommand(limiter, "zscore", [clientLastSeenKey, clientId])).not.toBeNull();
+  });
+
+  test("Should parse UNKNOWN_CLIENT from Redis", async ({ track }) => {
+    const limiter = track(
+      new Bottleneck({ datastore: process.env.DATASTORE, clearDatastore: true }),
+    );
+
+    await limiter.ready();
+    const clientLastSeenKey = limiterKeys(limiter)[7];
+    await runCommand(limiter, "zrem", [clientLastSeenKey, limiter._store.clientId]);
+
+    const err = await captureFirstScriptError(limiter, () => limiter.running());
+
+    expect(err).toBeTruthy();
+    expect(err.message).toMatch(UNKNOWN_CLIENT);
   });
 
   test("Should drop all jobs in the Cluster when entering blocked mode", async ({
