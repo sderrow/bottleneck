@@ -396,49 +396,6 @@ class Bottleneck {
     }
   }
 
-  submit(...sargs) {
-    let cb, fn, options;
-    if (typeof sargs[0] === "function") {
-      cb = sargs.pop();
-      [fn, ...sargs] = sargs;
-      options = parser.load({}, this.jobDefaults);
-    } else {
-      cb = sargs.pop();
-      [options, fn, ...sargs] = sargs;
-      options = parser.load(options, this.jobDefaults);
-    }
-
-    const task = (...targs) => {
-      return new Promise((resolve, reject) =>
-        fn(...targs, (...args) => (args[0] != null ? reject : resolve)(args)),
-      );
-    };
-
-    const job = new Job(
-      task,
-      sargs,
-      options,
-      this.jobDefaults,
-      this.rejectOnDrop,
-      this.Events,
-      this._states,
-    );
-    // Promise-to-callback bridge for the dual submit()/schedule() API: submit()
-    // is synchronous and pipes the job's eventual outcome into the Node-style
-    // callback. The chain form IS the bridge — an async wrapper would just add
-    // a floating promise around the same pipe.
-    job.promise
-      .then((args) => (typeof cb === "function" ? cb(...(args || [])) : undefined))
-      .catch((args) => {
-        if (Array.isArray(args)) {
-          return typeof cb === "function" ? cb(...args) : undefined;
-        } else {
-          return typeof cb === "function" ? cb(args) : undefined;
-        }
-      });
-    return this._receive(job);
-  }
-
   schedule(...args) {
     let options, task;
     if (typeof args[0] === "function") {

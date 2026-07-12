@@ -1,7 +1,7 @@
 import sleep from "../../src/sleep.js";
 
 /**
- * Manually-released signal for {@link createTaskFns}'s deferredJob/deferredPromise.
+ * Manually-released signal for {@link createTaskFns}'s deferredPromise.
  *
  *   const d = deferred();
  *   limiter.schedule(h.deferredPromise, d.signal, null, 1);
@@ -21,26 +21,6 @@ export function deferred() {
  * Expects a `log` with a `record(err, result)` method.
  */
 export function createTaskFns(log) {
-  function job(err, ...result) {
-    const cb = result.pop();
-    log.record(err, result);
-    cb.apply(null, [err].concat(result));
-  }
-
-  async function slowJob(duration, err, ...result) {
-    const cb = result.pop();
-    await sleep(duration);
-    log.record(err, result);
-    cb.apply(null, [err].concat(result));
-  }
-
-  async function deferredJob(signal, err, ...result) {
-    const cb = result.pop();
-    await signal;
-    log.record(err, result);
-    cb.apply(null, [err].concat(result));
-  }
-
   async function promise(err, ...result) {
     log.record(err, result);
     if (err === null) {
@@ -68,9 +48,6 @@ export function createTaskFns(log) {
   }
 
   return {
-    job,
-    slowJob,
-    deferredJob,
     promise,
     slowPromise,
     deferredPromise,

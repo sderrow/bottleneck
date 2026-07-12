@@ -7,7 +7,7 @@ const Bottleneck = require("./bottleneck");
 useFakeClock();
 
 describe("Group", () => {
-  test("Should create limiters", ({ track }) => {
+  test("Should create limiters", async ({ track }) => {
     expect.hasAssertions();
     const group = track(
       new Bottleneck.Group({
@@ -34,28 +34,22 @@ describe("Group", () => {
       group.key("C").schedule(job, 7);
     }, 40);
 
-    return new Promise((resolve, reject) => {
-      group.key("A").submit((cb) => {
-        try {
-          expect(results.length).toStrictEqual(6);
+    // Scheduled last on key "A", so it runs once all other jobs are done and
+    // acts as the completion barrier; assertion failures reject the promise.
+    await group.key("A").schedule(async () => {
+      expect(results.length).toStrictEqual(6);
 
-          const byGroup = {};
-          for (let i = 0; i < results.length; i++) {
-            const v = results[i][0];
-            const key = v === 1 || v === 3 || v === 4 ? "A" : v === 5 ? "B" : "C";
-            byGroup[key] = byGroup[key] || [];
-            byGroup[key].push(v);
-          }
-          expect(byGroup.A).toStrictEqual([1, 3, 4]);
-          expect(byGroup.B).toStrictEqual([5]);
-          expect(byGroup.C).toStrictEqual([6, 7]);
-          expect(results[0]).toStrictEqual([1, 2]);
-          cb();
-          resolve();
-        } catch (e) {
-          reject(e);
-        }
-      }, null);
+      const byGroup = {};
+      for (let i = 0; i < results.length; i++) {
+        const v = results[i][0];
+        const key = v === 1 || v === 3 || v === 4 ? "A" : v === 5 ? "B" : "C";
+        byGroup[key] = byGroup[key] || [];
+        byGroup[key].push(v);
+      }
+      expect(byGroup.A).toStrictEqual([1, 3, 4]);
+      expect(byGroup.B).toStrictEqual([5]);
+      expect(byGroup.C).toStrictEqual([6, 7]);
+      expect(results[0]).toStrictEqual([1, 2]);
     });
   });
 
@@ -135,7 +129,7 @@ describe("Group", () => {
     await limiter.ready();
   });
 
-  test("Should pass error on failure", ({ track }) => {
+  test("Should pass error on failure", async ({ track }) => {
     const failureMessage = "SOMETHING BLEW UP!!";
     const group = track(
       new Bottleneck.Group({
@@ -169,16 +163,10 @@ describe("Group", () => {
       group.key("C").schedule(job, 7);
     }, 40);
 
-    return new Promise((resolve, reject) => {
-      group.key("A").submit((cb) => {
-        try {
-          expect(results).toStrictEqual([[1, 2], ["CAUGHT", failureMessage], [6], [3], [7], [4]]);
-          cb();
-          resolve();
-        } catch (e) {
-          reject(e);
-        }
-      }, null);
+    // Scheduled last on key "A", so it runs once all other jobs are done and
+    // acts as the completion barrier; assertion failures reject the promise.
+    await group.key("A").schedule(async () => {
+      expect(results).toStrictEqual([[1, 2], ["CAUGHT", failureMessage], [6], [3], [7], [4]]);
     });
   });
 

@@ -1,6 +1,6 @@
 import { describe, expect } from "vitest";
 import sleep from "../src/sleep.js";
-import { test, waitForState, deferred } from "./helpers/test-api.js";
+import { test, waitForState, deferred, enqueued } from "./helpers/test-api.js";
 const Bottleneck = require("./bottleneck");
 const Scripts = require("../src/cluster/Scripts.js");
 
@@ -16,20 +16,6 @@ const runningOrExecuting = (limiter) => {
   const counts = limiter.counts();
   return counts.RUNNING + counts.EXECUTING;
 };
-// Promisify a submit() callback: pass `cb` to limiter.submit and await
-// `promise` for the job's result value. `onCall` runs at completion time
-// (e.g. to timestamp it).
-const submitResult = (onCall) => {
-  const d = deferred();
-  return {
-    promise: d.signal,
-    cb: (_err, n) => {
-      onCall?.();
-      d.release(n);
-    },
-  };
-};
-
 describe("Cluster coordination", () => {
   if (process.env.DATASTORE !== "redis" && process.env.DATASTORE !== "ioredis") {
     throw new Error("DATASTORE must be redis or ioredis");
@@ -209,14 +195,31 @@ describe("Cluster coordination", () => {
     );
     await limiter2.ready();
 
+    // Fire jobs 1-2 on limiter1, then wait for enqueued(limiter1) so both
+    // registrations reach redis before limiter2's jobs — preserving the
+    // enqueue order the old awaited submit groups pinned. Job 2 is NOT
+    // dropped yet at this point: blocked mode only trips once limiter2's
+    // submissions push the cluster queue to highWater, so p2's rejection
+    // cannot be awaited before jobs 3-5 are fired.
+    const p1 = limiter1.schedule(h.slowPromise, 100, null, 1);
+    const p2 = limiter1.schedule(h.slowPromise, 100, null, 2);
+    await enqueued(limiter1);
+    // Jobs 3-5 trip blocked mode, which drops jobs 2-5 cluster-wide and
+    // rejects their schedule promises (default rejectOnDrop). The .rejects
+    // assertions join the barrier's Promise.all: they attach synchronously
+    // with these schedules — before the drops fire during the registration
+    // round-trips — so vitest never sees an unhandled rejection, and the
+    // await point covers all four drops, which the old test confirmed via
+    // the queue counts right below.
+    const p3 = limiter2.schedule(h.slowPromise, 100, null, 3);
+    const p4 = limiter2.schedule(h.slowPromise, 100, null, 4);
+    const p5 = limiter2.schedule(h.slowPromise, 100, null, 5);
     await Promise.all([
-      limiter1.submit(h.slowJob, 100, null, 1, h.noErrVal(1)),
-      limiter1.submit(h.slowJob, 100, null, 2, (err) => expect(err).toBeTruthy()),
-    ]);
-    await Promise.all([
-      limiter2.submit(h.slowJob, 100, null, 3, (err) => expect(err).toBeTruthy()),
-      limiter2.submit(h.slowJob, 100, null, 4, (err) => expect(err).toBeTruthy()),
-      limiter2.submit(h.slowJob, 100, null, 5, (err) => expect(err).toBeTruthy()),
+      enqueued(limiter2),
+      expect(p2).rejects.toThrow("This job has been dropped by Bottleneck"),
+      expect(p3).rejects.toThrow("This job has been dropped by Bottleneck"),
+      expect(p4).rejects.toThrow("This job has been dropped by Bottleneck"),
+      expect(p5).rejects.toThrow("This job has been dropped by Bottleneck"),
     ]);
 
     const queues = await runCommand(limiter1, "hvals", [client_num_queued_key]);
@@ -228,11 +231,15 @@ describe("Cluster coordination", () => {
     ]);
     expect(clusterQueues).toEqual([0, 0]);
 
+    // Job 1 is the only survivor; its completion is confirmed alongside the
+    // drop counts the old test checked here.
+    await expect(p1).resolves.toEqual([1]);
+
     // Poll for the final settled state instead of a fixed wait. Under
     // event-loop stress (sustained test runs), setTimeout(100) can slip
     // multiple seconds and break a wall-clock-based wait. We give
     // 5000ms (default 2000ms is not always enough): j1's 100ms
-    // slowJob can dispatch hundreds of ms late under load (a single
+    // slowPromise can dispatch hundreds of ms late under load (a single
     // connect-retry on the ioredis client adds ~500ms to register;
     // doExecute's setTimeout(0) drifts when the event loop is busy
     // serving other parallel test workers).
@@ -690,53 +697,49 @@ describe("Cluster coordination", () => {
       }),
     );
 
-    const r1 = submitResult();
-    const r2 = submitResult();
-    const r3 = submitResult();
-    const r4 = submitResult();
-    const r5 = submitResult();
-    const r6 = submitResult();
-    const r7 = submitResult();
-
     await limiter1.schedule({ id: "1" }, h.promise, null, "A");
     await limiter2.schedule({ id: "2" }, h.promise, null, "B");
     await limiter3.schedule({ id: "3" }, h.promise, null, "C");
     await limiter4.schedule({ id: "4" }, h.promise, null, "D");
 
     // Hold A open with a deferred job so cluster capacity stays at 3 while
-    // D/E/F/G queue, regardless of how long the submit round-trips take.
+    // D/E/F/G queue, regardless of how long the registration round-trips take.
     // We release A after the QUEUED assertions so it finishes before B,
     // preserving the original [1, 4, 5, 6, 7, 2, 3] completion order.
+    //
+    // Registration order is load-bearing (client_last_registered feeds the
+    // capacity-priority grants), so each schedule is followed by a drain of
+    // that limiter's enqueued() barrier — the enqueue-time guarantee the old
+    // sequentially-awaited submits provided.
     const sigA = deferred();
 
-    await limiter1.submit({ id: "A" }, h.deferredJob, sigA.signal, null, 1, r1.cb);
+    const p1 = limiter1.schedule({ id: "A" }, h.deferredPromise, sigA.signal, null, 1);
+    await enqueued(limiter1);
     // B and C must finish after D/E/F/G. Use generous durations so the test
     // is robust to redis round-trip delays between releaseA() and G's completion.
-    await limiter1.submit({ id: "B" }, h.slowJob, 1000, null, 2, r2.cb);
-    await limiter2.submit({ id: "C" }, h.slowJob, 1050, null, 3, r3.cb);
+    const p2 = limiter1.schedule({ id: "B" }, h.slowPromise, 1000, null, 2);
+    await enqueued(limiter1);
+    const p3 = limiter2.schedule({ id: "C" }, h.slowPromise, 1050, null, 3);
+    await enqueued(limiter2);
 
     expect(runningOrExecuting(limiter1)).toEqual(2);
     expect(runningOrExecuting(limiter2)).toEqual(1);
 
-    await limiter3.submit({ id: "D" }, h.slowJob, 50, null, 4, r4.cb);
-    await limiter4.submit({ id: "E" }, h.slowJob, 50, null, 5, r5.cb);
-    await limiter3.submit({ id: "F" }, h.slowJob, 50, null, 6, r6.cb);
-    await limiter4.submit({ id: "G" }, h.slowJob, 50, null, 7, r7.cb);
+    const p4 = limiter3.schedule({ id: "D" }, h.slowPromise, 50, null, 4);
+    await enqueued(limiter3);
+    const p5 = limiter4.schedule({ id: "E" }, h.slowPromise, 50, null, 5);
+    await enqueued(limiter4);
+    const p6 = limiter3.schedule({ id: "F" }, h.slowPromise, 50, null, 6);
+    await enqueued(limiter3);
+    const p7 = limiter4.schedule({ id: "G" }, h.slowPromise, 50, null, 7);
+    await enqueued(limiter4);
 
     expect(limiter3.counts().QUEUED).toEqual(2);
     expect(limiter4.counts().QUEUED).toEqual(2);
 
     sigA.release();
 
-    await Promise.all([
-      r1.promise,
-      r2.promise,
-      r3.promise,
-      r4.promise,
-      r5.promise,
-      r6.promise,
-      r7.promise,
-    ]);
+    await Promise.all([p1, p2, p3, p4, p5, p6, p7]);
 
     // The CONTRACT here is "Bottleneck distributes cluster capacity to the
     // least-busy limiter" — i.e. D/E spread to limiter3/limiter4 (instead of
@@ -806,47 +809,59 @@ describe("Cluster coordination", () => {
     );
     let t3, t4;
 
-    const r1 = submitResult();
-    const r2 = submitResult();
-    const r3 = submitResult(() => {
-      t3 = Date.now();
-    });
-    const r4 = submitResult(() => {
-      t4 = Date.now();
-    });
-    const r5 = submitResult();
-
     await limiter1.schedule({ id: "1" }, h.promise, null, "A");
     await limiter2.schedule({ id: "2" }, h.promise, null, "B");
     await limiter3.schedule({ id: "3" }, h.promise, null, "C");
     await limiter4.schedule({ id: "4" }, h.promise, null, "D");
 
-    // Hold limiter1's job (weight 2) with deferredJob so the cluster's
+    // Hold limiter1's job (weight 2) with deferredPromise so the cluster's
     // shared maxConcurrent=3 stays saturated (2+1=3) across the queue
-    // count assertions below. With slowJob(50), under load 4 awaited
-    // submits can take >50ms, so limiter1's job sometimes finished
+    // count assertions below. With slowPromise(50), under load 4 awaited
+    // registrations can take >50ms, so limiter1's job sometimes finished
     // before the asserts ran — capacity freed, limiter3's queued job
     // dispatched, and `limiter3.counts().QUEUED` flipped from 1 to 0.
+    //
+    // Registration order is load-bearing here (see the capacity-priority
+    // comment below), so each schedule is followed by a drain of that
+    // limiter's enqueued() barrier — the enqueue-time guarantee the old
+    // sequentially-awaited submits provided.
     const sigFirst = deferred();
-    await limiter1.submit({ id: "A", weight: 2 }, h.deferredJob, sigFirst.signal, null, 1, r1.cb);
-    await limiter2.submit({ id: "C" }, h.slowJob, 550, null, 2, r2.cb);
+    const p1 = limiter1.schedule(
+      { id: "A", weight: 2 },
+      h.deferredPromise,
+      sigFirst.signal,
+      null,
+      1,
+    );
+    await enqueued(limiter1);
+    const p2 = limiter2.schedule({ id: "C" }, h.slowPromise, 550, null, 2);
+    await enqueued(limiter2);
 
     expect(runningOrExecuting(limiter1)).toEqual(1);
     expect(runningOrExecuting(limiter2)).toEqual(1);
 
-    await limiter3.submit({ id: "D" }, h.slowJob, 50, null, 3, r3.cb);
-    await limiter4.submit({ id: "E" }, h.slowJob, 50, null, 4, r4.cb);
-    await limiter4.submit({ id: "G" }, h.slowJob, 50, null, 5, r5.cb);
+    // The .finally callbacks timestamp each job's completion; they are
+    // chained at schedule time, before any await of the promises.
+    const p3 = limiter3.schedule({ id: "D" }, h.slowPromise, 50, null, 3).finally(() => {
+      t3 = Date.now();
+    });
+    await enqueued(limiter3);
+    const p4 = limiter4.schedule({ id: "E" }, h.slowPromise, 50, null, 4).finally(() => {
+      t4 = Date.now();
+    });
+    await enqueued(limiter4);
+    const p5 = limiter4.schedule({ id: "G" }, h.slowPromise, 50, null, 5);
+    await enqueued(limiter4);
 
     expect(limiter3.counts().QUEUED).toEqual(1);
     expect(limiter4.counts().QUEUED).toEqual(2);
 
     // Release limiter1's job; capacity opens up; queued jobs dispatch.
-    // Order is preserved because deferredJob's calls.push fires when the
-    // signal resolves (matching slowJob's timing semantics).
+    // Order is preserved because deferredPromise's log.record fires when the
+    // signal resolves (matching slowPromise's timing semantics).
     sigFirst.release();
 
-    await Promise.all([r1.promise, r2.promise, r3.promise, r4.promise, r5.promise]);
+    await Promise.all([p1, p2, p3, p4, p5]);
 
     // Capacity-priority (process_tick.lua): among clients tied on minimum running
     // load with queued>0, Redis picks the one with the smallest client_last_registered
@@ -902,16 +917,22 @@ describe("Cluster coordination", () => {
     await limiter2.schedule({ id: "2" }, h.promise, null, "B");
     await limiter3.schedule({ id: "3" }, h.promise, null, "C");
 
-    const r1 = submitResult();
-    const r2 = submitResult(); // never completes: limiter2 disconnects below
-    const r3 = submitResult();
-
-    await limiter1.submit({ id: "4" }, h.slowJob, 100, null, 4, r1.cb);
-    await limiter2.submit({ id: "5" }, h.slowJob, 100, null, 5, r2.cb);
-    await limiter3.submit({ id: "6" }, h.slowJob, 100, null, 6, r3.cb);
+    // Registration order is load-bearing (limiter2 must be the priority
+    // client when it stops responding), so each schedule is followed by a
+    // wait on that limiter's enqueued() barrier — the enqueue-time guarantee the
+    // old sequentially-awaited submits provided.
+    const p1 = limiter1.schedule({ id: "4" }, h.slowPromise, 100, null, 4);
+    await enqueued(limiter1);
+    // Job 5's promise never settles: limiter2 disconnects below while the
+    // job is still queued, so it is never dispatched nor dropped — no
+    // assertion can be attached and it must stay un-awaited.
+    limiter2.schedule({ id: "5" }, h.slowPromise, 100, null, 5);
+    await enqueued(limiter2);
+    const p3 = limiter3.schedule({ id: "6" }, h.slowPromise, 100, null, 6);
+    await enqueued(limiter3);
     await limiter2.disconnect(false);
 
-    await Promise.all([r1.promise, r3.promise]);
+    await Promise.all([p1, p3]);
     expect(h.log).toHaveCallOrder([["A"], ["B"], ["C"], [4], [6]]);
   });
 });

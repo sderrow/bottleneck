@@ -6,12 +6,16 @@ import makeLimiterHelper from "./limiter.js";
 export { waitForState } from "./wait-for-state.js";
 export { deferred } from "./job-tasks.js";
 
-function noErrVal(...expected) {
-  return (err, ...actual) => {
-    vitestExpect(err).toBeNull();
-    vitestExpect(actual).toEqual(expected);
-  };
-}
+/**
+ * Enqueue barrier: resolves once every schedule() issued so far on this
+ * limiter has committed to the queue (or been dropped). schedule() returns
+ * only the COMPLETION promise, so tests that sequence submissions wait here.
+ *
+ * This is the one place the suite couples to the private _submitLock; if the
+ * library ever hardens privacy (#fields), replace this body with a per-job
+ * "queued"/"dropped" event race.
+ */
+export const enqueued = (limiter) => limiter._submitLock.schedule(() => Promise.resolve());
 
 function createJobHarness() {
   const start = Date.now();
@@ -45,16 +49,12 @@ function createJobHarness() {
 
   return {
     log: record,
-    job: tasks.job,
-    slowJob: tasks.slowJob,
-    deferredJob: tasks.deferredJob,
     promise: tasks.promise,
     slowPromise: tasks.slowPromise,
     deferredPromise: tasks.deferredPromise,
     getResults,
     results: getResults,
     flushLimiter,
-    noErrVal,
     callTimes,
   };
 }

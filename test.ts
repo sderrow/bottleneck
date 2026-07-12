@@ -11,11 +11,6 @@ package name via the triple-slash reference above). Checked by
 `pnpm tsc` as part of the project tsconfig.
 */
 
-function withCb(foo: number, bar: () => void, cb: (err: any, result: string) => void) {
-  let s: string = `cb ${foo}`;
-  cb(null, s);
-}
-
 console.log(Bottleneck);
 
 let limiter = new Bottleneck({
@@ -60,17 +55,6 @@ limiter.clusterQueued().then(function (x) {
 limiter.done().then(function (x) {
   let i: number = x;
 });
-
-limiter.submit(
-  withCb,
-  1,
-  () => {},
-  (err, result) => {
-    let s: string = result;
-    console.log(s);
-    assert(s == "cb 1");
-  },
-);
 
 function withPromise(foo: number, bar: () => void): PromiseLike<string> {
   let s: string = `promise ${foo}`;
@@ -184,29 +168,6 @@ group.on("created", (limiter, key) => {
   assert(limiter.empty());
   assert(key.length > 0);
 });
-
-group.key("foo").submit(
-  withCb,
-  2,
-  () => {},
-  (err, result) => {
-    let s: string = `${result} foo`;
-    console.log(s);
-    assert(s == "cb 2 foo");
-  },
-);
-
-group.key("bar").submit(
-  { priority: 4 },
-  withCb,
-  3,
-  () => {},
-  (err, result) => {
-    let s: string = `${result} bar`;
-    console.log(s);
-    assert(s == "cb 3 foo");
-  },
-);
 
 let f1: Promise<string> = group.key("pizza").schedule(withPromise, 2, () => {});
 f1.then(function (result: string) {

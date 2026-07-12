@@ -1,6 +1,6 @@
 import { describe, expect } from "vitest";
 import { useFakeClock } from "./helpers/clock.js";
-import { test, waitForState, deferred } from "./helpers/test-api.js";
+import { test, waitForState, deferred, enqueued } from "./helpers/test-api.js";
 const Bottleneck = require("./bottleneck");
 
 useFakeClock();
@@ -32,27 +32,6 @@ describe("General", () => {
 
     expect(await limiter.schedule(() => job.action.bind(job)(1))).toEqual(6);
     expect(await limiter.wrap(job.action.bind(job))(2)).toEqual(7);
-  });
-
-  test("Should pass multiple arguments back even on errors when using submit()", ({
-    harness: h,
-    makeLimiter,
-  }) => {
-    expect.hasAssertions();
-    const limiter = makeLimiter({ maxConcurrent: 1 });
-
-    return new Promise((resolve, reject) => {
-      limiter.submit(h.job, new Error("welp"), 1, 2, (err, x, y) => {
-        try {
-          expect(err.message).toEqual("welp");
-          expect(x).toEqual(1);
-          expect(y).toEqual(2);
-          resolve();
-        } catch (e) {
-          reject(e);
-        }
-      });
-    });
   });
 
   test("Should expose the Events library", () => {
@@ -92,9 +71,10 @@ describe("General", () => {
       const limiter = makeLimiter({ maxConcurrent: 1, minTime: 100 });
 
       // Hold job 1 with a deferred promise so it never finishes until we
-      // explicitly release it. Otherwise the prior `slowJob, 50` could finish
-      // before all 4 submits complete (each submit adds Redis RTT) and a
-      // queued job dispatches, making `queued()` count race the minTime gate.
+      // explicitly release it. Otherwise a `slowPromise, 50` job 1 could finish
+      // before all 4 remaining jobs are enqueued (each enqueue barrier adds a
+      // Redis RTT) and a queued job dispatches, making `queued()` count race
+      // the minTime gate.
       const hold1 = deferred();
 
       expect(await limiter.check()).toEqual(true);
@@ -102,30 +82,35 @@ describe("General", () => {
       expect(limiter.queued()).toEqual(0);
       expect(await limiter.clusterQueued()).toEqual(0);
 
-      await limiter.submit({ id: 1 }, h.deferredJob, hold1.signal, null, 1, h.noErrVal(1));
+      const p1 = limiter.schedule({ id: 1 }, h.deferredPromise, hold1.signal, null, 1);
+      await enqueued(limiter);
       expect(limiter.queued()).toEqual(0); // It's already running
 
       expect(await limiter.check()).toEqual(false);
 
-      await limiter.submit({ id: 2 }, h.slowJob, 50, null, 2, h.noErrVal(2));
+      const p2 = limiter.schedule({ id: 2 }, h.slowPromise, 50, null, 2);
+      await enqueued(limiter);
       expect(limiter.queued()).toEqual(1);
       expect(await limiter.clusterQueued()).toEqual(1);
       expect(limiter.queued(1)).toEqual(0);
       expect(limiter.queued(5)).toEqual(1);
 
-      await limiter.submit({ id: 3 }, h.slowJob, 50, null, 3, h.noErrVal(3));
+      const p3 = limiter.schedule({ id: 3 }, h.slowPromise, 50, null, 3);
+      await enqueued(limiter);
       expect(limiter.queued()).toEqual(2);
       expect(await limiter.clusterQueued()).toEqual(2);
       expect(limiter.queued(1)).toEqual(0);
       expect(limiter.queued(5)).toEqual(2);
 
-      await limiter.submit({ id: 4 }, h.slowJob, 50, null, 4, h.noErrVal(4));
+      const p4 = limiter.schedule({ id: 4 }, h.slowPromise, 50, null, 4);
+      await enqueued(limiter);
       expect(limiter.queued()).toEqual(3);
       expect(await limiter.clusterQueued()).toEqual(3);
       expect(limiter.queued(1)).toEqual(0);
       expect(limiter.queued(5)).toEqual(3);
 
-      await limiter.submit({ priority: 1, id: 5 }, h.job, null, 5, h.noErrVal(5));
+      const p5 = limiter.schedule({ priority: 1, id: 5 }, h.promise, null, 5);
+      await enqueued(limiter);
       expect(limiter.queued()).toEqual(4);
       expect(await limiter.clusterQueued()).toEqual(4);
       expect(limiter.queued(1)).toEqual(1);
@@ -134,6 +119,13 @@ describe("General", () => {
       hold1.release();
 
       await h.flushLimiter(limiter);
+      await Promise.all([
+        expect(p1).resolves.toEqual([1]),
+        expect(p2).resolves.toEqual([2]),
+        expect(p3).resolves.toEqual([3]),
+        expect(p4).resolves.toEqual([4]),
+        expect(p5).resolves.toEqual([5]),
+      ]);
       expect(limiter.queued()).toEqual(0);
       expect(await limiter.clusterQueued()).toEqual(0);
       expect(h.log).toHaveCallOrder([[1], [5], [2], [3], [4]]);
@@ -155,9 +147,9 @@ describe("General", () => {
       expect(running0).toEqual(0);
       expect(done0).toEqual(0);
 
-      limiter.submit({ weight: 1, id: 1 }, h.deferredJob, hold1.signal, null, 1, h.noErrVal(1));
-      limiter.submit({ weight: 3, id: 2 }, h.deferredJob, hold2.signal, null, 2, h.noErrVal(2));
-      limiter.submit({ weight: 1, id: 3 }, h.deferredJob, hold3.signal, null, 3, h.noErrVal(3));
+      const p1 = limiter.schedule({ weight: 1, id: 1 }, h.deferredPromise, hold1.signal, null, 1);
+      const p2 = limiter.schedule({ weight: 3, id: 2 }, h.deferredPromise, hold2.signal, null, 2);
+      const p3 = limiter.schedule({ weight: 1, id: 3 }, h.deferredPromise, hold3.signal, null, 3);
       await limiter.schedule({ weight: 0, id: 4 }, h.promise, null);
 
       const [running1, done1] = await Promise.all([limiter.running(), limiter.done()]);
@@ -188,6 +180,11 @@ describe("General", () => {
       expect(done3).toEqual(5);
 
       await h.flushLimiter(limiter);
+      await Promise.all([
+        expect(p1).resolves.toEqual([1]),
+        expect(p2).resolves.toEqual([2]),
+        expect(p3).resolves.toEqual([3]),
+      ]);
       expect(h.log).toHaveCallOrder([[], [1], [3], [2]]);
     });
 
@@ -340,7 +337,7 @@ describe("General", () => {
         DONE: 0,
       });
 
-      // Job 1 is held with a deferredJob so we can observe the state where
+      // Job 1 is held with a deferredPromise so we can observe the state where
       // job 1 is EXECUTING, job 2 is RUNNING (just dispatched), job 3 is
       // QUEUED, and DONE=0 deterministically. Using slowPromise(100) here
       // races with minTime=100 — the moment job 2 dispatches is the same
@@ -348,7 +345,7 @@ describe("General", () => {
       // window may not exist depending on microtask order.
       const hold1 = deferred();
 
-      limiter.submit({ weight: 1, id: 1 }, h.deferredJob, hold1.signal, null, 1, h.noErrVal(1));
+      const p1 = limiter.schedule({ weight: 1, id: 1 }, h.deferredPromise, hold1.signal, null, 1);
       const p2 = limiter.schedule({ weight: 1, id: 2 }, h.slowPromise, 200, null, 2);
       const p3 = limiter.schedule({ weight: 2, id: 3 }, h.slowPromise, 100, null, 3);
       expect(limiter.counts()).toEqual({
@@ -406,7 +403,11 @@ describe("General", () => {
       expect(limiter.jobs("QUEUED")).toEqual(["3"]);
 
       await h.flushLimiter(limiter);
-      await Promise.all([expect(p2).resolves.toEqual([2]), expect(p3).resolves.toEqual([3])]);
+      await Promise.all([
+        expect(p1).resolves.toEqual([1]),
+        expect(p2).resolves.toEqual([2]),
+        expect(p3).resolves.toEqual([3]),
+      ]);
 
       expect(limiter.counts()).toEqual({
         RECEIVED: 0,
@@ -545,9 +546,13 @@ describe("General", () => {
       let calledEmpty = 0;
       let calledIdle = 0;
       let calledDepleted = 0;
+      const thirdEmpty = deferred();
 
       limiter.on("empty", () => {
         calledEmpty++;
+        if (calledEmpty === 3) {
+          thirdEmpty.release();
+        }
       });
       limiter.on("idle", () => {
         calledIdle++;
@@ -563,13 +568,20 @@ describe("General", () => {
         expect(limiter.schedule({ id: 2 }, h.slowPromise, 50, null, 2)).resolves.toEqual([2]),
         expect(limiter.schedule({ id: 3 }, h.slowPromise, 50, null, 3)).resolves.toEqual([3]),
       ]);
-      await limiter.submit({ id: 4 }, h.slowJob, 50, null, 4, null);
+      // Fire job 4 and wait for its enqueue to trigger the third "empty" —
+      // the counters below must be observed while job 4 is still pending.
+      // An enqueued() barrier cannot be used here: the empty() check requires
+      // the submit lock to be idle, so a pending barrier task would
+      // suppress the very event under test.
+      const p4 = limiter.schedule({ id: 4 }, h.slowPromise, 50, null, 4);
+      await thirdEmpty.signal;
       expect(h).toHaveFinalCallAt(250);
       expect(h.log).toHaveCallOrder([[1], [2], [3]]);
       expect(calledEmpty).toEqual(3);
       expect(calledIdle).toEqual(2);
       expect(calledDepleted).toEqual(0);
       await h.flushLimiter(limiter);
+      await expect(p4).resolves.toEqual([4]);
     });
 
     test("Should fire events once", async ({ harness: h, makeLimiter }) => {

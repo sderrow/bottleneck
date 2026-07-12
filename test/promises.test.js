@@ -9,15 +9,20 @@ describe("Promises", () => {
   test("Should support promises", async ({ harness: h, makeLimiter }) => {
     const limiter = makeLimiter({ maxConcurrent: 1, minTime: 100 });
 
-    limiter.submit(h.job, null, 1, 9, h.noErrVal(1, 9));
-    limiter.submit(h.job, null, 2, h.noErrVal(2));
-    limiter.submit(h.job, null, 3, h.noErrVal(3));
+    const p1 = limiter.schedule(h.promise, null, 1, 9);
+    const p2 = limiter.schedule(h.promise, null, 2);
+    const p3 = limiter.schedule(h.promise, null, 3);
     const p4 = limiter.schedule(h.promise, null, 4, 5);
 
     await h.flushLimiter(limiter);
     expect(h.log).toHaveCallOrder([[1, 9], [2], [3], [4, 5]]);
     expect(h).toHaveFinalCallAt(300);
-    await expect(p4).resolves.toEqual([4, 5]);
+    await Promise.all([
+      expect(p1).resolves.toEqual([1, 9]),
+      expect(p2).resolves.toEqual([2]),
+      expect(p3).resolves.toEqual([3]),
+      expect(p4).resolves.toEqual([4, 5]),
+    ]);
   });
 
   test("Should pass error on failure", async ({ harness: h, makeLimiter }) => {
@@ -90,9 +95,10 @@ describe("Promises", () => {
     test.override({ limiterOptions: { maxConcurrent: 1, minTime: 100 } });
 
     test("Should wrap", async ({ harness: h, limiter }) => {
-      limiter.submit(h.job, null, 1, h.noErrVal(1));
-      limiter.submit(h.job, null, 2, h.noErrVal(2));
-      limiter.submit(h.job, null, 3, h.noErrVal(3));
+      // Wrapped jobs share the same queue as directly scheduled ones.
+      const p1 = limiter.schedule(h.promise, null, 1);
+      const p2 = limiter.schedule(h.promise, null, 2);
+      const p3 = limiter.schedule(h.promise, null, 3);
 
       const wrapped = limiter.wrap(h.promise);
       const p4 = wrapped(null, 4);
@@ -100,7 +106,12 @@ describe("Promises", () => {
       await h.flushLimiter(limiter);
       expect(h.log).toHaveCallOrder([[1], [2], [3], [4]]);
       expect(h).toHaveFinalCallAt(300);
-      await expect(p4).resolves.toEqual([4]);
+      await Promise.all([
+        expect(p1).resolves.toEqual([1]),
+        expect(p2).resolves.toEqual([2]),
+        expect(p3).resolves.toEqual([3]),
+        expect(p4).resolves.toEqual([4]),
+      ]);
     });
 
     test("Should automatically wrap a returned value in a resolved promise", async ({

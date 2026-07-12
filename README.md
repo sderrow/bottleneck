@@ -18,6 +18,7 @@ More importantly, this library has been rewritten with modern-day JS (courtesy o
 
 ### Breaking changes in v4
 
+- The callback-style `submit()` method has been removed — Bottleneck is now Promise-only. Use `schedule()`, wrapping callback-style functions with [`util.promisify`](https://nodejs.org/api/util.html#utilpromisifyoriginal). The `Bottleneck.Callback` type is gone from the typings.
 - The ES5 build has been removed (`require("bottleneck/es5")` no longer exists). If you need broad-browser support, use the UMD `@sderrow/bottleneck/light` build instead.
 - Cluster mode now requires `redis` v4+ (drops v2/v3) or `ioredis` v5+. The unsupported `redis` v2/v3 client API has been removed.
 - `ioredis` and `redis` are now optional **peer dependencies**. Your application must install whichever client it uses.
@@ -35,7 +36,6 @@ See [Upgrading to v4](#upgrading-to-v4) for migration steps.
   - [Gotchas & Common Mistakes](#gotchas--common-mistakes)
 - [Constructor](#constructor)
 - [Reservoir Intervals](#reservoir-intervals)
-- [`submit()`](#submit)
 - [`schedule()`](#schedule)
 - [`wrap()`](#wrap)
 - [Job Options](#job-options)
@@ -153,16 +153,11 @@ const result = await wrapped(arg1, arg2);
 
 #### ➤ Using callbacks?
 
-Instead of this:
+Bottleneck is Promise-only. Wrap callback-style functions with [`util.promisify`](https://nodejs.org/api/util.html#utilpromisifyoriginal) and `schedule()` them:
 
 ```js
-someAsyncCall(arg1, arg2, callback);
-```
-
-Do this:
-
-```js
-limiter.submit(someAsyncCall, arg1, arg2, callback);
+const promisified = util.promisify(someAsyncCall);
+const result = await limiter.schedule(promisified, arg1, arg2);
 ```
 
 ### Step 3 of 3
@@ -219,9 +214,7 @@ limiter.schedule(() => object.doSomething());
 
 - If you plan on using `priorities`, make sure to set a `maxConcurrent` value.
 
-- **When using `submit()`**, if a callback isn't necessary, you must pass `null` or an empty function instead. It will not work otherwise.
-
-- **When using `submit()`**, make sure all the jobs will eventually complete by calling their callback, or set an [`expiration`](#job-options). Even if you submitted your job with a `null` callback , it still needs to call its callback. This is particularly important if you are using a `maxConcurrent` value that isn't `null` (unlimited), otherwise those not completed jobs will be clogging up the limiter and no new jobs will be allowed to run. It's safe to call the callback more than once, subsequent calls are ignored.
+- **Make sure your jobs eventually settle** (resolve or reject), or set an [`expiration`](#job-options). With a `maxConcurrent` value that isn't `null` (unlimited), jobs whose promises never settle clog the limiter and no new jobs will be allowed to run.
 
 - Using tools like `mockdate` in your tests to change time in JavaScript will likely result in undefined behavior from Bottleneck.
 
@@ -301,21 +294,9 @@ Reservoir Intervals are an advanced feature, please take the time to read and un
 
 - **Reservoir Intervals prevent a limiter from being garbage collected.** Call `limiter.disconnect()` to clear the interval and allow the memory to be freed. However, it's not necessary to call `.disconnect()` to allow the Node.js process to exit.
 
-### submit()
-
-Adds a job to the queue. This is the callback version of `schedule()`.
-
-```js
-limiter.submit(someAsyncCall, arg1, arg2, callback);
-```
-
-You can pass `null` instead of an empty function if there is no callback, but `someAsyncCall` still needs to call **its** callback to let the limiter know it has completed its work.
-
-`submit()` can also accept [advanced options](#job-options).
-
 ### schedule()
 
-Adds a job to the queue. This is the Promise and async/await version of `submit()`.
+Adds a job to the queue.
 
 ```js
 const fn = function (arg1, arg2) {
@@ -360,12 +341,9 @@ wrapped()
 
 ### Job Options
 
-`submit()`, `schedule()`, and `wrap()` all accept advanced options.
+`schedule()` and `wrap()` accept advanced options.
 
 ```js
-// Submit
-limiter.submit({/* options */}, someAsyncCall, arg1, arg2, callback);
-
 // Schedule
 limiter.schedule({/* options */}, fn, arg1, arg2);
 
@@ -1122,6 +1100,20 @@ Pass the imported library to Bottleneck explicitly. Bottleneck no longer require
 The same applies to `Bottleneck.Group` and to the standalone `Bottleneck.RedisConnection` / `Bottleneck.IORedisConnection` constructors. Pass `Redis` once at the top of your module and reuse the resulting Connection or Group across as many limiters as you want — see [Managing Redis Connections](#managing-redis-connections).
 
 If you previously hit "Bottleneck failed to require ioredis at runtime", that workaround paragraph is no longer needed. The implicit-require hack has been removed entirely.
+
+### `submit()` users
+
+The callback API is gone. The one-line translation:
+
+```js
+// Before
+limiter.submit(someAsyncCall, arg1, arg2, callback);
+
+// After
+limiter.schedule(util.promisify(someAsyncCall), arg1, arg2).then(result => /* ... */);
+```
+
+Job options move over unchanged: `limiter.schedule({ priority: 4 }, fn, ...args)`.
 
 ### Legacy `redis` v2/v3 users
 
