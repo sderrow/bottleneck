@@ -13,6 +13,8 @@
 // automatically because they are spawned after this setup function runs.
 
 import type { StartedRedisContainer } from "@testcontainers/redis";
+// Untyped CJS module shared with src and the test helpers (see src/sleep.js).
+import sleep from "../../src/sleep.js";
 
 let stop: (() => Promise<unknown>) | undefined;
 
@@ -41,7 +43,7 @@ export async function setup(): Promise<void> {
       console.warn(
         `[global-setup] Redis container start failed (attempt ${attempt}/${START_ATTEMPTS}): ${err}; retrying in ${RETRY_DELAY_MS}ms`,
       );
-      await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
+      await sleep(RETRY_DELAY_MS);
     }
   }
 

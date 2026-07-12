@@ -474,7 +474,7 @@ describe("Cluster coordination", () => {
     harness: h,
     track,
   }) => {
-    // Bump timeout (and the corresponding h.waitFor below) so autocleanup
+    // Bump timeout (and the corresponding waitForState below) so autocleanup
     // doesn't race with the initial schedule under stress. Original 300ms
     // gave a 150ms autocleanup interval that could fire before init.lua
     // settled when redis was slow.

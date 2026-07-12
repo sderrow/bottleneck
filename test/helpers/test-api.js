@@ -111,7 +111,7 @@ vitestExpect.extend({
       // Accepts N or exactly N+1: sinon fake-timers assigns callAt = now + 1
       // to a 0ms timer created INSIDE a running timer callback ("duringTick"
       // quantization), which every heartbeat-driven dispatch hits via
-      // LocalDatastore's heartbeat setInterval -> yieldLoop() setTimeout(0).
+      // LocalDatastore's heartbeat setInterval -> yieldLoop() sleep(0).
       // Interval-driven calls therefore land at exactly N+1; direct minTime
       // dispatches land at exactly N. Never N-1, never N+2.
       const pass = time === expectedMs || time === expectedMs + 1;

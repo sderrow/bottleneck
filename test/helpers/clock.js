@@ -38,9 +38,6 @@ export function useRealClockForThisTest() {
   vi.useRealTimers();
 }
 
-/** Promise delay via global setTimeout (respects fake timers when installed). */
-export function sleep(ms) {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms);
-  });
-}
+// Shared with src (LocalDatastore's yieldLoop uses the same delay): reads the
+// global setTimeout at call time, so it respects fake timers when installed.
+export { default as sleep } from "../../src/sleep.js";

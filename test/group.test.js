@@ -1,5 +1,5 @@
 import { describe, expect } from "vitest";
-import { useFakeClock } from "./helpers/clock.js";
+import { useFakeClock, sleep } from "./helpers/clock.js";
 import { test, waitForState } from "./helpers/test-api.js";
 const Bottleneck = require("./bottleneck");
 
@@ -17,11 +17,9 @@ describe("Group", () => {
 
     const results = [];
 
-    const job = (...result) => {
+    const job = async (...result) => {
       results.push(result);
-      return new Promise((resolve, _reject) => {
-        setTimeout(() => resolve(), 50);
-      });
+      await sleep(50);
     };
 
     group.key("A").schedule(job, 1, 2);
@@ -148,11 +146,9 @@ describe("Group", () => {
 
     const results = [];
 
-    const job = (...result) => {
+    const job = async (...result) => {
       results.push(result);
-      return new Promise((resolve, _reject) => {
-        setTimeout(() => resolve(), 50);
-      });
+      await sleep(50);
     };
 
     group.key("A").schedule(job, 1, 2);

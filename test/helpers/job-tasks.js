@@ -1,3 +1,5 @@
+import { sleep } from "./clock.js";
+
 /**
  * Manually-released signal for {@link createTaskFns}'s deferredJob/deferredPromise.
  *
@@ -25,12 +27,11 @@ export function createTaskFns(log) {
     cb.apply(null, [err].concat(result));
   }
 
-  function slowJob(duration, err, ...result) {
+  async function slowJob(duration, err, ...result) {
     const cb = result.pop();
-    setTimeout(() => {
-      log.record(err, result);
-      cb.apply(null, [err].concat(result));
-    }, duration);
+    await sleep(duration);
+    log.record(err, result);
+    cb.apply(null, [err].concat(result));
   }
 
   async function deferredJob(signal, err, ...result) {
@@ -50,16 +51,13 @@ export function createTaskFns(log) {
     });
   }
 
-  function slowPromise(duration, err, ...result) {
-    return new Promise((resolve, reject) => {
-      setTimeout(() => {
-        log.record(err, result);
-        if (err === null) {
-          return resolve(result);
-        }
-        return reject(err);
-      }, duration);
-    });
+  async function slowPromise(duration, err, ...result) {
+    await sleep(duration);
+    log.record(err, result);
+    if (err === null) {
+      return result;
+    }
+    throw err;
   }
 
   async function deferredPromise(signal, err, ...result) {
