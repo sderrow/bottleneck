@@ -1,26 +1,33 @@
-import { sleep } from "./helpers/clock.js";
-import { test, describe, expect, waitForState, deferred } from "./helpers/test-api.js";
+import { describe, expect } from "vitest";
+import sleep from "../src/sleep.js";
+import { test, waitForState, deferred } from "./helpers/test-api.js";
 const Bottleneck = require("./bottleneck");
 const Scripts = require("../src/cluster/Scripts.js");
 
 // Causality policy (Workstream B): observe product-timer effects via waitForState
 // and state counts — never assert wall-clock bounds around real network time.
 
-const limiterKeys = function (limiter) {
-  return Scripts.allKeys(limiter._store.originalId);
-};
-const countKeys = function (limiter) {
-  return runCommand(limiter, "exists", limiterKeys(limiter));
-};
-const deleteKeys = function (limiter) {
-  return runCommand(limiter, "del", limiterKeys(limiter));
-};
-const runCommand = function (limiter, command, args) {
-  return limiter._store.connection.__runCommand__([command, ...args]);
-};
-const runningOrExecuting = function (limiter) {
+const limiterKeys = (limiter) => Scripts.allKeys(limiter._store.originalId);
+const countKeys = (limiter) => runCommand(limiter, "exists", limiterKeys(limiter));
+const deleteKeys = (limiter) => runCommand(limiter, "del", limiterKeys(limiter));
+const runCommand = (limiter, command, args) =>
+  limiter._store.connection.__runCommand__([command, ...args]);
+const runningOrExecuting = (limiter) => {
   const counts = limiter.counts();
   return counts.RUNNING + counts.EXECUTING;
+};
+// Promisify a submit() callback: pass `cb` to limiter.submit and await
+// `promise` for the job's result value. `onCall` runs at completion time
+// (e.g. to timestamp it).
+const submitResult = (onCall) => {
+  const d = deferred();
+  return {
+    promise: d.signal,
+    cb: (_err, n) => {
+      onCall?.();
+      d.release(n);
+    },
+  };
 };
 
 describe("Cluster coordination", () => {
@@ -28,11 +35,11 @@ describe("Cluster coordination", () => {
     throw new Error("DATASTORE must be redis or ioredis");
   }
 
-  test("Should chain local and distributed limiters (total concurrency)", async function ({
+  test("Should chain local and distributed limiters (total concurrency)", async ({
     harness: h,
     makeLimiter,
     track,
-  }) {
+  }) => {
     const rootLimiter = makeLimiter({ id: "limiter1", maxConcurrent: 3 });
     const limiter2 = track(new Bottleneck({ id: "limiter2", maxConcurrent: 1 }));
     const limiter3 = track(new Bottleneck({ id: "limiter3", maxConcurrent: 2 }));
@@ -57,7 +64,7 @@ describe("Cluster coordination", () => {
     const p5 = limiter3.schedule(h.deferredPromise, sig5.signal, null, 5);
     const p6 = limiter3.schedule(h.deferredPromise, sig6.signal, null, 6);
 
-    await waitForState(function () {
+    await waitForState(() => {
       expect(rootLimiter.counts().EXECUTING).toBe(3);
       expect(limiter2.counts().QUEUED).toBe(2);
       expect(limiter3.counts().QUEUED).toBe(1);
@@ -66,13 +73,13 @@ describe("Cluster coordination", () => {
     sig1.release();
     sig4.release();
     sig5.release();
-    await waitForState(function () {
+    await waitForState(() => {
       expect(h.log.mock.calls.length).toBe(3);
     });
 
     sig2.release();
     sig6.release();
-    await waitForState(function () {
+    await waitForState(() => {
       expect(h.log.mock.calls.length).toBe(5);
     });
 
@@ -82,11 +89,11 @@ describe("Cluster coordination", () => {
     expect(h.log).toHaveCallOrder([[1], [4], [5], [2], [6], [3]]);
   });
 
-  test("Should chain local and distributed limiters (partial concurrency)", async function ({
+  test("Should chain local and distributed limiters (partial concurrency)", async ({
     harness: h,
     makeLimiter,
     track,
-  }) {
+  }) => {
     const rootLimiter = makeLimiter({ maxConcurrent: 2 });
     const limiter2 = track(new Bottleneck({ maxConcurrent: 1 }));
     const limiter3 = track(new Bottleneck({ maxConcurrent: 2 }));
@@ -110,7 +117,7 @@ describe("Cluster coordination", () => {
     const p5 = limiter3.schedule(h.deferredPromise, sig5.signal, null, 5);
     const p6 = limiter3.schedule(h.deferredPromise, sig6.signal, null, 6);
 
-    await waitForState(function () {
+    await waitForState(() => {
       expect(rootLimiter.counts().EXECUTING).toBe(2);
       expect(limiter2.counts().QUEUED).toBe(2);
       expect(limiter3.counts().QUEUED).toBe(1);
@@ -119,13 +126,13 @@ describe("Cluster coordination", () => {
     sig1.release();
     sig4.release();
     sig5.release();
-    await waitForState(function () {
+    await waitForState(() => {
       expect(h.log.mock.calls.length).toBe(3);
     });
 
     sig2.release();
     sig6.release();
-    await waitForState(function () {
+    await waitForState(() => {
       expect(h.log.mock.calls.length).toBe(5);
     });
 
@@ -135,7 +142,7 @@ describe("Cluster coordination", () => {
     expect(h.log).toHaveCallOrder([[1], [4], [5], [2], [6], [3]]);
   });
 
-  test("Should use the limiter ID to build Redis keys", function ({ makeLimiter, track }) {
+  test("Should use the limiter ID to build Redis keys", async ({ makeLimiter, track }) => {
     const rootLimiter = makeLimiter();
     const randomId = rootLimiter._randomIndex();
     const limiter = track(
@@ -146,51 +153,35 @@ describe("Cluster coordination", () => {
       }),
     );
 
-    return limiter
-      .ready()
-      .then(function () {
-        const keys = limiterKeys(limiter);
-        keys.forEach((key) => expect(key.indexOf(randomId)).toBeGreaterThan(0));
-        return deleteKeys(limiter);
-      })
-      .then(function (deleted) {
-        expect(deleted).toEqual(5);
-      });
+    await limiter.ready();
+    const keys = limiterKeys(limiter);
+    keys.forEach((key) => expect(key.indexOf(randomId)).toBeGreaterThan(0));
+    const deleted = await deleteKeys(limiter);
+    expect(deleted).toEqual(5);
   });
 
-  test("Should not fail when Redis data is missing", function ({ track }) {
+  test("Should not fail when Redis data is missing", async ({ track }) => {
     const limiter = track(
       new Bottleneck({ datastore: process.env.DATASTORE, clearDatastore: true }),
     );
 
-    return limiter
-      .running()
-      .then(function (running) {
-        expect(running).toEqual(0);
-        return deleteKeys(limiter);
-      })
-      .then(function (deleted) {
-        expect(deleted).toEqual(5);
-        return countKeys(limiter);
-      })
-      .then(function (count) {
-        expect(count).toEqual(0);
-        return limiter.running();
-      })
-      .then(function (running) {
-        expect(running).toEqual(0);
-        return countKeys(limiter);
-      })
-      .then(function (count) {
-        expect(count).toBeGreaterThan(0);
-      });
+    const runningBefore = await limiter.running();
+    expect(runningBefore).toEqual(0);
+    const deleted = await deleteKeys(limiter);
+    expect(deleted).toEqual(5);
+    const countAfterDelete = await countKeys(limiter);
+    expect(countAfterDelete).toEqual(0);
+    const runningAfter = await limiter.running();
+    expect(runningAfter).toEqual(0);
+    const countRecreated = await countKeys(limiter);
+    expect(countRecreated).toBeGreaterThan(0);
   });
 
-  test("Should drop all jobs in the Cluster when entering blocked mode", function ({
+  test("Should drop all jobs in the Cluster when entering blocked mode", async ({
     harness: h,
     makeLimiter,
     track,
-  }) {
+  }) => {
     const rootLimiter = makeLimiter();
     const limiter1 = track(
       new Bottleneck({
@@ -205,85 +196,74 @@ describe("Cluster coordination", () => {
         strategy: Bottleneck.strategy.BLOCK,
       }),
     );
-    let limiter2;
     const client_num_queued_key = limiterKeys(limiter1)[5];
 
-    return limiter1
-      .ready()
-      .then(function () {
-        limiter2 = track(
-          new Bottleneck({
-            id: "blocked",
-            trackDoneStatus: true,
-            datastore: process.env.DATASTORE,
-            clearDatastore: false,
-          }),
-        );
-        return limiter2.ready();
-      })
-      .then(function () {
-        return Promise.all([
-          limiter1.submit(h.slowJob, 100, null, 1, h.noErrVal(1)),
-          limiter1.submit(h.slowJob, 100, null, 2, (err) => expect(err).toBeTruthy()),
-        ]);
-      })
-      .then(function () {
-        return Promise.all([
-          limiter2.submit(h.slowJob, 100, null, 3, (err) => expect(err).toBeTruthy()),
-          limiter2.submit(h.slowJob, 100, null, 4, (err) => expect(err).toBeTruthy()),
-          limiter2.submit(h.slowJob, 100, null, 5, (err) => expect(err).toBeTruthy()),
-        ]);
-      })
-      .then(function () {
-        return runCommand(limiter1, "hvals", [client_num_queued_key]);
-      })
-      .then(function (queues) {
-        expect(queues).toEqual(["0", "0"]);
+    await limiter1.ready();
+    const limiter2 = track(
+      new Bottleneck({
+        id: "blocked",
+        trackDoneStatus: true,
+        datastore: process.env.DATASTORE,
+        clearDatastore: false,
+      }),
+    );
+    await limiter2.ready();
 
-        return Promise.all([rootLimiter.clusterQueued(), limiter2.clusterQueued()]);
-      })
-      .then(function (queues) {
-        expect(queues).toEqual([0, 0]);
-        // Poll for the final settled state instead of a fixed wait. Under
-        // event-loop stress (sustained test runs), setTimeout(100) can slip
-        // multiple seconds and break a wall-clock-based wait. We give
-        // 5000ms (default 2000ms is not always enough): j1's 100ms
-        // slowJob can dispatch hundreds of ms late under load (a single
-        // connect-retry on the ioredis client adds ~500ms to register;
-        // doExecute's setTimeout(0) drifts when the event loop is busy
-        // serving other parallel test workers).
-        return waitForState(function () {
-          const c1 = limiter1.counts();
-          expect(c1.RECEIVED).toBe(0);
-          expect(c1.QUEUED).toBe(0);
-          expect(c1.RUNNING).toBe(0);
-          expect(c1.EXECUTING).toBe(0);
-          expect(c1.DONE).toBe(1);
-        });
-      })
-      .then(function () {
-        const counts1 = limiter1.counts();
-        expect(counts1.RECEIVED).toEqual(0);
-        expect(counts1.QUEUED).toEqual(0);
-        expect(counts1.RUNNING).toEqual(0);
-        expect(counts1.EXECUTING).toEqual(0);
-        expect(counts1.DONE).toEqual(1);
+    await Promise.all([
+      limiter1.submit(h.slowJob, 100, null, 1, h.noErrVal(1)),
+      limiter1.submit(h.slowJob, 100, null, 2, (err) => expect(err).toBeTruthy()),
+    ]);
+    await Promise.all([
+      limiter2.submit(h.slowJob, 100, null, 3, (err) => expect(err).toBeTruthy()),
+      limiter2.submit(h.slowJob, 100, null, 4, (err) => expect(err).toBeTruthy()),
+      limiter2.submit(h.slowJob, 100, null, 5, (err) => expect(err).toBeTruthy()),
+    ]);
 
-        const counts2 = limiter2.counts();
-        expect(counts2.RECEIVED).toEqual(0);
-        expect(counts2.QUEUED).toEqual(0);
-        expect(counts2.RUNNING).toEqual(0);
-        expect(counts2.EXECUTING).toEqual(0);
-        expect(counts2.DONE).toEqual(0);
+    const queues = await runCommand(limiter1, "hvals", [client_num_queued_key]);
+    expect(queues).toEqual(["0", "0"]);
 
-        return h.flushLimiter(rootLimiter);
-      })
-      .then(function (_results) {
-        expect(h.log).toHaveCallOrder([[1]]);
-      });
+    const clusterQueues = await Promise.all([
+      rootLimiter.clusterQueued(),
+      limiter2.clusterQueued(),
+    ]);
+    expect(clusterQueues).toEqual([0, 0]);
+
+    // Poll for the final settled state instead of a fixed wait. Under
+    // event-loop stress (sustained test runs), setTimeout(100) can slip
+    // multiple seconds and break a wall-clock-based wait. We give
+    // 5000ms (default 2000ms is not always enough): j1's 100ms
+    // slowJob can dispatch hundreds of ms late under load (a single
+    // connect-retry on the ioredis client adds ~500ms to register;
+    // doExecute's setTimeout(0) drifts when the event loop is busy
+    // serving other parallel test workers).
+    await waitForState(() => {
+      const c1 = limiter1.counts();
+      expect(c1.RECEIVED).toBe(0);
+      expect(c1.QUEUED).toBe(0);
+      expect(c1.RUNNING).toBe(0);
+      expect(c1.EXECUTING).toBe(0);
+      expect(c1.DONE).toBe(1);
+    });
+
+    const counts1 = limiter1.counts();
+    expect(counts1.RECEIVED).toEqual(0);
+    expect(counts1.QUEUED).toEqual(0);
+    expect(counts1.RUNNING).toEqual(0);
+    expect(counts1.EXECUTING).toEqual(0);
+    expect(counts1.DONE).toEqual(1);
+
+    const counts2 = limiter2.counts();
+    expect(counts2.RECEIVED).toEqual(0);
+    expect(counts2.QUEUED).toEqual(0);
+    expect(counts2.RUNNING).toEqual(0);
+    expect(counts2.EXECUTING).toEqual(0);
+    expect(counts2.DONE).toEqual(0);
+
+    await h.flushLimiter(rootLimiter);
+    expect(h.log).toHaveCallOrder([[1]]);
   });
 
-  test("Should pass messages to all limiters in Cluster", function ({ makeLimiter, track }) {
+  test("Should pass messages to all limiters in Cluster", async ({ makeLimiter, track }) => {
     const rootLimiter = makeLimiter({
       maxConcurrent: 1,
       minTime: 100,
@@ -317,23 +297,21 @@ describe("Cluster coordination", () => {
       received.push(3, msg);
     });
 
-    return Promise.all([rootLimiter.ready(), limiter1.ready(), limiter2.ready()])
-      .then(function () {
-        limiter1.publish(555);
-        return waitForState(function () {
-          expect(received.length).toBeGreaterThanOrEqual(4);
-        });
-      })
-      .then(function () {
-        limiter1.disconnect();
-        limiter2.disconnect();
-        expect(received.sort()).toEqual([1, 2, "555", "555"]);
-      });
+    await Promise.all([rootLimiter.ready(), limiter1.ready(), limiter2.ready()]);
+
+    limiter1.publish(555);
+    await waitForState(() => {
+      expect(received.length).toBeGreaterThanOrEqual(4);
+    });
+
+    limiter1.disconnect();
+    limiter2.disconnect();
+    expect(received.sort()).toEqual([1, 2, "555", "555"]);
   });
 
-  test("Should pass messages to correct limiter after Group re-instantiations", function ({
+  test("Should pass messages to correct limiter after Group re-instantiations", async ({
     track,
-  }) {
+  }) => {
     const group = track(
       new Bottleneck.Group({
         maxConcurrent: 1,
@@ -343,71 +321,61 @@ describe("Cluster coordination", () => {
     );
     const received = [];
 
-    return new Promise(function (resolve, _reject) {
+    await new Promise((resolve, _reject) => {
       const limiter = group.key("A");
 
-      limiter.on("message", function (msg) {
+      limiter.on("message", (msg) => {
         received.push("1", msg);
         return resolve();
       });
       limiter.publish("Bonjour!");
-    })
-      .then(function () {
-        return new Promise(function (resolve, _reject) {
-          const limiter = group.key("B");
+    });
 
-          limiter.on("message", function (msg) {
-            received.push("2", msg);
-            return resolve();
-          });
-          limiter.publish("Comment allez-vous?");
-        });
-      })
-      .then(function () {
-        return group.deleteKey("A");
-      })
-      .then(function () {
-        return new Promise(function (resolve, _reject) {
-          const limiter = group.key("A");
+    await new Promise((resolve, _reject) => {
+      const limiter = group.key("B");
 
-          limiter.on("message", function (msg) {
-            received.push("3", msg);
-            return resolve();
-          });
-          limiter.publish("Au revoir!");
-        });
-      })
-      .then(function () {
-        expect(received).toEqual(["1", "Bonjour!", "2", "Comment allez-vous?", "3", "Au revoir!"]);
-        // Semantic, not cleanup: flush=true gracefully drains the un-awaited
-        // "Au revoir!" PUBLISH reply before closing. track's disconnect(false)
-        // would destroy the socket mid-flight and reject that pending command.
-        group.disconnect();
+      limiter.on("message", (msg) => {
+        received.push("2", msg);
+        return resolve();
       });
+      limiter.publish("Comment allez-vous?");
+    });
+
+    await group.deleteKey("A");
+
+    await new Promise((resolve, _reject) => {
+      const limiter = group.key("A");
+
+      limiter.on("message", (msg) => {
+        received.push("3", msg);
+        return resolve();
+      });
+      limiter.publish("Au revoir!");
+    });
+
+    expect(received).toEqual(["1", "Bonjour!", "2", "Comment allez-vous?", "3", "Au revoir!"]);
+    // Semantic, not cleanup: flush=true gracefully drains the un-awaited
+    // "Au revoir!" PUBLISH reply before closing. track's disconnect(false)
+    // would destroy the socket mid-flight and reject that pending command.
+    group.disconnect();
   });
 
-  test("Should have a default key TTL when using Groups", function ({ track }) {
+  test("Should have a default key TTL when using Groups", async ({ track }) => {
     const group = track(
       new Bottleneck.Group({
         datastore: process.env.DATASTORE,
       }),
     );
 
-    return group
-      .key("one")
-      .ready()
-      .then(function () {
-        const limiter = group.key("one");
-        const settings_key = limiterKeys(limiter)[0];
-        return runCommand(limiter, "ttl", [settings_key]);
-      })
-      .then(function (ttl) {
-        expect(ttl).toBeGreaterThanOrEqual(290);
-        expect(ttl).toBeLessThanOrEqual(305);
-      });
+    await group.key("one").ready();
+    const limiter = group.key("one");
+    const settings_key = limiterKeys(limiter)[0];
+    const ttl = await runCommand(limiter, "ttl", [settings_key]);
+    expect(ttl).toBeGreaterThanOrEqual(290);
+    expect(ttl).toBeLessThanOrEqual(305);
   });
 
-  test("Should support Groups and expire Redis keys", function ({ makeLimiter, track }) {
+  test("Should support Groups and expire Redis keys", async ({ makeLimiter, track }) => {
     const rootLimiter = makeLimiter();
     const group = track(
       new Bottleneck.Group({
@@ -417,87 +385,83 @@ describe("Cluster coordination", () => {
         timeout: 200,
       }),
     );
-    let limiter1;
-    let limiter2;
-    let limiter3;
 
     const t0 = Date.now();
     const results = {};
-    const job = function (x) {
+    const job = (x) => {
       results[x] = Date.now() - t0;
       return Promise.resolve();
     };
 
-    return rootLimiter
-      .ready()
-      .then(function () {
-        limiter1 = group.key("one");
-        limiter2 = group.key("two");
-        limiter3 = group.key("three");
+    await rootLimiter.ready();
+    const limiter1 = group.key("one");
+    const limiter2 = group.key("two");
+    const limiter3 = group.key("three");
 
-        return Promise.all([limiter1.ready(), limiter2.ready(), limiter3.ready()]);
-      })
-      .then(function () {
-        return Promise.all([countKeys(limiter1), countKeys(limiter2), countKeys(limiter3)]);
-      })
-      .then(function (counts) {
-        expect(counts).toEqual([5, 5, 5]);
-        return Promise.all([
-          limiter1.schedule(job, "a"),
-          limiter1.schedule(job, "b"),
-          limiter1.schedule(job, "c"),
-          limiter2.schedule(job, "d"),
-          limiter2.schedule(job, "e"),
-          limiter3.schedule(job, "f"),
-        ]);
-      })
-      .then(function () {
-        // The CONTRACT this test verifies is "Bottleneck.Group creates
-        // independent per-key limiters that can run in parallel, and Redis
-        // keys are eventually cleaned up". We verify dispatch ORDER (which
-        // is guaranteed by FIFO + minTime gating inside Bottleneck) and
-        // job count, but DELIBERATELY do not assert per-pair gap timings
-        // here. Reason: results[x] = Date.now() - t0 is recorded inside
-        // the job body, and under heavy event-loop load (testcontainer
-        // boot, parallel test files, etc.) several pending bodies can
-        // run in the same event-loop tick — collapsing Date.now() to the
-        // same millisecond. minTime spacing is still upheld inside the
-        // limiter, just not externally measurable from here. Stronger
-        // minTime assertions live in the simpler priority/general-traffic
-        // tests where we control the event loop directly.
-        expect(Object.keys(results).length).toEqual(6);
-        expect(results.a).toBeLessThanOrEqual(results.b);
-        expect(results.b).toBeLessThanOrEqual(results.c);
-        expect(results.d).toBeLessThanOrEqual(results.e);
+    await Promise.all([limiter1.ready(), limiter2.ready(), limiter3.ready()]);
 
-        // Different limiters in the same group should dispatch in parallel
-        // (no shared minTime/maxConcurrent). Tolerate dispatch jitter —
-        // simultaneous dispatches across separate limiters drift slightly
-        // under load even though the intended behavior is "fire together".
-        expect(Math.abs(results.a - results.d)).toBeLessThanOrEqual(100);
-        expect(Math.abs(results.d - results.f)).toBeLessThanOrEqual(100);
-        expect(Math.abs(results.b - results.e)).toBeLessThanOrEqual(100);
+    const counts = await Promise.all([
+      countKeys(limiter1),
+      countKeys(limiter2),
+      countKeys(limiter3),
+    ]);
+    expect(counts).toEqual([5, 5, 5]);
 
-        // Poll for autocleanup AND the underlying disconnect to settle.
-        // group.deleteKey removes from instances synchronously but awaits
-        // instance.disconnect() which clears connection.limiters async — both
-        // need to be flushed before the assertions below.
-        return waitForState(function () {
-          expect(group.keys().length).toBe(0);
-          expect(Object.keys(group.connection.limiters).length).toBe(0);
-        });
-      })
-      .then(function () {
-        return Promise.all([countKeys(limiter1), countKeys(limiter2), countKeys(limiter3)]);
-      })
-      .then(function (counts) {
-        expect(counts).toEqual([0, 0, 0]);
-        expect(group.keys().length).toEqual(0);
-        expect(Object.keys(group.connection.limiters).length).toEqual(0);
-      });
+    await Promise.all([
+      limiter1.schedule(job, "a"),
+      limiter1.schedule(job, "b"),
+      limiter1.schedule(job, "c"),
+      limiter2.schedule(job, "d"),
+      limiter2.schedule(job, "e"),
+      limiter3.schedule(job, "f"),
+    ]);
+
+    // The CONTRACT this test verifies is "Bottleneck.Group creates
+    // independent per-key limiters that can run in parallel, and Redis
+    // keys are eventually cleaned up". We verify dispatch ORDER (which
+    // is guaranteed by FIFO + minTime gating inside Bottleneck) and
+    // job count, but DELIBERATELY do not assert per-pair gap timings
+    // here. Reason: results[x] = Date.now() - t0 is recorded inside
+    // the job body, and under heavy event-loop load (testcontainer
+    // boot, parallel test files, etc.) several pending bodies can
+    // run in the same event-loop tick — collapsing Date.now() to the
+    // same millisecond. minTime spacing is still upheld inside the
+    // limiter, just not externally measurable from here. Stronger
+    // minTime assertions live in the simpler priority/general-traffic
+    // tests where we control the event loop directly.
+    expect(Object.keys(results).length).toEqual(6);
+    expect(results.a).toBeLessThanOrEqual(results.b);
+    expect(results.b).toBeLessThanOrEqual(results.c);
+    expect(results.d).toBeLessThanOrEqual(results.e);
+
+    // Different limiters in the same group should dispatch in parallel
+    // (no shared minTime/maxConcurrent). Tolerate dispatch jitter —
+    // simultaneous dispatches across separate limiters drift slightly
+    // under load even though the intended behavior is "fire together".
+    expect(Math.abs(results.a - results.d)).toBeLessThanOrEqual(100);
+    expect(Math.abs(results.d - results.f)).toBeLessThanOrEqual(100);
+    expect(Math.abs(results.b - results.e)).toBeLessThanOrEqual(100);
+
+    // Poll for autocleanup AND the underlying disconnect to settle.
+    // group.deleteKey removes from instances synchronously but awaits
+    // instance.disconnect() which clears connection.limiters async — both
+    // need to be flushed before the assertions below.
+    await waitForState(() => {
+      expect(group.keys().length).toBe(0);
+      expect(Object.keys(group.connection.limiters).length).toBe(0);
+    });
+
+    const countsAfterCleanup = await Promise.all([
+      countKeys(limiter1),
+      countKeys(limiter2),
+      countKeys(limiter3),
+    ]);
+    expect(countsAfterCleanup).toEqual([0, 0, 0]);
+    expect(group.keys().length).toEqual(0);
+    expect(Object.keys(group.connection.limiters).length).toEqual(0);
   });
 
-  test("Should not recreate a key when running heartbeat", function ({ harness: h, track }) {
+  test("Should not recreate a key when running heartbeat", async ({ harness: h, track }) => {
     const group = track(
       new Bottleneck.Group({
         datastore: process.env.DATASTORE,
@@ -511,28 +475,19 @@ describe("Cluster coordination", () => {
     const key = "heartbeat";
 
     const limiter = group.key(key);
-    return h
-      .pNoErrVal(limiter.schedule(h.promise, null, 1), 1)
-      .then(function () {
-        return limiter.done();
-      })
-      .then(function (doneCount) {
-        expect(doneCount).toEqual(1);
-        return sleep(400);
-      })
-      .then(function () {
-        return countKeys(limiter);
-      })
-      .then(function (count) {
-        expect(count).toEqual(0);
-      });
+    await expect(limiter.schedule(h.promise, null, 1)).resolves.toEqual([1]);
+    const doneCount = await limiter.done();
+    expect(doneCount).toEqual(1);
+    await sleep(400);
+    const count = await countKeys(limiter);
+    expect(count).toEqual(0);
   });
 
-  test("Should delete Redis key when manually deleting a group key", function ({
+  test("Should delete Redis key when manually deleting a group key", async ({
     harness: h,
     track,
-  }) {
-    // Bump timeout (and the corresponding h.waitFor below) so autocleanup
+  }) => {
+    // Bump timeout (and the corresponding waitForState below) so autocleanup
     // doesn't race with the initial schedule under stress. Original 300ms
     // gave a 150ms autocleanup interval that could fire before init.lua
     // settled when redis was slow.
@@ -558,50 +513,41 @@ describe("Cluster coordination", () => {
     const key = "deleted";
     const limiter = group1.key(key); // only for countKeys() use
 
-    return h
-      .pNoErrVal(group1.key(key).schedule(h.promise, null, 1), 1)
-      .then(function () {
-        return h.pNoErrVal(group2.key(key).schedule(h.promise, null, 2), 2);
-      })
-      .then(function () {
-        expect(group1.keys().length).toEqual(1);
-        expect(group2.keys().length).toEqual(1);
-        return group1.key(key).running();
-      })
-      .then(function () {
-        // Call deleteKey ONCE and assert its return value — retrying a delete
-        // until it returns true would mask a regression where the first call
-        // wrongly returns false. group1 holds the local instance, so true is
-        // guaranteed structurally (instance != null short-circuits).
-        return group1.deleteKey(key);
-      })
-      .then(function (deleted) {
-        expect(deleted).toEqual(true);
-        return countKeys(limiter);
-      })
-      .then(function (count) {
-        expect(count).toEqual(0);
-        expect(group1.keys().length).toEqual(0);
-        expect(group2.keys().length).toEqual(1);
-        // Poll for group2's autocleanup to detect the missing redis key and
-        // prune the local instance — fires every groupTimeout/2 ms.
-        return waitForState(
-          function () {
-            expect(group2.keys().length).toBe(0);
-          },
-          { timeout: groupTimeout * 2 },
-        );
-      })
-      .then(function () {
-        expect(group1.keys().length).toEqual(0);
-        expect(group2.keys().length).toEqual(0);
-      });
+    await expect(group1.key(key).schedule(h.promise, null, 1)).resolves.toEqual([1]);
+    await expect(group2.key(key).schedule(h.promise, null, 2)).resolves.toEqual([2]);
+
+    expect(group1.keys().length).toEqual(1);
+    expect(group2.keys().length).toEqual(1);
+    await group1.key(key).running();
+
+    // Call deleteKey ONCE and assert its return value — retrying a delete
+    // until it returns true would mask a regression where the first call
+    // wrongly returns false. group1 holds the local instance, so true is
+    // guaranteed structurally (instance != null short-circuits).
+    const deleted = await group1.deleteKey(key);
+    expect(deleted).toEqual(true);
+
+    const count = await countKeys(limiter);
+    expect(count).toEqual(0);
+    expect(group1.keys().length).toEqual(0);
+    expect(group2.keys().length).toEqual(1);
+    // Poll for group2's autocleanup to detect the missing redis key and
+    // prune the local instance — fires every groupTimeout/2 ms.
+    await waitForState(
+      () => {
+        expect(group2.keys().length).toBe(0);
+      },
+      { timeout: groupTimeout * 2 },
+    );
+
+    expect(group1.keys().length).toEqual(0);
+    expect(group2.keys().length).toEqual(0);
   });
 
-  test("Should delete Redis keys from a group even when the local limiter is not present", function ({
+  test("Should delete Redis keys from a group even when the local limiter is not present", async ({
     harness: h,
     track,
-  }) {
+  }) => {
     // groupTimeout pulls double duty here: it sets the redis-side TTL
     // (must not expire before group2.deleteKey runs), and it gates
     // autocleanup interval (timeout/2). 2000ms was enough for autocleanup
@@ -630,50 +576,42 @@ describe("Cluster coordination", () => {
     const key = "deleted-cluster-wide";
     const limiter = group1.key(key); // only for countKeys() use
 
-    return h
-      .pNoErrVal(group1.key(key).schedule(h.promise, null, 1), 1)
-      .then(function () {
-        expect(group1.keys().length).toEqual(1);
-        expect(group2.keys().length).toEqual(0);
-        return group1.key(key).running();
-      })
-      .then(function () {
-        // The keys were written through group1's connection; poll read-only
-        // existence before the cross-group delete so a slow write can't turn
-        // this into a false failure...
-        return waitForState(async function () {
-          expect(await countKeys(limiter)).toBeGreaterThan(0);
-        });
-      })
-      .then(function () {
-        // ...then call deleteKey ONCE and assert its return value. group2 has
-        // no local instance, so the value reflects the redis DEL — retrying
-        // until true would mask a regression where it wrongly returns false.
-        return group2.deleteKey(key);
-      })
-      .then(function (deleted) {
-        expect(deleted).toEqual(true);
-        return countKeys(limiter);
-      })
-      .then(function (count) {
-        expect(count).toEqual(0);
-        expect(group1.keys().length).toEqual(1);
-        expect(group2.keys().length).toEqual(0);
-        // Poll for group1's autocleanup to detect the missing redis key.
-        return waitForState(
-          function () {
-            expect(group1.keys().length).toBe(0);
-          },
-          { timeout: groupTimeout * 2 },
-        );
-      })
-      .then(function () {
-        expect(group1.keys().length).toEqual(0);
-        expect(group2.keys().length).toEqual(0);
-      });
+    await expect(group1.key(key).schedule(h.promise, null, 1)).resolves.toEqual([1]);
+
+    expect(group1.keys().length).toEqual(1);
+    expect(group2.keys().length).toEqual(0);
+    await group1.key(key).running();
+
+    // The keys were written through group1's connection; poll read-only
+    // existence before the cross-group delete so a slow write can't turn
+    // this into a false failure...
+    await waitForState(async () => {
+      expect(await countKeys(limiter)).toBeGreaterThan(0);
+    });
+
+    // ...then call deleteKey ONCE and assert its return value. group2 has
+    // no local instance, so the value reflects the redis DEL — retrying
+    // until true would mask a regression where it wrongly returns false.
+    const deleted = await group2.deleteKey(key);
+    expect(deleted).toEqual(true);
+
+    const count = await countKeys(limiter);
+    expect(count).toEqual(0);
+    expect(group1.keys().length).toEqual(1);
+    expect(group2.keys().length).toEqual(0);
+    // Poll for group1's autocleanup to detect the missing redis key.
+    await waitForState(
+      () => {
+        expect(group1.keys().length).toBe(0);
+      },
+      { timeout: groupTimeout * 2 },
+    );
+
+    expect(group1.keys().length).toEqual(0);
+    expect(group2.keys().length).toEqual(0);
   });
 
-  test("Should returns all Group keys in the cluster", async function ({ track }) {
+  test("Should returns all Group keys in the cluster", async ({ track }) => {
     // Use a long timeout so redis-side TTLs cannot expire mid-test under load.
     // Original 3000ms was tight enough that a slow run (cumulative redis latency)
     // could let keys expire before the assertions, then autocleanup would prune
@@ -710,7 +648,7 @@ describe("Cluster coordination", () => {
     expect(await group3.clusterKeys()).toEqual([]);
   });
 
-  test("Should queue up the least busy limiter", async function ({ harness: h, track }) {
+  test("Should queue up the least busy limiter", async ({ harness: h, track }) => {
     const limiter1 = track(
       new Bottleneck({
         datastore: process.env.DATASTORE,
@@ -752,42 +690,13 @@ describe("Cluster coordination", () => {
       }),
     );
 
-    let resolve1, resolve2, resolve3, resolve4, resolve5, resolve6, resolve7;
-    const p1 = new Promise(function (resolve, _reject) {
-      resolve1 = function (_err, n) {
-        resolve(n);
-      };
-    });
-    const p2 = new Promise(function (resolve, _reject) {
-      resolve2 = function (_err, n) {
-        resolve(n);
-      };
-    });
-    const p3 = new Promise(function (resolve, _reject) {
-      resolve3 = function (_err, n) {
-        resolve(n);
-      };
-    });
-    const p4 = new Promise(function (resolve, _reject) {
-      resolve4 = function (_err, n) {
-        resolve(n);
-      };
-    });
-    const p5 = new Promise(function (resolve, _reject) {
-      resolve5 = function (_err, n) {
-        resolve(n);
-      };
-    });
-    const p6 = new Promise(function (resolve, _reject) {
-      resolve6 = function (_err, n) {
-        resolve(n);
-      };
-    });
-    const p7 = new Promise(function (resolve, _reject) {
-      resolve7 = function (_err, n) {
-        resolve(n);
-      };
-    });
+    const r1 = submitResult();
+    const r2 = submitResult();
+    const r3 = submitResult();
+    const r4 = submitResult();
+    const r5 = submitResult();
+    const r6 = submitResult();
+    const r7 = submitResult();
 
     await limiter1.schedule({ id: "1" }, h.promise, null, "A");
     await limiter2.schedule({ id: "2" }, h.promise, null, "B");
@@ -800,26 +709,34 @@ describe("Cluster coordination", () => {
     // preserving the original [1, 4, 5, 6, 7, 2, 3] completion order.
     const sigA = deferred();
 
-    await limiter1.submit({ id: "A" }, h.deferredJob, sigA.signal, null, 1, resolve1);
+    await limiter1.submit({ id: "A" }, h.deferredJob, sigA.signal, null, 1, r1.cb);
     // B and C must finish after D/E/F/G. Use generous durations so the test
     // is robust to redis round-trip delays between releaseA() and G's completion.
-    await limiter1.submit({ id: "B" }, h.slowJob, 1000, null, 2, resolve2);
-    await limiter2.submit({ id: "C" }, h.slowJob, 1050, null, 3, resolve3);
+    await limiter1.submit({ id: "B" }, h.slowJob, 1000, null, 2, r2.cb);
+    await limiter2.submit({ id: "C" }, h.slowJob, 1050, null, 3, r3.cb);
 
     expect(runningOrExecuting(limiter1)).toEqual(2);
     expect(runningOrExecuting(limiter2)).toEqual(1);
 
-    await limiter3.submit({ id: "D" }, h.slowJob, 50, null, 4, resolve4);
-    await limiter4.submit({ id: "E" }, h.slowJob, 50, null, 5, resolve5);
-    await limiter3.submit({ id: "F" }, h.slowJob, 50, null, 6, resolve6);
-    await limiter4.submit({ id: "G" }, h.slowJob, 50, null, 7, resolve7);
+    await limiter3.submit({ id: "D" }, h.slowJob, 50, null, 4, r4.cb);
+    await limiter4.submit({ id: "E" }, h.slowJob, 50, null, 5, r5.cb);
+    await limiter3.submit({ id: "F" }, h.slowJob, 50, null, 6, r6.cb);
+    await limiter4.submit({ id: "G" }, h.slowJob, 50, null, 7, r7.cb);
 
     expect(limiter3.counts().QUEUED).toEqual(2);
     expect(limiter4.counts().QUEUED).toEqual(2);
 
     sigA.release();
 
-    await Promise.all([p1, p2, p3, p4, p5, p6, p7]);
+    await Promise.all([
+      r1.promise,
+      r2.promise,
+      r3.promise,
+      r4.promise,
+      r5.promise,
+      r6.promise,
+      r7.promise,
+    ]);
 
     // The CONTRACT here is "Bottleneck distributes cluster capacity to the
     // least-busy limiter" — i.e. D/E spread to limiter3/limiter4 (instead of
@@ -838,9 +755,7 @@ describe("Cluster coordination", () => {
     // resolved via a Redis-side capacity grant whose order is sensitive to
     // pubsub round-trip latency under load. Strict ordering here was the
     // observed flake (e.g. [..,4,5,7,6,..]).
-    const calls = h.results().calls.map(function (call) {
-      return call.result[0];
-    });
+    const calls = h.results().calls.map((call) => call.result[0]);
     expect(calls.length).toEqual(11);
     expect(calls.slice(0, 5)).toEqual(["A", "B", "C", "D", 1]);
     expect(calls.slice(5, 7).sort()).toEqual([4, 5]);
@@ -848,10 +763,7 @@ describe("Cluster coordination", () => {
     expect(calls.slice(9, 11).sort()).toEqual([2, 3]);
   });
 
-  test("Should pass the remaining capacity to other limiters", async function ({
-    harness: h,
-    track,
-  }) {
+  test("Should pass the remaining capacity to other limiters", async ({ harness: h, track }) => {
     const limiter1 = track(
       new Bottleneck({
         datastore: process.env.DATASTORE,
@@ -894,34 +806,15 @@ describe("Cluster coordination", () => {
     );
     let t3, t4;
 
-    let resolve1, resolve2, resolve3, resolve4, resolve5;
-    const p1 = new Promise(function (resolve, _reject) {
-      resolve1 = function (_err, n) {
-        resolve(n);
-      };
+    const r1 = submitResult();
+    const r2 = submitResult();
+    const r3 = submitResult(() => {
+      t3 = Date.now();
     });
-    const p2 = new Promise(function (resolve, _reject) {
-      resolve2 = function (_err, n) {
-        resolve(n);
-      };
+    const r4 = submitResult(() => {
+      t4 = Date.now();
     });
-    const p3 = new Promise(function (resolve, _reject) {
-      resolve3 = function (_err, n) {
-        t3 = Date.now();
-        resolve(n);
-      };
-    });
-    const p4 = new Promise(function (resolve, _reject) {
-      resolve4 = function (_err, n) {
-        t4 = Date.now();
-        resolve(n);
-      };
-    });
-    const p5 = new Promise(function (resolve, _reject) {
-      resolve5 = function (_err, n) {
-        resolve(n);
-      };
-    });
+    const r5 = submitResult();
 
     await limiter1.schedule({ id: "1" }, h.promise, null, "A");
     await limiter2.schedule({ id: "2" }, h.promise, null, "B");
@@ -935,22 +828,15 @@ describe("Cluster coordination", () => {
     // before the asserts ran — capacity freed, limiter3's queued job
     // dispatched, and `limiter3.counts().QUEUED` flipped from 1 to 0.
     const sigFirst = deferred();
-    await limiter1.submit(
-      { id: "A", weight: 2 },
-      h.deferredJob,
-      sigFirst.signal,
-      null,
-      1,
-      resolve1,
-    );
-    await limiter2.submit({ id: "C" }, h.slowJob, 550, null, 2, resolve2);
+    await limiter1.submit({ id: "A", weight: 2 }, h.deferredJob, sigFirst.signal, null, 1, r1.cb);
+    await limiter2.submit({ id: "C" }, h.slowJob, 550, null, 2, r2.cb);
 
     expect(runningOrExecuting(limiter1)).toEqual(1);
     expect(runningOrExecuting(limiter2)).toEqual(1);
 
-    await limiter3.submit({ id: "D" }, h.slowJob, 50, null, 3, resolve3);
-    await limiter4.submit({ id: "E" }, h.slowJob, 50, null, 4, resolve4);
-    await limiter4.submit({ id: "G" }, h.slowJob, 50, null, 5, resolve5);
+    await limiter3.submit({ id: "D" }, h.slowJob, 50, null, 3, r3.cb);
+    await limiter4.submit({ id: "E" }, h.slowJob, 50, null, 4, r4.cb);
+    await limiter4.submit({ id: "G" }, h.slowJob, 50, null, 5, r5.cb);
 
     expect(limiter3.counts().QUEUED).toEqual(1);
     expect(limiter4.counts().QUEUED).toEqual(2);
@@ -960,7 +846,7 @@ describe("Cluster coordination", () => {
     // signal resolves (matching slowJob's timing semantics).
     sigFirst.release();
 
-    await Promise.all([p1, p2, p3, p4, p5]);
+    await Promise.all([r1.promise, r2.promise, r3.promise, r4.promise, r5.promise]);
 
     // Capacity-priority (process_tick.lua): among clients tied on minimum running
     // load with queued>0, Redis picks the one with the smallest client_last_registered
@@ -977,10 +863,10 @@ describe("Cluster coordination", () => {
     expect(Math.abs(t3 - t4)).toBeLessThan(100);
   });
 
-  test("Should take the capacity and blacklist if the priority limiter is not responding", async function ({
+  test("Should take the capacity and blacklist if the priority limiter is not responding", async ({
     harness: h,
     track,
-  }) {
+  }) => {
     const limiter1 = track(
       new Bottleneck({
         datastore: process.env.DATASTORE,
@@ -1016,29 +902,16 @@ describe("Cluster coordination", () => {
     await limiter2.schedule({ id: "2" }, h.promise, null, "B");
     await limiter3.schedule({ id: "3" }, h.promise, null, "C");
 
-    let resolve1, resolve2, resolve3;
-    const p1 = new Promise(function (resolve, _reject) {
-      resolve1 = function (_err, n) {
-        resolve(n);
-      };
-    });
-    const _p2 = new Promise(function (resolve, _reject) {
-      resolve2 = function (_err, n) {
-        resolve(n);
-      };
-    });
-    const p3 = new Promise(function (resolve, _reject) {
-      resolve3 = function (_err, n) {
-        resolve(n);
-      };
-    });
+    const r1 = submitResult();
+    const r2 = submitResult(); // never completes: limiter2 disconnects below
+    const r3 = submitResult();
 
-    await limiter1.submit({ id: "4" }, h.slowJob, 100, null, 4, resolve1);
-    await limiter2.submit({ id: "5" }, h.slowJob, 100, null, 5, resolve2);
-    await limiter3.submit({ id: "6" }, h.slowJob, 100, null, 6, resolve3);
+    await limiter1.submit({ id: "4" }, h.slowJob, 100, null, 4, r1.cb);
+    await limiter2.submit({ id: "5" }, h.slowJob, 100, null, 5, r2.cb);
+    await limiter3.submit({ id: "6" }, h.slowJob, 100, null, 6, r3.cb);
     await limiter2.disconnect(false);
 
-    await Promise.all([p1, p3]);
+    await Promise.all([r1.promise, r3.promise]);
     expect(h.log).toHaveCallOrder([["A"], ["B"], ["C"], [4], [6]]);
   });
 });

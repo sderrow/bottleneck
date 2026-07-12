@@ -6,14 +6,8 @@ import makeLimiterHelper from "./limiter.js";
 export { waitForState } from "./wait-for-state.js";
 export { deferred } from "./job-tasks.js";
 
-function pNoErrVal(promise, ...expected) {
-  return promise.then((actual) => {
-    vitestExpect(actual).toEqual(expected);
-  });
-}
-
 function noErrVal(...expected) {
-  return function (err, ...actual) {
+  return (err, ...actual) => {
     vitestExpect(err).toBeNull();
     vitestExpect(actual).toEqual(expected);
   };
@@ -28,7 +22,7 @@ function createJobHarness() {
   });
 
   const log = {
-    record: record,
+    record,
     calls: record.mock.calls,
   };
 
@@ -46,9 +40,7 @@ function createJobHarness() {
 
   function flushLimiter(limiter, scheduleOptions) {
     const opt = scheduleOptions != null ? scheduleOptions : {};
-    return limiter.schedule(opt, () => {
-      return Promise.resolve(getResults());
-    });
+    return limiter.schedule(opt, () => Promise.resolve(getResults()));
   }
 
   return {
@@ -59,12 +51,11 @@ function createJobHarness() {
     promise: tasks.promise,
     slowPromise: tasks.slowPromise,
     deferredPromise: tasks.deferredPromise,
-    getResults: getResults,
+    getResults,
     results: getResults,
-    flushLimiter: flushLimiter,
-    pNoErrVal: pNoErrVal,
-    noErrVal: noErrVal,
-    callTimes: callTimes,
+    flushLimiter,
+    noErrVal,
+    callTimes,
   };
 }
 
@@ -120,7 +111,7 @@ vitestExpect.extend({
       // Accepts N or exactly N+1: sinon fake-timers assigns callAt = now + 1
       // to a 0ms timer created INSIDE a running timer callback ("duringTick"
       // quantization), which every heartbeat-driven dispatch hits via
-      // LocalDatastore's heartbeat setInterval -> yieldLoop() setTimeout(0).
+      // LocalDatastore's heartbeat setInterval -> yieldLoop() sleep(0).
       // Interval-driven calls therefore land at exactly N+1; direct minTime
       // dispatches land at exactly N. Never N-1, never N+2.
       const pass = time === expectedMs || time === expectedMs + 1;
@@ -148,13 +139,13 @@ export const test = baseTest.extend({
   // it parses the pattern to build the dependency graph — so the empty
   // pattern is mandatory for dependency-free fixtures.
   // oxlint-disable-next-line no-empty-pattern
-  harness: async function ({}, use) {
+  async harness({}, use) {
     await use(createJobHarness());
   },
   limiterOptions: {},
   limiterMeta: {},
   // oxlint-disable-next-line no-empty-pattern
-  track: async function ({}, use) {
+  async track({}, use) {
     const resources = [];
     await use((resource) => {
       resources.push(resource);
@@ -168,13 +159,10 @@ export const test = baseTest.extend({
       }
     }
   },
-  makeLimiter: async function ({ track }, use) {
+  async makeLimiter({ track }, use) {
     await use((opts, meta) => track(makeLimiterHelper(opts, meta)));
   },
-  limiter: async function ({ makeLimiter, limiterOptions, limiterMeta }, use) {
+  async limiter({ makeLimiter, limiterOptions, limiterMeta }, use) {
     await use(makeLimiter(limiterOptions, limiterMeta));
   },
 });
-
-export const expect = vitestExpect;
-export { describe, vi } from "vitest";

@@ -1,6 +1,5 @@
-const Bottleneck = (() => {
-  const entry = process.env.BOTTLENECK_ENTRY ?? "source";
-  switch (entry) {
+const resolveEntry = () => {
+  switch (process.env.BOTTLENECK_ENTRY ?? "source") {
     case "light":
       return require("../dist/light.js");
     case "lib":
@@ -8,7 +7,8 @@ const Bottleneck = (() => {
     default:
       return require("../src/index.js");
   }
-})();
+};
+const Bottleneck = resolveEntry();
 
 // A limiter (or group) is Redis-backed if its options either name a Redis
 // datastore explicitly OR provide a pre-built `connection` (in which case

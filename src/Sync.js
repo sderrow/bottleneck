@@ -28,7 +28,7 @@ class Sync {
   schedule(task, ...args) {
     let reject;
     let resolve = (reject = null);
-    const promise = new Promise(function (_resolve, _reject) {
+    const promise = new Promise((_resolve, _reject) => {
       resolve = _resolve;
       reject = _reject;
     });

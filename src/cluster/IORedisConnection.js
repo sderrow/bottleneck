@@ -38,13 +38,13 @@ class IORedisConnection {
     }
     this.limiters = {};
 
-    this.ready = Promise.all([
-      this._setup(this.client, false),
-      this._setup(this.subscriber, true),
-    ]).then(() => {
-      this._loadScripts();
-      return { client: this.client, subscriber: this.subscriber };
-    });
+    this.ready = this._initReady();
+  }
+
+  async _initReady() {
+    await Promise.all([this._setup(this.client, false), this._setup(this.subscriber, true)]);
+    this._loadScripts();
+    return { client: this.client, subscriber: this.subscriber };
   }
 
   _setup(client, sub) {
@@ -87,13 +87,10 @@ class IORedisConnection {
 
   async __addLimiter__(instance) {
     await Promise.all(
-      [instance.channel(), instance.channel_client()].map((channel) => {
-        return new Promise((resolve) => {
-          this.subscriber.subscribe(channel, () => {
-            this.limiters[channel] = instance;
-            resolve();
-          });
-        });
+      [instance.channel(), instance.channel_client()].map(async (channel) => {
+        // ioredis returns a promise when subscribe is called without a callback.
+        await this.subscriber.subscribe(channel);
+        this.limiters[channel] = instance;
       }),
     );
   }

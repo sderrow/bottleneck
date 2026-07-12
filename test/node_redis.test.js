@@ -1,10 +1,11 @@
-import { test, describe, expect } from "./helpers/test-api.js";
+import { describe, expect } from "vitest";
+import { test } from "./helpers/test-api.js";
 const Bottleneck = require("./bottleneck");
 const Redis = require("redis");
 const buildClientOptions = require("./redis-client-options");
 
 describe("node_redis-only", () => {
-  test("Should accept node_redis lib override", function ({ makeLimiter }) {
+  test("Should accept node_redis lib override", ({ makeLimiter }) => {
     const limiter = makeLimiter({
       maxConcurrent: 2,
       Redis,
@@ -13,7 +14,7 @@ describe("node_redis-only", () => {
     expect(limiter.datastore).toStrictEqual("redis");
   });
 
-  test("Should accept existing connections", function ({ harness: h, makeLimiter, track }) {
+  test("Should accept existing connections", async ({ harness: h, makeLimiter, track }) => {
     const connection = track(
       new Bottleneck.RedisConnection({
         Redis,
@@ -26,25 +27,21 @@ describe("node_redis-only", () => {
       connection,
     });
 
-    h.pNoErrVal(limiter.schedule(h.promise, null, 1), 1);
-    h.pNoErrVal(limiter.schedule(h.promise, null, 2), 2);
+    const p1 = limiter.schedule(h.promise, null, 1);
+    const p2 = limiter.schedule(h.promise, null, 2);
 
-    return h
-      .flushLimiter(limiter)
-      .then(function (_results) {
-        expect(h.log).toHaveCallOrder([[1], [2]]);
-        expect(h).toHaveFinalCallAt(50);
-        expect(limiter.connection.id).toStrictEqual("super-connection");
-        expect(limiter.datastore).toStrictEqual("redis");
+    await h.flushLimiter(limiter);
+    expect(h.log).toHaveCallOrder([[1], [2]]);
+    expect(h).toHaveFinalCallAt(50);
+    expect(limiter.connection.id).toStrictEqual("super-connection");
+    expect(limiter.datastore).toStrictEqual("redis");
 
-        return limiter.disconnect();
-      })
-      .then(function () {
-        expect(limiter.clients().client.isReady).toStrictEqual(true);
-      });
+    await limiter.disconnect();
+    expect(limiter.clients().client.isReady).toStrictEqual(true);
+    await Promise.all([expect(p1).resolves.toEqual([1]), expect(p2).resolves.toEqual([2])]);
   });
 
-  test("Should accept existing redis clients", async function ({ harness: h, makeLimiter, track }) {
+  test("Should accept existing redis clients", async ({ harness: h, makeLimiter, track }) => {
     const client = Redis.createClient(buildClientOptions("redis"));
     client.id = "super-client";
     await client.connect();
@@ -56,28 +53,24 @@ describe("node_redis-only", () => {
       connection,
     });
 
-    h.pNoErrVal(limiter.schedule(h.promise, null, 1), 1);
-    h.pNoErrVal(limiter.schedule(h.promise, null, 2), 2);
+    const p1 = limiter.schedule(h.promise, null, 1);
+    const p2 = limiter.schedule(h.promise, null, 2);
 
-    return h
-      .flushLimiter(limiter)
-      .then(function (_results) {
-        expect(h.log).toHaveCallOrder([[1], [2]]);
-        expect(h).toHaveFinalCallAt(50);
-        expect(limiter.clients().client.id).toStrictEqual("super-client");
-        expect(limiter.connection.id).toStrictEqual("super-connection");
-        expect(limiter.datastore).toStrictEqual("redis");
+    await h.flushLimiter(limiter);
+    expect(h.log).toHaveCallOrder([[1], [2]]);
+    expect(h).toHaveFinalCallAt(50);
+    expect(limiter.clients().client.id).toStrictEqual("super-client");
+    expect(limiter.connection.id).toStrictEqual("super-connection");
+    expect(limiter.datastore).toStrictEqual("redis");
 
-        return limiter.disconnect();
-      })
-      .then(function () {
-        expect(limiter.clients().client.isReady).toStrictEqual(true);
-      });
+    await limiter.disconnect();
+    expect(limiter.clients().client.isReady).toStrictEqual(true);
+    await Promise.all([expect(p1).resolves.toEqual([1]), expect(p2).resolves.toEqual([2])]);
   });
 
-  test("Should trigger error events on the shared connection", function ({ makeLimiter, track }) {
+  test("Should trigger error events on the shared connection", ({ makeLimiter, track }) => {
     expect.hasAssertions();
-    return new Promise(function (resolve, reject) {
+    return new Promise((resolve, reject) => {
       const connection = track(
         new Bottleneck.RedisConnection({
           Redis,
@@ -92,7 +85,7 @@ describe("node_redis-only", () => {
       connection.ready.catch(() => {});
       let fired = false;
       const limiter = makeLimiter({ connection }, { expectErrors: true });
-      connection.on("error", function (_err) {
+      connection.on("error", (_err) => {
         if (fired) return;
         fired = true;
         expect(limiter.datastore).toStrictEqual("redis");
@@ -100,7 +93,7 @@ describe("node_redis-only", () => {
         resolve();
       });
 
-      limiter.on("error", function (err) {
+      limiter.on("error", (err) => {
         if (fired) return;
         reject(err);
       });

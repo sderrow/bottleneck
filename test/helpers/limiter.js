@@ -38,7 +38,7 @@ function makeLimiter(options, meta) {
   const limiter = new Bottleneck(options);
 
   if (!meta.expectErrors) {
-    limiter.on("error", function (err) {
+    limiter.on("error", (err) => {
       const isIoredisConnectTimeout = err?.code === "ETIMEDOUT" && err?.syscall === "connect";
       const isTransientNodeRedisError =
         err instanceof ConnectionTimeoutError || err instanceof SocketClosedUnexpectedlyError;
@@ -48,7 +48,10 @@ function makeLimiter(options, meta) {
     });
   }
 
-  limiter.ready().catch(function () {});
+  // makeLimiter is synchronous; suppress the unhandled-rejection from ready()
+  // for tests that never await it (connection-failure tests assert via the
+  // "error" event instead).
+  limiter.ready().catch(() => {});
 
   return limiter;
 }

@@ -3,8 +3,8 @@ const assert = require("assert");
 const Bottleneck = require("../bottleneck");
 const { iterateAsync } = require("../leakage");
 
-describe("Limiter memory", function () {
-  it("Should not leak memory on instantiation", { timeout: 8000 }, async function () {
+describe("Limiter memory", () => {
+  it("Should not leak memory on instantiation", { timeout: 8000 }, async () => {
     let calls = 0;
     await iterateAsync(
       async () => {
@@ -18,7 +18,7 @@ describe("Limiter memory", function () {
     assert.strictEqual(calls, 28);
   });
 
-  it("Should not leak memory running jobs", { timeout: 12000 }, async function () {
+  it("Should not leak memory running jobs", { timeout: 12000 }, async () => {
     const limiter = new Bottleneck({ datastore: "local", maxConcurrent: 1, minTime: 10 });
     await limiter.ready();
 
@@ -30,14 +30,14 @@ describe("Limiter memory", function () {
         async () => {
           calls++;
           await limiter.schedule(
-            function (zero, one) {
+            (zero, one) => {
               i = i + zero + one;
             },
             0,
             1,
           );
           await limiter.schedule(
-            function (zero, one) {
+            (zero, one) => {
               i = i + zero + one;
             },
             0,

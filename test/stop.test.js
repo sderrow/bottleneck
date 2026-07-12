@@ -1,10 +1,11 @@
+import { describe, expect } from "vitest";
 import { useFakeClock } from "./helpers/clock.js";
-import { test, describe, expect, waitForState } from "./helpers/test-api.js";
+import { test, waitForState } from "./helpers/test-api.js";
 
 useFakeClock();
 
 describe("Stop", () => {
-  test("Should stop and drop the queue", async function ({ harness: h, makeLimiter }) {
+  test("Should stop and drop the queue", async ({ harness: h, makeLimiter }) => {
     const limiter = makeLimiter({
       maxConcurrent: 2,
       minTime: 100,
@@ -12,13 +13,13 @@ describe("Stop", () => {
     });
     let dropped = 0;
 
-    limiter.on("dropped", function () {
+    limiter.on("dropped", () => {
       dropped++;
     });
 
-    h.pNoErrVal(limiter.schedule({ id: "0" }, h.promise, null, 0), 0);
+    const p0 = limiter.schedule({ id: "0" }, h.promise, null, 0);
 
-    h.pNoErrVal(limiter.schedule({ id: "1" }, h.slowPromise, 500, null, 1), 1);
+    const p1 = limiter.schedule({ id: "1" }, h.slowPromise, 500, null, 1);
 
     const scheduledDroppedJob = limiter.schedule({ id: "2" }, h.promise, null, 2);
     const queuedDroppedJob = limiter.schedule({ id: "3" }, h.promise, null, 3);
@@ -40,6 +41,8 @@ describe("Stop", () => {
 
     await Promise.all([
       stopPromise,
+      expect(p0).resolves.toEqual([0]),
+      expect(p1).resolves.toEqual([1]),
       expect(scheduledDroppedJob).rejects.toThrow("Dropped!"),
       expect(queuedDroppedJob).rejects.toThrow("Dropped!"),
       expect(submitFailedJob).rejects.toThrow("Stopped!"),
@@ -56,7 +59,7 @@ describe("Stop", () => {
     expect(h.log).toHaveCallOrder([[0], [1]]);
   });
 
-  test("Should stop and let the queue finish", async function ({ harness: h, makeLimiter }) {
+  test("Should stop and let the queue finish", async ({ harness: h, makeLimiter }) => {
     const limiter = makeLimiter({
       maxConcurrent: 1,
       minTime: 100,
@@ -64,13 +67,13 @@ describe("Stop", () => {
     });
     let dropped = 0;
 
-    limiter.on("dropped", function () {
+    limiter.on("dropped", () => {
       dropped++;
     });
 
-    h.pNoErrVal(limiter.schedule({ id: "1" }, h.promise, null, 1), 1);
-    h.pNoErrVal(limiter.schedule({ id: "2" }, h.promise, null, 2), 2);
-    h.pNoErrVal(limiter.schedule({ id: "3" }, h.slowPromise, 100, null, 3), 3);
+    const p1 = limiter.schedule({ id: "1" }, h.promise, null, 1);
+    const p2 = limiter.schedule({ id: "2" }, h.promise, null, 2);
+    const p3 = limiter.schedule({ id: "3" }, h.slowPromise, 100, null, 3);
 
     await waitForState(() => {
       const counts = limiter.counts();
@@ -87,7 +90,13 @@ describe("Stop", () => {
     });
     const submitFailedJob = limiter.schedule(() => Promise.resolve(true));
 
-    await Promise.all([stopPromise, expect(submitFailedJob).rejects.toThrow("Stopped!")]);
+    await Promise.all([
+      stopPromise,
+      expect(p1).resolves.toEqual([1]),
+      expect(p2).resolves.toEqual([2]),
+      expect(p3).resolves.toEqual([3]),
+      expect(submitFailedJob).rejects.toThrow("Stopped!"),
+    ]);
     const counts = limiter.counts();
     expect(dropped).toEqual(0);
     expect(counts.RECEIVED).toEqual(0);
@@ -99,85 +108,71 @@ describe("Stop", () => {
     expect(h.log).toHaveCallOrder([[1], [2], [3]]);
   });
 
-  test("Should still resolve when rejectOnDrop is false", function ({ harness: h, makeLimiter }) {
+  test("Should still resolve when rejectOnDrop is false", async ({ harness: h, makeLimiter }) => {
     const limiter = makeLimiter({
       maxConcurrent: 1,
       minTime: 100,
       rejectOnDrop: false,
     });
 
-    h.pNoErrVal(limiter.schedule({ id: "1" }, h.promise, null, 1), 1);
-    h.pNoErrVal(limiter.schedule({ id: "2" }, h.promise, null, 2), 2);
-    h.pNoErrVal(limiter.schedule({ id: "3" }, h.slowPromise, 100, null, 3), 3);
+    // With rejectOnDrop false, jobs dropped by stop() never settle their
+    // promises — so there is deliberately no assertion on them (wrapping in
+    // expect().resolves would hang the test's auto-awaited assertions). The
+    // contract under test is only that stop() resolves and rejects on reuse.
+    limiter.schedule({ id: "1" }, h.promise, null, 1);
+    limiter.schedule({ id: "2" }, h.promise, null, 2);
+    limiter.schedule({ id: "3" }, h.slowPromise, 100, null, 3);
 
-    return limiter
-      .stop()
-      .then(function () {
-        return limiter.stop();
-      })
-      .then(function () {
-        throw new Error("Should not be here");
-      })
-      .catch(function (err) {
-        expect(err.message).toEqual("stop() has already been called");
-      });
+    await limiter.stop();
+    await expect(limiter.stop()).rejects.toThrow("stop() has already been called");
   });
 
-  test("Should not allow calling stop() twice when dropWaitingJobs=true", function ({
+  test("Should not allow calling stop() twice when dropWaitingJobs=true", async ({
     harness: h,
     makeLimiter,
-  }) {
+  }) => {
     const limiter = makeLimiter({
       maxConcurrent: 1,
       minTime: 100,
     });
-    let failed = 0;
-    const handler = function (err) {
-      expect(err.message).toEqual("This limiter has been stopped.");
-      failed++;
-    };
+    // All three jobs are still waiting when stop() drops the queue, so all
+    // three promises must reject with the stop message.
+    const dropped = [
+      limiter.schedule({ id: "1" }, h.promise, null, 1),
+      limiter.schedule({ id: "2" }, h.promise, null, 2),
+      limiter.schedule({ id: "3" }, h.slowPromise, 100, null, 3),
+    ];
 
-    h.pNoErrVal(limiter.schedule({ id: "1" }, h.promise, null, 1), 1).catch(handler);
-    h.pNoErrVal(limiter.schedule({ id: "2" }, h.promise, null, 2), 2).catch(handler);
-    h.pNoErrVal(limiter.schedule({ id: "3" }, h.slowPromise, 100, null, 3), 3).catch(handler);
-
-    return limiter
-      .stop({ dropWaitingJobs: true })
-      .then(function () {
-        return limiter.stop({ dropWaitingJobs: true });
-      })
-      .then(function () {
-        throw new Error("Should not be here");
-      })
-      .catch(function (err) {
-        expect(err.message).toEqual("stop() has already been called");
-        expect(failed).toEqual(3);
-      });
+    await limiter.stop({ dropWaitingJobs: true });
+    await expect(limiter.stop({ dropWaitingJobs: true })).rejects.toThrow(
+      "stop() has already been called",
+    );
+    await Promise.all(
+      dropped.map((p) => expect(p).rejects.toThrow("This limiter has been stopped.")),
+    );
   });
 
-  test("Should not allow calling stop() twice when dropWaitingJobs=false", function ({
+  test("Should not allow calling stop() twice when dropWaitingJobs=false", async ({
     harness: h,
     makeLimiter,
-  }) {
+  }) => {
     const limiter = makeLimiter({
       maxConcurrent: 1,
       minTime: 100,
     });
 
-    h.pNoErrVal(limiter.schedule({ id: "1" }, h.promise, null, 1), 1);
-    h.pNoErrVal(limiter.schedule({ id: "2" }, h.promise, null, 2), 2);
-    h.pNoErrVal(limiter.schedule({ id: "3" }, h.slowPromise, 100, null, 3), 3);
+    const p1 = limiter.schedule({ id: "1" }, h.promise, null, 1);
+    const p2 = limiter.schedule({ id: "2" }, h.promise, null, 2);
+    const p3 = limiter.schedule({ id: "3" }, h.slowPromise, 100, null, 3);
 
-    return limiter
-      .stop({ dropWaitingJobs: false })
-      .then(function () {
-        return limiter.stop({ dropWaitingJobs: false });
-      })
-      .then(function () {
-        throw new Error("Should not be here");
-      })
-      .catch(function (err) {
-        expect(err.message).toEqual("stop() has already been called");
-      });
+    await limiter.stop({ dropWaitingJobs: false });
+    await expect(limiter.stop({ dropWaitingJobs: false })).rejects.toThrow(
+      "stop() has already been called",
+    );
+    await Promise.all([
+      expect(p1).resolves.toEqual([1]),
+      expect(p2).resolves.toEqual([2]),
+      expect(p3).resolves.toEqual([3]),
+    ]);
   });
 });

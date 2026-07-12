@@ -38,26 +38,29 @@ class RedisDatastore {
     this.instance.connection = this.connection;
     this.instance.datastore = this.connection.datastore;
 
-    this.ready = this.connection.ready
-      .then((clients) => {
-        this.clients = clients;
-        return this.runScript("init", this.prepareInitSettings(this.clearDatastore));
-      })
-      .then(() => this.connection.__addLimiter__(this.instance))
-      .then(() => this.runScript("register_client", [this.instance.queued()]))
-      .then(() => {
-        if (!this._disconnecting) {
-          this.heartbeat = setInterval(() => {
-            return this.runScript("heartbeat", []).catch((e) => {
-              if (!this._disconnecting) {
-                this.instance.Events.trigger("error", e);
-              }
-            });
-          }, this.heartbeatInterval).unref?.();
-        }
-        return this.clients;
-      });
+    this.ready = this._initReady();
+    // Stored init promise: consumers await `ready` lazily, so suppress the
+    // unhandled-rejection that would fire before anyone attaches a handler.
     this.ready.catch(() => {});
+  }
+
+  async _initReady() {
+    this.clients = await this.connection.ready;
+    await this.runScript("init", this.prepareInitSettings(this.clearDatastore));
+    await this.connection.__addLimiter__(this.instance);
+    await this.runScript("register_client", [this.instance.queued()]);
+    if (!this._disconnecting) {
+      this.heartbeat = setInterval(async () => {
+        try {
+          await this.runScript("heartbeat", []);
+        } catch (e) {
+          if (!this._disconnecting) {
+            this.instance.Events.trigger("error", e);
+          }
+        }
+      }, this.heartbeatInterval).unref?.();
+    }
+    return this.clients;
   }
 
   async __publish__(message) {

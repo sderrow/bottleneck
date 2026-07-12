@@ -8,13 +8,13 @@ const fakeQueues = function () {
   this.fns = [this.incr, this.decr];
 };
 
-describe("DLList", function () {
-  it("Should be created and be empty", function () {
+describe("DLList", () => {
+  it("Should be created and be empty", () => {
     const list = new DLList();
     expect(list.getArray().length).toStrictEqual(0);
   });
 
-  it("Should be possible to append once", function () {
+  it("Should be possible to append once", () => {
     const queues = new fakeQueues();
     const list = new DLList(...queues.fns);
     list.push(5);
@@ -25,7 +25,7 @@ describe("DLList", function () {
     expect(arr[0]).toStrictEqual(5);
   });
 
-  it("Should be possible to append multiple times", function () {
+  it("Should be possible to append multiple times", () => {
     const queues = new fakeQueues();
     const list = new DLList(...queues.fns);
     list.push(5);
@@ -47,7 +47,7 @@ describe("DLList", function () {
     expect(arr[2]).toStrictEqual(10);
   });
 
-  it("Should be possible to shift an empty list", function () {
+  it("Should be possible to shift an empty list", () => {
     const queues = new fakeQueues();
     const list = new DLList(...queues.fns);
     expect(list.length).toStrictEqual(0);
@@ -62,7 +62,7 @@ describe("DLList", function () {
     expect(queues._length).toStrictEqual(0);
   });
 
-  it("Should be possible to append then shift once", function () {
+  it("Should be possible to append then shift once", () => {
     const queues = new fakeQueues();
     const list = new DLList(...queues.fns);
     list.push(5);
@@ -74,7 +74,7 @@ describe("DLList", function () {
     expect(queues._length).toStrictEqual(0);
   });
 
-  it("Should be possible to append then shift multiple times", function () {
+  it("Should be possible to append then shift multiple times", () => {
     const queues = new fakeQueues();
     const list = new DLList(...queues.fns);
     list.push(5);
@@ -89,7 +89,7 @@ describe("DLList", function () {
     expect(queues._length).toStrictEqual(0);
   });
 
-  it("Should pass a full test", function () {
+  it("Should pass a full test", () => {
     const queues = new fakeQueues();
     const list = new DLList(...queues.fns);
     list.push(10);
@@ -115,7 +115,7 @@ describe("DLList", function () {
     expect(queues._length).toStrictEqual(2);
   });
 
-  it("Should return the first value without shifting", function () {
+  it("Should return the first value without shifting", () => {
     const queues = new fakeQueues();
     const list = new DLList(...queues.fns);
     expect(list.first()).toStrictEqual();

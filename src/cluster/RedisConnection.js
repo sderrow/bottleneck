@@ -5,10 +5,13 @@ const Scripts = require("./Scripts");
 
 const closeClient = (c) => (typeof c.close === "function" ? c.close() : c.quit());
 const destroyClient = (c) => (typeof c.destroy === "function" ? c.destroy() : c.disconnect());
-const safe = (run) =>
-  Promise.resolve()
-    .then(run)
-    .catch(() => undefined);
+const safe = async (run) => {
+  try {
+    return await run();
+  } catch {
+    return undefined;
+  }
+};
 
 const connectIfNeeded = async (c) => {
   if (typeof c.connect === "function" && c.isOpen === false) {
@@ -87,10 +90,16 @@ class RedisConnection {
     this.subscriber = this.client.duplicate();
     this.limiters = {};
 
-    this.ready = Promise.all([this._setup(this.client, false), this._setup(this.subscriber, true)])
-      .then(() => this._loadScripts())
-      .then(() => ({ client: this.client, subscriber: this.subscriber }));
+    this.ready = this._initReady();
+    // Stored init promise: consumers await `ready` lazily, so suppress the
+    // unhandled-rejection that would fire before anyone attaches a handler.
     this.ready.catch(() => {});
+  }
+
+  async _initReady() {
+    await Promise.all([this._setup(this.client, false), this._setup(this.subscriber, true)]);
+    await this._loadScripts();
+    return { client: this.client, subscriber: this.subscriber };
   }
 
   async _setup(client, _sub) {
@@ -110,11 +119,13 @@ class RedisConnection {
 
   _loadScripts() {
     return Promise.all(
-      Scripts.names.map((k) =>
-        this._loadScript(k).catch((e) => {
+      Scripts.names.map(async (k) => {
+        try {
+          return await this._loadScript(k);
+        } catch (e) {
           if (!this.terminated) throw e;
-        }),
-      ),
+        }
+      }),
     );
   }
 

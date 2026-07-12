@@ -1,3 +1,5 @@
+import sleep from "../../src/sleep.js";
+
 /**
  * Manually-released signal for {@link createTaskFns}'s deferredJob/deferredPromise.
  *
@@ -11,7 +13,7 @@ export function deferred() {
   const signal = new Promise((resolve) => {
     release = resolve;
   });
-  return { signal: signal, release: release };
+  return { signal, release };
 }
 
 /**
@@ -25,62 +27,52 @@ export function createTaskFns(log) {
     cb.apply(null, [err].concat(result));
   }
 
-  function slowJob(duration, err, ...result) {
+  async function slowJob(duration, err, ...result) {
     const cb = result.pop();
-    setTimeout(() => {
-      log.record(err, result);
-      cb.apply(null, [err].concat(result));
-    }, duration);
+    await sleep(duration);
+    log.record(err, result);
+    cb.apply(null, [err].concat(result));
   }
 
-  function deferredJob(signal, err, ...result) {
+  async function deferredJob(signal, err, ...result) {
     const cb = result.pop();
-    signal.then(() => {
-      log.record(err, result);
-      cb.apply(null, [err].concat(result));
-    });
+    await signal;
+    log.record(err, result);
+    cb.apply(null, [err].concat(result));
   }
 
-  function promise(err, ...result) {
-    return new Promise((resolve, reject) => {
-      log.record(err, result);
-      if (err === null) {
-        return resolve(result);
-      }
-      return reject(err);
-    });
+  async function promise(err, ...result) {
+    log.record(err, result);
+    if (err === null) {
+      return result;
+    }
+    throw err;
   }
 
-  function slowPromise(duration, err, ...result) {
-    return new Promise((resolve, reject) => {
-      setTimeout(function () {
-        log.record(err, result);
-        if (err === null) {
-          return resolve(result);
-        }
-        return reject(err);
-      }, duration);
-    });
+  async function slowPromise(duration, err, ...result) {
+    await sleep(duration);
+    log.record(err, result);
+    if (err === null) {
+      return result;
+    }
+    throw err;
   }
 
-  function deferredPromise(signal, err, ...result) {
-    return new Promise((resolve, reject) => {
-      signal.then(function () {
-        log.record(err, result);
-        if (err === null) {
-          return resolve(result);
-        }
-        return reject(err);
-      });
-    });
+  async function deferredPromise(signal, err, ...result) {
+    await signal;
+    log.record(err, result);
+    if (err === null) {
+      return result;
+    }
+    throw err;
   }
 
   return {
-    job: job,
-    slowJob: slowJob,
-    deferredJob: deferredJob,
-    promise: promise,
-    slowPromise: slowPromise,
-    deferredPromise: deferredPromise,
+    job,
+    slowJob,
+    deferredJob,
+    promise,
+    slowPromise,
+    deferredPromise,
   };
 }

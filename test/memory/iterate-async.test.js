@@ -1,8 +1,8 @@
 import { describe, it, assert, expect } from "vitest";
 const { iterateAsync } = require("../leakage");
 
-describe("iterateAsync helper", { timeout: 8000 }, function () {
-  it("Should resolve when memory is stable", async function () {
+describe("iterateAsync helper", { timeout: 8000 }, () => {
+  it("Should resolve when memory is stable", async () => {
     let calls = 0;
     await iterateAsync(
       async () => {
@@ -15,7 +15,7 @@ describe("iterateAsync helper", { timeout: 8000 }, function () {
     assert.strictEqual(calls, 6, "fn should run warmup + iterations times");
   });
 
-  it("Should throw when heap grows on every iteration", async function () {
+  it("Should throw when heap grows on every iteration", async () => {
     const sink = [];
     await expect(
       iterateAsync(
@@ -27,19 +27,19 @@ describe("iterateAsync helper", { timeout: 8000 }, function () {
     ).rejects.toThrow(/Memory leaked on every iteration \(5 iterations\)/);
   });
 
-  it("Should call fn (warmup + iterations) times in total", async function () {
+  it("Should call fn (warmup + iterations) times in total", async () => {
     let calls = 0;
     await iterateAsync(async () => calls++, { iterations: 10, warmup: 2 });
     assert.strictEqual(calls, 12);
   });
 
-  it("Should default to warmup=3 and iterations=25 when options omitted", async function () {
+  it("Should default to warmup=3 and iterations=25 when options omitted", async () => {
     let calls = 0;
     await iterateAsync(async () => calls++);
     assert.strictEqual(calls, 28);
   });
 
-  it("Should propagate errors thrown by fn", async function () {
+  it("Should propagate errors thrown by fn", async () => {
     await expect(
       iterateAsync(
         async () => {
@@ -50,7 +50,7 @@ describe("iterateAsync helper", { timeout: 8000 }, function () {
     ).rejects.toThrow(/boom/);
   });
 
-  it("Should not flag a leak when growth is non-monotonic", async function () {
+  it("Should not flag a leak when growth is non-monotonic", async () => {
     let i = 0;
     const sink = [];
     await expect(

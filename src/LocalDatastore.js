@@ -1,5 +1,6 @@
 const parser = require("./parser");
 const BottleneckError = require("./BottleneckError");
+const sleep = require("./sleep");
 
 class LocalDatastore {
   constructor(instance, storeOptions, storeInstanceOptions) {
@@ -69,7 +70,7 @@ class LocalDatastore {
   }
 
   yieldLoop(t) {
-    return new Promise((resolve) => setTimeout(resolve, t ?? 0));
+    return sleep(t ?? 0);
   }
 
   computePenalty() {

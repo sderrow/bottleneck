@@ -37,10 +37,3 @@ export function useFakeClock() {
 export function useRealClockForThisTest() {
   vi.useRealTimers();
 }
-
-/** Promise delay via global setTimeout (respects fake timers when installed). */
-export function sleep(ms) {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms);
-  });
-}

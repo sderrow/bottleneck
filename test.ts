@@ -6,8 +6,9 @@ import Bottleneck from "bottleneck";
 function assert(b: boolean): void {}
 
 /*
-This file is run by `pnpm run check-types`.
-It validates the typings in bottleneck.d.ts via `tsc --noEmit --strict`.
+Consumer-side exercise of the public typings in bottleneck.d.ts (imported by
+package name via the triple-slash reference above). Checked by
+`pnpm tsc` as part of the project tsconfig.
 */
 
 function withCb(foo: number, bar: () => void, cb: (err: any, result: string) => void) {
