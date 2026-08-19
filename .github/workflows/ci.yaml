@@ -93,8 +93,8 @@ jobs:
       matrix:
         include:
           - { client: ioredis, version: 5, project: ioredis, image: redis:6-alpine }
-          - { client: redis, version: 4, project: node-redis, image: redis:6-alpine }
-          - { client: redis, version: 5, project: node-redis, image: redis:6-alpine }
+          - { client: node-redis, version: 4, project: node-redis, image: redis:6-alpine }
+          - { client: node-redis, version: 5, project: node-redis, image: redis:6-alpine }
     env:
       REDIS_IMAGE: ${{ matrix.image }}
     steps:
