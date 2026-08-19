@@ -80,8 +80,10 @@ jobs:
 
   # Varies the CLIENT library versions; each vitest project uses exactly one
   # client, so each leg overrides a single devDependency and runs only the
-  # matching project — no cross-product legs. The committed lockfile
-  # (ioredis 6 + redis 6) is covered by cluster-matrix.
+  # matching project — no cross-product legs. Old clients are paired with the
+  # oldest supported server (the realistic combination: apps pin old clients
+  # against managed Redis that lags). New clients × every server image are
+  # covered by cluster-matrix via the committed lockfile.
   client-matrix:
     name: Clients (${{ matrix.client }}@${{ matrix.version }})
     runs-on: ubuntu-latest
@@ -90,10 +92,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { client: ioredis, version: 5, project: ioredis }
-          - { client: ioredis, version: 6, project: ioredis }
-          - { client: redis, version: 4, project: node-redis }
-          - { client: redis, version: 5, project: node-redis }
+          - { client: ioredis, version: 5, project: ioredis, image: redis:6-alpine }
+          - { client: redis, version: 4, project: node-redis, image: redis:6-alpine }
+          - { client: redis, version: 5, project: node-redis, image: redis:6-alpine }
+    env:
+      REDIS_IMAGE: ${{ matrix.image }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
