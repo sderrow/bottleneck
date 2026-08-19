@@ -78,24 +78,58 @@ jobs:
       - name: Run cluster tests
         run: pnpm run test:cluster && pnpm run test:lib
 
+  # Varies the CLIENT library versions; each vitest project uses exactly one
+  # client, so each leg overrides a single devDependency and runs only the
+  # matching project — no cross-product legs. The committed lockfile
+  # (ioredis 6 + redis 6) is covered by cluster-matrix.
+  client-matrix:
+    name: Clients (${{ matrix.client }}@${{ matrix.version }})
+    runs-on: ubuntu-latest
+    needs: checks
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { client: ioredis, version: 5, project: ioredis }
+          - { client: ioredis, version: 6, project: ioredis }
+          - { client: redis, version: 4, project: node-redis }
+          - { client: redis, version: 5, project: node-redis }
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup
+        uses: ./.github/actions/setup
+
+      # Overrides the devDependency after the normal install. Nothing is
+      # committed, so mutating package.json here is safe; every pinned major
+      # is admitted by the peer ranges, so pnpm won't warn about conflicts.
+      - name: Pin client version
+        run: pnpm add -D ${{ matrix.client }}@${{ matrix.version }}
+
+      - name: Run cluster tests
+        run: pnpm exec vitest run --project ${{ matrix.project }}
+
   test:
     name: Test
     runs-on: ubuntu-latest
-    needs: [test-no-cluster, cluster-matrix]
+    needs: [test-no-cluster, cluster-matrix, client-matrix]
     if: always()
     steps:
       - name: Require all test jobs to pass
         run: |
           test_no_cluster_result="${{ needs.test-no-cluster.result }}"
           cluster_matrix_result="${{ needs.cluster-matrix.result }}"
+          client_matrix_result="${{ needs.client-matrix.result }}"
           failed=0
-          for r in "$test_no_cluster_result" "$cluster_matrix_result"; do
+          for r in "$test_no_cluster_result" "$cluster_matrix_result" "$client_matrix_result"; do
             if [[ "$r" != "success" ]]; then
               failed=1
             fi
           done
           echo "test-no-cluster: $test_no_cluster_result"
           echo "cluster-matrix: $cluster_matrix_result"
+          echo "client-matrix: $client_matrix_result"
           if [[ "$failed" == "1" ]]; then
             echo "::error::One or more test jobs failed."
             exit 1

@@ -2,6 +2,7 @@ const parser = require("../parser");
 const Events = require("../Events");
 const BottleneckError = require("../BottleneckError");
 const Scripts = require("./Scripts");
+const { normalizeReply } = require("./normalizeReply");
 
 const closeClient = (c) => (typeof c.close === "function" ? c.close() : c.quit());
 const destroyClient = (c) => (typeof c.destroy === "function" ? c.destroy() : c.disconnect());
@@ -21,46 +22,6 @@ const connectIfNeeded = async (c) => {
 
 const stringifyArgs = (args) =>
   args.map((a) => (a == null ? "" : typeof a === "string" ? a : String(a)));
-
-const arrayToObject = (arr) => {
-  const obj = {};
-  for (let i = 0; i < arr.length; i += 2) {
-    obj[arr[i]] = arr[i + 1];
-  }
-  return obj;
-};
-
-/**
- * node-redis negotiates RESP2 by default in v4/v5 but RESP3 by default in v6.
- * Under RESP3 several reply shapes differ from the flat, all-string arrays the
- * rest of Bottleneck (and the ioredis path) assume:
- *   - HGETALL          -> map object instead of a flat [field, value, ...] array
- *   - WITHSCORES      -> [[member, score:number], ...] instead of [member, "score", ...]
- * Normalize back to the RESP2 canonical shape so the library behaves identically
- * across redis v4/v5/v6 regardless of the negotiated protocol.
- */
-const normalizeReply = (cmd, reply) => {
-  const name = String(cmd[0]).toLowerCase();
-  if (name === "hgetall") {
-    // RESP2: flat array -> object. RESP3: already an object; pass through.
-    return Array.isArray(reply) ? arrayToObject(reply) : reply;
-  }
-  // RESP3 returns WITHSCORES results as [member, score] pairs with numeric
-  // scores. Flatten to the RESP2 [member, "score", ...] form.
-  if (
-    Array.isArray(reply) &&
-    reply.length > 0 &&
-    Array.isArray(reply[0]) &&
-    cmd.some((a) => typeof a === "string" && a.toLowerCase() === "withscores")
-  ) {
-    const flat = [];
-    for (const [member, score] of reply) {
-      flat.push(member, String(score));
-    }
-    return flat;
-  }
-  return reply;
-};
 
 class RedisConnection {
   defaults = {
