@@ -2,6 +2,7 @@ const parser = require("../parser");
 const Events = require("../Events");
 const BottleneckError = require("../BottleneckError");
 const Scripts = require("./Scripts");
+const { normalizeReply } = require("./normalizeReply");
 
 class IORedisConnection {
   datastore = "ioredis";
@@ -77,7 +78,9 @@ class IORedisConnection {
   async __runCommand__(cmd) {
     await this.ready;
     const [[, value]] = await this.client.pipeline([cmd]).exec();
-    return value;
+    // ioredis v6 can negotiate RESP3 (opt-in), where reply shapes such as
+    // HGETALL and WITHSCORES differ from the RESP2 forms assumed below.
+    return normalizeReply(cmd, value);
   }
 
   __runScript__(name, id, args) {
