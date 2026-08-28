@@ -46,8 +46,8 @@ describe("Priority", () => {
     // promises never settle, so wrapping them in expect().resolves would hang
     // the test's auto-awaited assertions. toHaveCallOrder below proves they
     // never ran. (2 and 3 are displaced by 5 and 6; 7 is dropped on arrival
-    // because its own priority (9) is the lowest; 4 is displaced later by the
-    // flush job, which is submitted while the queue is still at highWater.)
+    // because its own priority (9) is the lowest; 4 is displaced by the flush
+    // job submitted below, while the queue is still at highWater.)
     limiter.schedule(h.promise, null, 2);
     limiter.schedule(h.promise, null, 3);
     limiter.schedule(h.promise, null, 4);
@@ -56,7 +56,20 @@ describe("Priority", () => {
     limiter.schedule({ priority: 9 }, h.promise, null, 7);
     // Enqueue barrier: schedule() resolves at completion, not enqueue, so run
     // a no-op through the submit lock to guarantee all seven submissions
-    // above have been processed before releasing.
+    // above have been processed.
+    await enqueued(limiter);
+    // Displace job 4 deterministically: submit the flush BEFORE releasing job
+    // 1, then barrier again, so the flush registers while the queue is still
+    // exactly at highWater — job 1 holds the only slot, so nothing can
+    // dispatch meanwhile. Submitted after release (the old design), the flush
+    // raced job 6's dispatch: under real-clock redis projects, once minTime
+    // had elapsed during the submission phase, 6 could drain the queue below
+    // highWater before the flush registered, letting 4 survive and run
+    // ([[1],[6],[5],[4]]). The default weight (1 — the old design passed an
+    // explicit 0) matters: at capacity 0 a weight-0 job passes
+    // conditions_check and is admitted without tripping HWM once minTime has
+    // elapsed, while weight 1 always fails the check.
+    const flush = h.flushLimiter(limiter);
     await enqueued(limiter);
     first.release();
 
@@ -64,7 +77,7 @@ describe("Priority", () => {
       expect(p1).resolves.toEqual([1]),
       expect(p5).resolves.toEqual([5]),
       expect(p6).resolves.toEqual([6]),
-      h.flushLimiter(limiter, { weight: 0 }),
+      flush,
     ]);
     expect(h.log).toHaveCallOrder([[1], [6], [5]]);
     expect(called).toEqual(true);

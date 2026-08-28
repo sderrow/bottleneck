@@ -78,6 +78,7 @@ class RedisDatastore {
         const [rawCapacity, priorityClient, counter] = data.split(":");
         const capacity = rawCapacity.length > 0 ? ~~rawCapacity : undefined;
         if (priorityClient === this.clientId) {
+          this.instance.Events.trigger("capacity-priority", capacity);
           const drained = await this.instance._drainAll(capacity);
           const newCapacity = capacity != null ? capacity - (drained || 0) : "";
           return await this.clients.client.publish(
