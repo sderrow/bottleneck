@@ -1133,16 +1133,16 @@ Suggestions and bug reports are also welcome.
 
 - Node.js: pinned by [.nvmrc](.nvmrc).
 - Package manager: `pnpm`, managed via [corepack](https://nodejs.org/api/corepack.html). Run `corepack enable` once after cloning so the version pinned in [package.json](package.json) (`packageManager`) is used automatically.
-- Bundler: [`tsdown`](https://tsdown.dev) (configured in [tsdown.config.ts](tsdown.config.ts)). Builds are fast — there is no separate "dev" build mode.
+- Bundler: [`tsdown`](https://tsdown.dev) (configured in [tsdown.config.mts](tsdown.config.mts)). Builds are fast — there is no separate "dev" build mode.
 - Linter / formatter: [`oxlint`](https://oxc.rs/docs/guide/usage/linter.html) and [`oxfmt`](https://oxc.rs/docs/guide/usage/formatter.html).
-- Tests: [`vitest`](https://vitest.dev) (multi-project workspace in [vitest.config.ts](vitest.config.ts)).
+- Tests: [`vitest`](https://vitest.dev) (multi-project workspace in [vitest.config.mts](vitest.config.mts)).
 
 ### Source layout
 
 Make changes only inside `src/`:
 
 - `src/` — the local-mode core (browser-safe, no Redis dependencies).
-- `src/cluster/` — Redis-only modules (RedisDatastore, RedisConnection, IORedisConnection, Scripts, and `lua/*.lua`). Anything in this folder is excluded from the `dist/light.js` UMD build by the `excludeClustering` plugin in [tsdown.config.ts](tsdown.config.ts).
+- `src/cluster/` — Redis-only modules (RedisDatastore, RedisConnection, IORedisConnection, Scripts, and `lua/*.lua`). Anything in this folder is excluded from the `dist/light.js` UMD build by the `excludeClustering` plugin in [tsdown.config.mts](tsdown.config.mts).
 
 ### Common commands
 

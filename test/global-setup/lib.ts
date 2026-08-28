@@ -3,7 +3,7 @@
 // The lib smoke test loads `dist/index.js` via `test/bottleneck.js`
 // (BOTTLENECK_ENTRY=lib), so the full bundle must exist on disk before any
 // test file is collected. We invoke tsdown programmatically and filter to
-// the `lib` config in tsdown.config.ts so the light bundle isn't rebuilt
+// the `lib` config in tsdown.config.mts so the light bundle isn't rebuilt
 // unnecessarily.
 //
 // The lib bundle is the one that actually exercises the `inline-lua` plugin

@@ -5,7 +5,7 @@ import { test } from "./helpers/test-api.js";
 const Bottleneck = require("./bottleneck");
 
 // Batcher is datastore-independent, so this file only runs in the `local`
-// project (excluded from the redis projects in vitest.config.ts) and always
+// project (excluded from the redis projects in vitest.config.mts) and always
 // gets the fake clock — timing assertions below are exact virtual times.
 useFakeClock();
 

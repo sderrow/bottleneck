@@ -1,5 +1,5 @@
 {
-  "include": ["src", "test", "test.ts", "vitest.config.ts", "tsdown.config.ts"],
+  "include": ["src", "test", "test.ts", "vitest.config.mts", "tsdown.config.mts"],
   "compilerOptions": {
     // Environment setup & latest features
     "lib": ["ESNext"],

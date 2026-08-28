@@ -1,6 +1,6 @@
 // Smoke test for `dist/index.js` (the full bundle).
 //
-// The point of this file is the `inline-lua` plugin in `tsdown.config.ts`.
+// The point of this file is the `inline-lua` plugin in `tsdown.config.mts`.
 // When the package is published, `dist/index.js` is the only file consumers
 // load, and `src/cluster/lua/*.lua` is NOT shipped — so any code path that
 // reaches `Scripts.js` must find its lua text already inlined into the
