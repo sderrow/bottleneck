@@ -1,3 +1,21 @@
+# Verifying your work
+
+Use the scripts in package.json to check your work. Lint and format checks are
+fast — run them always. Type checking and tests are slower — run them before
+declaring done.
+
+```
+pnpm lint          # oxlint --quiet — fast, always run
+pnpm format        # oxfmt — fast, always run
+pnpm exec tsc      # type check, no script
+pnpm test          # full local test suite, ~20-25s, covers the main stuff
+```
+
+- Test output must be tee'd to a file (see below).
+- Faster/split test runs exist for targeted work, e.g., `test:local`, `test:smoke`.
+  `pnpm test` is the default; use the narrower projects only when you know they
+  cover your change.
+
 # Test reliability: no timing flakes
 
 Shared test files run in two modes: the `local` project (fake timers, exact
