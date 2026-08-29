@@ -34,6 +34,23 @@ jobs:
       - name: Run build
         run: pnpm run build
 
+  # Matrix data for both matrix jobs below. scripts/ci-matrix.mjs is the
+  # single source of truth (also imported by the local runner: `pnpm run
+  # test:ci`), so the workflow and local legs cannot drift apart.
+  matrix-data:
+    name: Matrix data
+    runs-on: ubuntu-latest
+    outputs:
+      cluster-images: ${{ steps.emit.outputs.cluster-images }}
+      client-matrix: ${{ steps.emit.outputs.client-matrix }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Emit matrix JSON
+        id: emit
+        run: node scripts/ci-matrix.mjs --emit >> "$GITHUB_OUTPUT"
+
   test-no-cluster:
     name: Test (no cluster)
     runs-on: ubuntu-latest
@@ -53,15 +70,12 @@ jobs:
   cluster-matrix:
     name: Cluster (${{ matrix.image }})
     runs-on: ubuntu-latest
-    needs: checks
+    needs: [checks, matrix-data]
     strategy:
       fail-fast: false
+      # Entries come from scripts/ci-matrix.mjs via the matrix-data job.
       matrix:
-        image:
-          - redis:6-alpine
-          - redis:7-alpine
-          - valkey/valkey:8-alpine
-          - valkey/valkey:9-alpine
+        image: ${{ fromJSON(needs.matrix-data.outputs.cluster-images) }}
     env:
       REDIS_IMAGE: ${{ matrix.image }}
     steps:
@@ -78,23 +92,15 @@ jobs:
       - name: Run cluster tests
         run: pnpm run test:cluster && pnpm run test:lib
 
-  # Varies the CLIENT library versions; each vitest project uses exactly one
-  # client, so each leg overrides a single devDependency and runs only the
-  # matching project — no cross-product legs. Old clients are paired with the
-  # oldest supported server (the realistic combination: apps pin old clients
-  # against managed Redis that lags). New clients × every server image are
-  # covered by cluster-matrix via the committed lockfile.
   client-matrix:
     name: Clients (${{ matrix.project }}@${{ matrix.version }})
     runs-on: ubuntu-latest
-    needs: checks
+    needs: [checks, matrix-data]
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - { client: ioredis, version: 5, project: ioredis, image: redis:6-alpine }
-          - { client: redis, version: 4, project: node-redis, image: redis:6-alpine }
-          - { client: redis, version: 5, project: node-redis, image: redis:6-alpine }
+      # Include entries ({client, version, project, image}) come from
+      # scripts/ci-matrix.mjs via the matrix-data job.
+      matrix: ${{ fromJSON(needs.matrix-data.outputs.client-matrix) }}
     env:
       REDIS_IMAGE: ${{ matrix.image }}
     steps:
