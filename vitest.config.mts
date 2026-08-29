@@ -94,5 +94,9 @@ export default defineConfig({
         },
       },
     ],
+    coverage: {
+      provider: "v8",
+      include: ["src/**/*.{ts,js,mts,mjs,cts,cjs}"],
+    },
   },
 });

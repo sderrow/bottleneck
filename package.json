@@ -62,6 +62,7 @@
     "test": "pnpm exec vitest",
     "test:ci": "node scripts/test-ci.mjs",
     "test:cluster": "pnpm exec vitest run --project ioredis --project node-redis",
+    "test:coverage": "pnpm exec vitest run --coverage",
     "test:lib": "pnpm exec vitest run --project lib-smoke",
     "test:light": "pnpm exec vitest run --project light-smoke",
     "test:local": "pnpm exec vitest run --project local",
@@ -72,6 +73,7 @@
   "devDependencies": {
     "@testcontainers/redis": "^12.1.0",
     "@types/node": "^24.13.3",
+    "@vitest/coverage-v8": "^4.1.11",
     "husky": "^9.1.7",
     "ioredis": "^6.0.0",
     "lint-staged": "^17.3.0",
