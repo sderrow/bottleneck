@@ -243,7 +243,11 @@ describe("Cluster-only", () => {
     const rootLimiter = makeLimiter({ ...settings });
     await rootLimiter.ready();
 
-    expect(await rootLimiter.currentReservoir()).toEqual(2);
+    // Catch-up increases can only add, never subtract — but how many
+    // interval boundaries the read's process_tick crosses depends on
+    // event-loop stalls, so an exact `=== 2` would be asserting a
+    // stall-free scheduler (observed 4/6 under load).
+    expect(await rootLimiter.currentReservoir()).toBeGreaterThanOrEqual(2);
 
     const settings_key = limiterKeys(rootLimiter)[0];
 
@@ -271,12 +275,19 @@ describe("Cluster-only", () => {
       "2",
     ]);
 
-    // 2 + ((3000 / 100) * 2) === 62 by construction. Allow up to 1 extra
-    // missed interval (+2 reservoir) of slop in case the hset round trip
-    // crosses the 100ms boundary.
+    // 2 + ((3000 / 100) * 2) === 62 by construction — but the read's
+    // process_tick samples `now` (client-side Date.now, passed per script)
+    // somewhere in [t, t2], so the honest bounds are derived from the
+    // MEASURED window, not from a stall-free assumption: at least the 30
+    // constructed intervals, at most however many fit before t2. Any
+    // number of interleaved catch-up ticks stays inside this (their
+    // interval counts sum to at most the elapsed total). The lower bound
+    // proves the catch-up arithmetic; the upper bound still catches a
+    // doubled-amount class of bug.
     const reservoir = await rootLimiter.currentReservoir();
-    expect(reservoir).toBeGreaterThanOrEqual(62);
-    expect(reservoir).toBeLessThanOrEqual(64);
+    const t2 = Date.now();
+    expect(reservoir).toBeGreaterThanOrEqual(2 + Math.floor(3000 / 100) * 2);
+    expect(reservoir).toBeLessThanOrEqual(2 + Math.floor((t2 - t + 3000) / 100) * 2);
   });
 
   test("Should migrate from 2.8.0", async ({ makeLimiter }) => {

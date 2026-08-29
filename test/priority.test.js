@@ -9,12 +9,27 @@ describe("Priority", () => {
   test("Should do basic ordering", async ({ harness: h, makeLimiter }) => {
     const limiter = makeLimiter({ maxConcurrent: 1, minTime: 100, rejectOnDrop: false });
 
+    // Hold job 1 open with a deferred signal and barrier on all five
+    // submissions before releasing. The dispatch triggered by job 1's
+    // completion picks from the local queue, so jobs 2-5 must be committed
+    // before the first capacity event. With the old real 50ms slowPromise, a
+    // slow submit round-trip under parallel-load could lose the race against
+    // job 1's completion, letting job 2 dispatch before [5, 6].
+    const first = deferred();
+    const p1 = limiter.schedule(h.deferredPromise, first.signal, null, 1);
+    const p2 = limiter.schedule(h.promise, null, 2);
+    const p3 = limiter.schedule({ priority: 1 }, h.promise, null, 5, 6);
+    const p4 = limiter.schedule(h.promise, null, 3);
+    const p5 = limiter.schedule(h.promise, null, 4);
+    await enqueued(limiter);
+    first.release();
+
     await Promise.all([
-      expect(limiter.schedule(h.slowPromise, 50, null, 1)).resolves.toEqual([1]),
-      expect(limiter.schedule(h.promise, null, 2)).resolves.toEqual([2]),
-      expect(limiter.schedule({ priority: 1 }, h.promise, null, 5, 6)).resolves.toEqual([5, 6]),
-      expect(limiter.schedule(h.promise, null, 3)).resolves.toEqual([3]),
-      expect(limiter.schedule(h.promise, null, 4)).resolves.toEqual([4]),
+      expect(p1).resolves.toEqual([1]),
+      expect(p2).resolves.toEqual([2]),
+      expect(p3).resolves.toEqual([5, 6]),
+      expect(p4).resolves.toEqual([3]),
+      expect(p5).resolves.toEqual([4]),
     ]);
 
     await h.flushLimiter(limiter);

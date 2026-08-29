@@ -1,14 +1,13 @@
 import { describe, expect } from "vitest";
 import { useFakeClock } from "./helpers/clock.js";
-import { test, waitForState } from "./helpers/test-api.js";
+import { test, waitForState, deferred } from "./helpers/test-api.js";
 
 useFakeClock();
 
 describe("Stop", () => {
   test("Should stop and drop the queue", async ({ harness: h, makeLimiter }) => {
     const limiter = makeLimiter({
-      maxConcurrent: 2,
-      minTime: 100,
+      maxConcurrent: 1,
       trackDoneStatus: true,
     });
     let dropped = 0;
@@ -17,20 +16,25 @@ describe("Stop", () => {
       dropped++;
     });
 
-    const p0 = limiter.schedule({ id: "0" }, h.promise, null, 0);
-
-    const p1 = limiter.schedule({ id: "1" }, h.slowPromise, 500, null, 1);
-
-    const scheduledDroppedJob = limiter.schedule({ id: "2" }, h.promise, null, 2);
-    const queuedDroppedJob = limiter.schedule({ id: "3" }, h.promise, null, 3);
+    // Job 1 is held by a deferred signal so EXECUTING=1 is stable, and jobs
+    // 2-3 are capacity-blocked so QUEUED=2 is stable — stop() then drops
+    // both queued jobs deterministically, with no wall-clock window in the
+    // path. (Dropping a scheduled RUNNING job is covered by the
+    // fake-clock-only test below: that state is a doExecute-timer window a
+    // real-clock poll can miss entirely when a stalled register lands
+    // after minTime has already elapsed.)
+    const hold1 = deferred();
+    const p1 = limiter.schedule({ id: "1" }, h.deferredPromise, hold1.signal, null, 1);
+    const p2 = limiter.schedule({ id: "2" }, h.promise, null, 2);
+    const p3 = limiter.schedule({ id: "3" }, h.promise, null, 3);
 
     await waitForState(() => {
       const counts = limiter.counts();
       expect(counts.RECEIVED).toBe(0);
-      expect(counts.QUEUED).toBe(1);
-      expect(counts.RUNNING).toBe(1);
+      expect(counts.QUEUED).toBe(2);
+      expect(counts.RUNNING).toBe(0);
       expect(counts.EXECUTING).toBe(1);
-      expect(counts.DONE).toBe(1);
+      expect(counts.DONE).toBe(0);
     });
 
     const stopPromise = limiter.stop({
@@ -39,12 +43,13 @@ describe("Stop", () => {
     });
     const submitFailedJob = limiter.schedule(() => Promise.resolve(true));
 
+    hold1.release();
+
     await Promise.all([
       stopPromise,
-      expect(p0).resolves.toEqual([0]),
       expect(p1).resolves.toEqual([1]),
-      expect(scheduledDroppedJob).rejects.toThrow("Dropped!"),
-      expect(queuedDroppedJob).rejects.toThrow("Dropped!"),
+      expect(p2).rejects.toThrow("Dropped!"),
+      expect(p3).rejects.toThrow("Dropped!"),
       expect(submitFailedJob).rejects.toThrow("Stopped!"),
     ]);
 
@@ -54,15 +59,62 @@ describe("Stop", () => {
     expect(counts.QUEUED).toEqual(0);
     expect(counts.RUNNING).toEqual(0);
     expect(counts.EXECUTING).toEqual(0);
-    expect(counts.DONE).toEqual(2);
+    expect(counts.DONE).toEqual(1);
 
-    expect(h.log).toHaveCallOrder([[0], [1]]);
+    expect(h.log).toHaveCallOrder([[1]]);
   });
+
+  // Dropping a scheduled (RUNNING) job requires catching the dispatched-
+  // but-not-executing window — deterministic only under the fake clock,
+  // where job 2's dispatch wait is exact. Gated on DATASTORE (the same
+  // condition useFakeClock() checks), not isFakeClock(): timers are not
+  // installed yet at test-collection time.
+  test.runIf(process.env.DATASTORE == null)(
+    "Should drop a scheduled RUNNING job on stop",
+    async ({ harness: h, makeLimiter }) => {
+      const limiter = makeLimiter({
+        maxConcurrent: 2,
+        minTime: 100,
+        trackDoneStatus: true,
+      });
+      let dropped = 0;
+      limiter.on("dropped", () => dropped++);
+
+      const p0 = limiter.schedule({ id: "0" }, h.promise, null, 0);
+      const p1 = limiter.schedule({ id: "1" }, h.slowPromise, 500, null, 1);
+      const scheduledJob = limiter.schedule({ id: "2" }, h.promise, null, 2);
+      const queuedJob = limiter.schedule({ id: "3" }, h.promise, null, 3);
+
+      await waitForState(() => {
+        const counts = limiter.counts();
+        expect(counts.QUEUED).toBe(1);
+        expect(counts.RUNNING).toBe(1);
+        expect(counts.EXECUTING).toBe(1);
+        expect(counts.DONE).toBe(1);
+      });
+
+      const stopPromise = limiter.stop({
+        enqueueErrorMessage: "Stopped!",
+        dropErrorMessage: "Dropped!",
+      });
+      const submitFailedJob = limiter.schedule(() => Promise.resolve(true));
+
+      await Promise.all([
+        stopPromise,
+        expect(p0).resolves.toEqual([0]),
+        expect(p1).resolves.toEqual([1]),
+        expect(scheduledJob).rejects.toThrow("Dropped!"),
+        expect(queuedJob).rejects.toThrow("Dropped!"),
+        expect(submitFailedJob).rejects.toThrow("Stopped!"),
+      ]);
+      expect(dropped).toEqual(2);
+      expect(h.log).toHaveCallOrder([[0], [1]]);
+    },
+  );
 
   test("Should stop and let the queue finish", async ({ harness: h, makeLimiter }) => {
     const limiter = makeLimiter({
       maxConcurrent: 1,
-      minTime: 100,
       trackDoneStatus: true,
     });
     let dropped = 0;
@@ -71,17 +123,20 @@ describe("Stop", () => {
       dropped++;
     });
 
-    const p1 = limiter.schedule({ id: "1" }, h.promise, null, 1);
+    // Job 1 held; jobs 2-3 queued (stable). stop(dropWaitingJobs=false)
+    // keeps them; releasing job 1 drains them in FIFO order.
+    const hold1 = deferred();
+    const p1 = limiter.schedule({ id: "1" }, h.deferredPromise, hold1.signal, null, 1);
     const p2 = limiter.schedule({ id: "2" }, h.promise, null, 2);
-    const p3 = limiter.schedule({ id: "3" }, h.slowPromise, 100, null, 3);
+    const p3 = limiter.schedule({ id: "3" }, h.promise, null, 3);
 
     await waitForState(() => {
       const counts = limiter.counts();
       expect(counts.RECEIVED).toBe(0);
-      expect(counts.QUEUED).toBe(1);
-      expect(counts.RUNNING).toBe(1);
-      expect(counts.EXECUTING).toBe(0);
-      expect(counts.DONE).toBe(1);
+      expect(counts.QUEUED).toBe(2);
+      expect(counts.RUNNING).toBe(0);
+      expect(counts.EXECUTING).toBe(1);
+      expect(counts.DONE).toBe(0);
     });
 
     const stopPromise = limiter.stop({
@@ -89,6 +144,8 @@ describe("Stop", () => {
       dropWaitingJobs: false,
     });
     const submitFailedJob = limiter.schedule(() => Promise.resolve(true));
+
+    hold1.release();
 
     await Promise.all([
       stopPromise,

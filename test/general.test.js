@@ -206,24 +206,34 @@ describe("General", () => {
 
       expect(limiter.counts()).toEqual({ RECEIVED: 0, QUEUED: 0, RUNNING: 0, EXECUTING: 0 });
 
+      // RUNNING is transient (dispatched, doExecute timer pending) and a
+      // real-clock register landing after minTime elapsed skips it entirely
+      // — so it is observed synchronously inside job 2's own "scheduled"
+      // event (doRun transitions the state BEFORE triggering the event,
+      // Job.js), never via a wall-clock poll.
+      let job2StatusAtScheduled = null;
+      limiter.on("scheduled", (info) => {
+        if (info.options.id === 2) job2StatusAtScheduled = limiter.jobStatus(2);
+      });
+
       const hold1 = deferred();
       const p1 = limiter.schedule({ weight: 1, id: 1 }, h.deferredPromise, hold1.signal, null, 1);
       const p2 = limiter.schedule({ weight: 1, id: 2 }, h.slowPromise, 200, null, 2);
       const p3 = limiter.schedule({ weight: 2, id: 3 }, h.slowPromise, 100, null, 3);
       expect(limiter.counts()).toEqual({ RECEIVED: 3, QUEUED: 0, RUNNING: 0, EXECUTING: 0 });
 
+      // Stable point: job 1 held-EXECUTING, job 3 capacity-blocked (weight
+      // 2 > remaining 1) — persists until release. (Job 2 may be EXECUTING
+      // here too under a stalled register, hence the >=.)
       await waitForState(() => {
         const counts = limiter.counts();
         expect(counts.RECEIVED).toBe(0);
         expect(counts.QUEUED).toBe(1);
-        expect(counts.RUNNING).toBe(1);
-        expect(counts.EXECUTING).toBe(1);
+        expect(counts.EXECUTING).toBeGreaterThanOrEqual(1);
       });
-
-      expect(limiter.counts()).toEqual({ RECEIVED: 0, QUEUED: 1, RUNNING: 1, EXECUTING: 1 });
       expect(limiter.jobStatus(1)).toEqual("EXECUTING");
-      expect(limiter.jobStatus(2)).toEqual("RUNNING");
       expect(limiter.jobStatus(3)).toEqual("QUEUED");
+      expect(job2StatusAtScheduled).toEqual("RUNNING");
 
       hold1.release();
       await h.flushLimiter(limiter);
@@ -247,14 +257,13 @@ describe("General", () => {
         DONE: 0,
       });
 
-      // Job 1 is held with a deferredPromise so we can deterministically
-      // observe the {EXECUTING:1, RUNNING:1, QUEUED:1, DONE:0} state. The
-      // original slowPromise(100) raced with minTime=100 — the moment
-      // job 2 dispatched (at t=100) was the same instant job 1's 100ms
-      // timer was firing, so the predicate could never be true if job 1
-      // resolved first (state would jump straight to {DONE:1, EXECUTING:1
-      // (job 2 — was RUNNING for one microtask), QUEUED:1}). Holding job 1
-      // with deferredPromise eliminates the race.
+      // RUNNING observed event-synchronously — see "Should return job
+      // statuses" above.
+      let job2StatusAtScheduled = null;
+      limiter.on("scheduled", (info) => {
+        if (info.options.id === 2) job2StatusAtScheduled = limiter.jobStatus(2);
+      });
+
       const hold1 = deferred();
       const p1 = limiter.schedule({ weight: 1, id: 1 }, h.deferredPromise, hold1.signal, null, 1);
       const p2 = limiter.schedule({ weight: 1, id: 2 }, h.slowPromise, 200, null, 2);
@@ -267,28 +276,23 @@ describe("General", () => {
         DONE: 0,
       });
 
+      // Stable point: job 1 held-EXECUTING, job 3 capacity-blocked.
       await waitForState(() => {
         const counts = limiter.counts();
         expect(counts.RECEIVED).toBe(0);
         expect(counts.QUEUED).toBe(1);
-        expect(counts.RUNNING).toBe(1);
-        expect(counts.EXECUTING).toBe(1);
+        expect(counts.EXECUTING).toBeGreaterThanOrEqual(1);
         expect(counts.DONE).toBe(0);
       });
-
-      expect(limiter.counts()).toEqual({
-        RECEIVED: 0,
-        QUEUED: 1,
-        RUNNING: 1,
-        EXECUTING: 1,
-        DONE: 0,
-      });
       expect(limiter.jobStatus(1)).toEqual("EXECUTING");
-      expect(limiter.jobStatus(2)).toEqual("RUNNING");
       expect(limiter.jobStatus(3)).toEqual("QUEUED");
+      expect(job2StatusAtScheduled).toEqual("RUNNING");
 
       hold1.release();
 
+      // After hold1.release(): job 1 is DONE; job 2 is mid-execution
+      // (200ms, dispatch-gated by minTime) so EXECUTING=1 is stable; job 3
+      // (weight 2) still cannot dispatch under the remaining capacity of 1.
       await waitForState(() => {
         const counts = limiter.counts();
         expect(counts.RECEIVED).toBe(0);
@@ -337,17 +341,29 @@ describe("General", () => {
         DONE: 0,
       });
 
-      // Job 1 is held with a deferredPromise so we can observe the state where
-      // job 1 is EXECUTING, job 2 is RUNNING (just dispatched), job 3 is
-      // QUEUED, and DONE=0 deterministically. Using slowPromise(100) here
-      // races with minTime=100 — the moment job 2 dispatches is the same
-      // instant job 1 finishes, so the {DONE:0, EXECUTING:1, RUNNING:1}
-      // window may not exist depending on microtask order.
+      // Every job is held by a deferred signal, so every asserted state is
+      // stable until a test-controlled release — no polling of wall-clock
+      // windows. (The old design polled for a transient RUNNING window
+      // whose existence depended on register round-trips beating minTime;
+      // a stalled register landed after minTime elapsed, collapsed the
+      // window to zero, and timed out the poll under load.) The one
+      // genuinely transient state — RUNNING, i.e. dispatched with the
+      // doExecute timer pending — is observed synchronously inside job 2's
+      // own "scheduled" event: doRun transitions the state BEFORE
+      // triggering the event (Job.js), and doExecute is timer-gated and
+      // cannot have fired inside the handler.
+      const scheduledRunning = [];
+      limiter.on("scheduled", (info) => {
+        scheduledRunning.push({ id: info.options.id, running: limiter.jobs("RUNNING") });
+      });
+
       const hold1 = deferred();
+      const hold2 = deferred();
+      const hold3 = deferred();
 
       const p1 = limiter.schedule({ weight: 1, id: 1 }, h.deferredPromise, hold1.signal, null, 1);
-      const p2 = limiter.schedule({ weight: 1, id: 2 }, h.slowPromise, 200, null, 2);
-      const p3 = limiter.schedule({ weight: 2, id: 3 }, h.slowPromise, 100, null, 3);
+      const p2 = limiter.schedule({ weight: 1, id: 2 }, h.deferredPromise, hold2.signal, null, 2);
+      const p3 = limiter.schedule({ weight: 2, id: 3 }, h.deferredPromise, hold3.signal, null, 3);
       expect(limiter.counts()).toEqual({
         RECEIVED: 3,
         QUEUED: 0,
@@ -359,55 +375,66 @@ describe("General", () => {
       expect(limiter.jobs()).toEqual(["1", "2", "3"]);
       expect(limiter.jobs("RECEIVED")).toEqual(["1", "2", "3"]);
 
+      // Stable point: both slots held-EXECUTING, job 3 capacity-blocked
+      // (weight 2 > 0 remaining). Persists until we release.
       await waitForState(() => {
-        const counts = limiter.counts();
-        expect(counts.RECEIVED).toBe(0);
-        expect(counts.QUEUED).toBe(1);
-        expect(counts.RUNNING).toBe(1);
-        expect(counts.EXECUTING).toBe(1);
-        expect(counts.DONE).toBe(0);
+        expect(limiter.counts()).toEqual({
+          RECEIVED: 0,
+          QUEUED: 1,
+          RUNNING: 0,
+          EXECUTING: 2,
+          DONE: 0,
+        });
       });
-
-      expect(limiter.counts()).toEqual({
-        RECEIVED: 0,
-        QUEUED: 1,
-        RUNNING: 1,
-        EXECUTING: 1,
-        DONE: 0,
-      });
-      expect(limiter.jobs("EXECUTING")).toEqual(["1"]);
-      expect(limiter.jobs("RUNNING")).toEqual(["2"]);
+      expect(limiter.jobs("EXECUTING")).toEqual(["1", "2"]);
       expect(limiter.jobs("QUEUED")).toEqual(["3"]);
+
+      // Event-synchronous RUNNING proof: at job 2's own "scheduled", its
+      // QUEUED→RUNNING transition had already happened. Job 1 may also
+      // still be RUNNING here (its doExecute is a 0ms timer that can lose
+      // to this synchronous observation), so assert membership only.
+      const job2Snapshot = scheduledRunning.find((s) => s.id === 2);
+      expect(job2Snapshot).toBeDefined();
+      expect(job2Snapshot.running).toContain("2");
 
       hold1.release();
 
-      // After hold1.release(), job 1 transitions to DONE and frees a slot. Job 2 is
-      // already in RUNNING and immediately moves to EXECUTING. Wait for that
-      // to complete to avoid catching the brief in-between RUNNING=1 state.
+      // Job 1 completes; job 3 (weight 2) still cannot dispatch while job 2
+      // (held) occupies a slot.
       await waitForState(() => {
-        const counts = limiter.counts();
-        expect(counts.DONE).toBe(1);
-        expect(counts.EXECUTING).toBe(1);
-        expect(counts.RUNNING).toBe(0);
-      });
-
-      expect(limiter.counts()).toEqual({
-        RECEIVED: 0,
-        QUEUED: 1,
-        RUNNING: 0,
-        EXECUTING: 1,
-        DONE: 1,
+        expect(limiter.counts()).toEqual({
+          RECEIVED: 0,
+          QUEUED: 1,
+          RUNNING: 0,
+          EXECUTING: 1,
+          DONE: 1,
+        });
       });
       expect(limiter.jobs("DONE")).toEqual(["1"]);
       expect(limiter.jobs("EXECUTING")).toEqual(["2"]);
       expect(limiter.jobs("QUEUED")).toEqual(["3"]);
 
-      await h.flushLimiter(limiter);
+      hold2.release();
+
+      // Job 2 completes; capacity 2 frees; job 3 dispatches and is held.
+      await waitForState(() => {
+        expect(limiter.counts()).toEqual({
+          RECEIVED: 0,
+          QUEUED: 0,
+          RUNNING: 0,
+          EXECUTING: 1,
+          DONE: 2,
+        });
+      });
+      expect(limiter.jobs("EXECUTING")).toEqual(["3"]);
+
+      hold3.release();
       await Promise.all([
         expect(p1).resolves.toEqual([1]),
         expect(p2).resolves.toEqual([2]),
         expect(p3).resolves.toEqual([3]),
       ]);
+      await h.flushLimiter(limiter);
 
       expect(limiter.counts()).toEqual({
         RECEIVED: 0,
@@ -456,10 +483,16 @@ describe("General", () => {
         DONE: 0,
       });
 
+      // All three jobs held by deferred signals — event counts are asserted
+      // only at stable points that persist until a test-controlled release
+      // (see "Should return jobs for a status" for the window-polling
+      // rationale this replaces).
       const hold1 = deferred();
+      const hold2 = deferred();
+      const hold3 = deferred();
       const p1 = limiter.schedule({ weight: 1, id: 1 }, h.deferredPromise, hold1.signal, null, 1);
-      const p2 = limiter.schedule({ weight: 1, id: 2 }, h.slowPromise, 200, null, 2);
-      const p3 = limiter.schedule({ weight: 2, id: 3 }, h.slowPromise, 100, null, 3);
+      const p2 = limiter.schedule({ weight: 1, id: 2 }, h.deferredPromise, hold2.signal, null, 2);
+      const p3 = limiter.schedule({ weight: 2, id: 3 }, h.deferredPromise, hold3.signal, null, 3);
       expect(limiter.counts()).toEqual({
         RECEIVED: 3,
         QUEUED: 0,
@@ -471,52 +504,49 @@ describe("General", () => {
       expect([onReceived, onQueued, onScheduled, onExecuting, onDone]).toEqual([3, 0, 0, 0, 0]);
 
       await waitForState(() => {
-        const counts = limiter.counts();
-        expect(counts.RECEIVED).toBe(0);
-        expect(counts.QUEUED).toBe(1);
-        expect(counts.RUNNING).toBe(1);
-        expect(counts.EXECUTING).toBe(1);
-        expect(counts.DONE).toBe(0);
+        expect(limiter.counts()).toEqual({
+          RECEIVED: 0,
+          QUEUED: 1,
+          RUNNING: 0,
+          EXECUTING: 2,
+          DONE: 0,
+        });
       });
-
-      expect(limiter.counts()).toEqual({
-        RECEIVED: 0,
-        QUEUED: 1,
-        RUNNING: 1,
-        EXECUTING: 1,
-        DONE: 0,
-      });
-      expect([onReceived, onQueued, onScheduled, onExecuting, onDone]).toEqual([3, 3, 2, 1, 0]);
+      expect([onReceived, onQueued, onScheduled, onExecuting, onDone]).toEqual([3, 3, 2, 2, 0]);
 
       hold1.release();
 
       await waitForState(() => {
-        const counts = limiter.counts();
-        expect(counts.RECEIVED).toBe(0);
-        expect(counts.QUEUED).toBe(1);
-        expect(counts.RUNNING).toBe(0);
-        expect(counts.EXECUTING).toBe(1);
-        expect(counts.DONE).toBe(1);
+        expect(limiter.counts()).toEqual({
+          RECEIVED: 0,
+          QUEUED: 1,
+          RUNNING: 0,
+          EXECUTING: 1,
+          DONE: 1,
+        });
       });
-
-      expect(limiter.counts()).toEqual({
-        RECEIVED: 0,
-        QUEUED: 1,
-        RUNNING: 0,
-        EXECUTING: 1,
-        DONE: 1,
-      });
-      expect(limiter.jobs("DONE")).toEqual(["1"]);
-      expect(limiter.jobs("EXECUTING")).toEqual(["2"]);
-      expect(limiter.jobs("QUEUED")).toEqual(["3"]);
       expect([onReceived, onQueued, onScheduled, onExecuting, onDone]).toEqual([3, 3, 2, 2, 1]);
 
-      await h.flushLimiter(limiter);
+      hold2.release();
+
+      await waitForState(() => {
+        expect(limiter.counts()).toEqual({
+          RECEIVED: 0,
+          QUEUED: 0,
+          RUNNING: 0,
+          EXECUTING: 1,
+          DONE: 2,
+        });
+      });
+      expect([onReceived, onQueued, onScheduled, onExecuting, onDone]).toEqual([3, 3, 3, 3, 2]);
+
+      hold3.release();
       await Promise.all([
         expect(p1).resolves.toEqual([1]),
         expect(p2).resolves.toEqual([2]),
         expect(p3).resolves.toEqual([3]),
       ]);
+      await h.flushLimiter(limiter);
 
       expect(limiter.counts()).toEqual({
         RECEIVED: 0,
