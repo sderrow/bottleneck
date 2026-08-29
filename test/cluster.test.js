@@ -1,4 +1,5 @@
 import { describe, expect } from "vitest";
+import sleep from "../src/sleep.js";
 import { test, waitForState, deferred, enqueued } from "./helpers/test-api.js";
 const Scripts = require("../src/cluster/Scripts.js");
 const assert = require("assert");
@@ -832,5 +833,121 @@ describe("Cluster-only", () => {
         },
       );
     });
+  });
+
+  test("Should map an OVERWEIGHT script error to a friendly message", async ({ makeLimiter }) => {
+    const limiter = makeLimiter({ maxConcurrent: 1 });
+
+    await expect(limiter.schedule({ weight: 2 }, () => Promise.resolve(1))).rejects.toThrow(
+      "Impossible to add a job having a weight of 2 to a limiter having a maxConcurrent setting of 1",
+    );
+  });
+
+  // White-box: onMessage is the pub/sub entry point; these drive its
+  // capacity-priority branches directly so they don't depend on cross-client
+  // broadcast timing.
+  test("Should handle a capacity-priority broadcast naming this client", async ({
+    makeLimiter,
+  }) => {
+    const limiter = makeLimiter({ maxConcurrent: 2 });
+    await limiter.ready();
+    const store = limiter._store;
+    const published = [];
+    store.clients.client = { publish: async (ch, msg) => published.push([ch, msg]) };
+
+    const capacities = [];
+    limiter.on("capacity-priority", (capacity) => capacities.push(capacity));
+
+    await store.onMessage(limiter.channel(), `capacity-priority:5:${store.clientId}:0`);
+    expect(capacities).toEqual([5]);
+    expect(published).toEqual([
+      [limiter.channel(), expect.stringMatching(/^capacity-priority:\d+::0$/)],
+    ]);
+
+    await store.onMessage(limiter.channel(), `capacity-priority::${store.clientId}:0`);
+    expect(capacities).toEqual([5, undefined]);
+    expect(published[1][1]).toBe("capacity-priority:::0");
+  });
+
+  test("Should handle a capacity-priority broadcast with no priority client", async ({
+    makeLimiter,
+  }) => {
+    const limiter = makeLimiter({ maxConcurrent: 2 });
+    await limiter.ready();
+    const store = limiter._store;
+
+    // No timeout should be scheduled, and the drain must run to completion.
+    await store.onMessage(limiter.channel(), "capacity-priority:5::0");
+    expect(Object.keys(store.capacityPriorityCounters)).toEqual([]);
+  });
+
+  test("Should surface onMessage errors unless disconnecting", async ({ makeLimiter }) => {
+    const limiter = makeLimiter({ maxConcurrent: 2 }, { expectErrors: true });
+    await limiter.ready();
+    const store = limiter._store;
+    const errors = [];
+    limiter.on("error", (e) => errors.push(e));
+
+    store.instance._drainAll = async () => {
+      throw new Error("drain boom");
+    };
+    await store.onMessage(limiter.channel(), "capacity:5");
+    expect(errors.map((e) => e.message)).toEqual(["drain boom"]);
+
+    store._disconnecting = true;
+    await store.onMessage(limiter.channel(), "capacity:5");
+    expect(errors.map((e) => e.message)).toEqual(["drain boom"]);
+  });
+
+  test("Should surface heartbeat errors unless disconnecting", async ({ makeLimiter }) => {
+    const limiter = makeLimiter(
+      { maxConcurrent: 2, heartbeatInterval: 50 },
+      { expectErrors: true },
+    );
+    await limiter.ready();
+    const store = limiter._store;
+    const errors = [];
+    limiter.on("error", (e) => errors.push(e));
+
+    const originalRunScript = store.runScript.bind(store);
+    store.runScript = async () => {
+      throw new Error("heartbeat boom");
+    };
+
+    // heartbeatInterval is 50ms; a 1s bound leaves ~1000x headroom for
+    // event-loop stalls under load. Assert the contract (>= 1 error, all
+    // ours), not the tick count.
+    await sleep(1000);
+    expect(errors.length).toBeGreaterThanOrEqual(1);
+    expect(errors.every((e) => e.message === "heartbeat boom")).toBe(true);
+
+    store._disconnecting = true;
+    store.runScript = originalRunScript;
+  });
+
+  test("Should blacklist a stale capacity-priority owner after its timeout", async ({
+    makeLimiter,
+  }) => {
+    const limiter = makeLimiter({ maxConcurrent: 2 });
+    await limiter.ready();
+    const store = limiter._store;
+
+    await store.onMessage(limiter.channel(), "capacity-priority:5:some-other-client:0");
+    expect(Object.keys(store.capacityPriorityCounters)).toEqual(["0"]);
+
+    // The blacklist timer is a product timer (1000ms); 2200ms is a sound
+    // lower bound at any load.
+    await sleep(2200);
+    expect(Object.keys(store.capacityPriorityCounters)).toEqual([]);
+  });
+
+  test("Should rethrow non-OVERWEIGHT submit errors", async ({ makeLimiter }) => {
+    const limiter = makeLimiter({ maxConcurrent: 2 });
+    await limiter.ready();
+    limiter._store.runScript = async () => {
+      throw new Error("redis exploded");
+    };
+
+    await expect(limiter.schedule(() => Promise.resolve(1))).rejects.toThrow("redis exploded");
   });
 });

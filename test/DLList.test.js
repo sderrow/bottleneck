@@ -89,6 +89,17 @@ describe("DLList", () => {
     expect(queues._length).toStrictEqual(0);
   });
 
+  it("Should expose debug information for each node", () => {
+    const queues = new fakeQueues();
+    const list = new DLList(...queues.fns);
+    list.push(1);
+    list.push(2);
+    expect(list.debug()).toStrictEqual([
+      { value: 1, prev: undefined, next: 2 },
+      { value: 2, prev: 1, next: undefined },
+    ]);
+  });
+
   it("Should pass a full test", () => {
     const queues = new fakeQueues();
     const list = new DLList(...queues.fns);

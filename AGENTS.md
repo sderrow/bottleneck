@@ -32,12 +32,27 @@ only makes the race rarer. Replace the race with an ordering guarantee:
   `=== N`.
 - **Gate fake-clock-only tests on `process.env.DATASTORE == null`**, not
   `isFakeClock()` (timers install in `beforeEach`, after collection).
-- **Never guess at an unreproduced flake.** Capture the failing assertion
-  first: run the full `pnpm test:ci` matrix under load and tee the FULL output
-  to a per-run file (`pnpm test:ci 2>&1 | tee /tmp/tci-$run.log`) — grep the
-  summary live, but diagnose from the saved `Failed Tests` blocks, which
-  terminal scrollback loses. Single-file reruns usually pass because
-  event-loop congestion is part of the failure.
+
+## Always tee test output
+
+**Every** test run should tee its full output to a file — not just runs that
+are hunting a specific flake:
+
+```
+pnpm test:ci 2>&1 | tee /tmp/tci-$run.log        # or: pnpm test 2>&1 | tee /tmp/test-$run.log
+```
+
+You never know when a flake is going to happen. Terminal scrollback gets lost
+(truncated, collapsed, or scattered across agent UI messages), but a saved run
+log preserves the complete `Failed Tests` block with the assertion details
+that diagnose a flake after the fact. A flake that happens during an unrelated
+run and isn't captured is an unreproducible flake — the worst kind. Grep the
+tee'd file for `Failed Tests` / `FAIL` whenever a run reports any failure, and
+keep the per-run file around until the work is done.
+
+- **Never guess at an unreproduced flake.** Diagnose from the saved
+  `Failed Tests` blocks, not memory or scrollback. Single-file reruns usually
+  pass because event-loop congestion is part of the failure.
 
 Canonical examples: test/priority.test.js, test/general.test.js ("Counts and
 statuses"), test/stop.test.js (incl. the DATASTORE-gated scheduled-job drop),

@@ -98,6 +98,35 @@ describe("Priority", () => {
     expect(called).toEqual(true);
   });
 
+  test("Should drop on LEAK when there is nothing to displace", async ({
+    harness: h,
+    makeLimiter,
+  }) => {
+    // highWater 0 with reservoir 0: the very first job trips HWM against an
+    // empty queue, so LEAK finds no victim to shift and drops the arriving
+    // job itself (shifted == null branch).
+    const limiter = makeLimiter({
+      highWater: 0,
+      reservoir: 0,
+      strategy: Bottleneck.strategy.LEAK,
+      rejectOnDrop: false,
+    });
+
+    let dropped = 0;
+    limiter.on("dropped", () => {
+      dropped++;
+    });
+
+    limiter.schedule(h.promise, null, 1);
+    // The arriving job is dropped synchronously inside _addToQueue, before
+    // the barrier task runs. (A flush job can't be used as the completion
+    // barrier here: with reservoir 0 it trips HWM too and never settles.)
+    await enqueued(limiter);
+
+    expect(dropped).toEqual(1);
+    expect(h.log).not.toHaveBeenCalled();
+  });
+
   test("Should support OVERFLOW", async ({ harness: h, makeLimiter }) => {
     const limiter = makeLimiter({
       maxConcurrent: 1,

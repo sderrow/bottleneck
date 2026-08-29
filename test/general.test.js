@@ -5,6 +5,14 @@ const Bottleneck = require("./bottleneck");
 
 useFakeClock();
 
+// White-box helper: swallows the datastore-disconnect noise that fires when a
+// limiter is shutting down, but surfaces everything else.
+const disconnectError = () => {
+  const e = new Error("connection is closed");
+  e.constructor = { name: "DisconnectsClientError" };
+  return e;
+};
+
 describe("General", () => {
   test("Should prompt to upgrade", () => {
     expect(() => {
@@ -705,6 +713,109 @@ describe("General", () => {
         expect(limiter.schedule(h.promise, null, 1)).resolves.toEqual([1]),
         errored,
       ]);
+    });
+  });
+
+  describe("Datastore errors", () => {
+    test("Should refuse an unknown datastore type", () => {
+      expect(() => new Bottleneck({ datastore: "carrier-pigeon" })).toThrow(
+        "Invalid datastore type: carrier-pigeon",
+      );
+    });
+
+    test("Should swallow DisconnectsClientError while disconnecting", async ({
+      harness: h,
+      makeLimiter,
+    }) => {
+      const limiter = makeLimiter({ maxConcurrent: 1 });
+      const errors = [];
+      limiter.on("error", (e) => errors.push(e));
+
+      limiter._store._disconnecting = true;
+      limiter._store.__free__ = async () => {
+        throw disconnectError();
+      };
+
+      await expect(limiter.schedule({ id: "swallowed" }, h.promise, null, 1)).resolves.toEqual([1]);
+      expect(errors).toEqual([]);
+    });
+
+    test("Should surface DisconnectsClientError while not disconnecting", async ({
+      harness: h,
+      makeLimiter,
+    }) => {
+      // Fires an expected "error" event; expectErrors silences the harness watchdog log for it.
+      const limiter = makeLimiter({ maxConcurrent: 1 }, { expectErrors: true });
+      const errored = deferred();
+      limiter.on("error", (e) => {
+        if (e.message === "connection is closed") errored.release();
+      });
+
+      limiter._store.__free__ = async () => {
+        throw disconnectError();
+      };
+
+      await Promise.all([
+        expect(limiter.schedule({ id: "surfaced" }, h.promise, null, 1)).resolves.toEqual([1]),
+        errored,
+      ]);
+    });
+
+    test("Should swallow disconnect errors raised while draining the queue", async ({
+      makeLimiter,
+    }) => {
+      const limiter = makeLimiter({ maxConcurrent: 1 });
+      const errors = [];
+      limiter.on("error", (e) => errors.push(e));
+
+      limiter._store._disconnecting = true;
+      limiter._drainOne = async () => {
+        throw disconnectError();
+      };
+
+      await limiter._drainAll(1);
+      expect(errors).toEqual([]);
+    });
+
+    test("Should surface drain errors while not disconnecting", async ({ makeLimiter }) => {
+      // Fires an expected "error" event; expectErrors silences the harness watchdog log for it.
+      const limiter = makeLimiter({ maxConcurrent: 1 }, { expectErrors: true });
+      const errors = [];
+      limiter.on("error", (e) => errors.push(e));
+
+      limiter._drainOne = async () => {
+        throw new Error("drain exploded");
+      };
+
+      await limiter._drainAll(1);
+      expect(errors.length).toBe(1);
+      expect(errors[0].message).toBe("drain exploded");
+    });
+  });
+
+  describe("LocalDatastore", () => {
+    test("computePenalty honors an explicit penalty", () => {
+      const limiter = new Bottleneck({ penalty: 123 });
+      expect(limiter._store.computePenalty()).toBe(123);
+    });
+
+    test("computePenalty falls back to 5000 ms when minTime is 0", () => {
+      const limiter = new Bottleneck({ minTime: 0 });
+      expect(limiter._store.computePenalty()).toBe(5000);
+    });
+
+    test("Restarting the heartbeat clears the previous interval", () => {
+      const limiter = new Bottleneck({
+        reservoirRefreshInterval: 100,
+        reservoirRefreshAmount: 5,
+      });
+      const { heartbeat } = limiter._store;
+      expect(heartbeat).toBeTruthy();
+
+      limiter.updateSettings({ minTime: 100 });
+      limiter.updateSettings({ minTime: 200 });
+
+      expect(limiter._store.heartbeat).toBeTruthy();
     });
   });
 });

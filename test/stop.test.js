@@ -165,6 +165,38 @@ describe("Stop", () => {
     expect(h.log).toHaveCallOrder([[1], [2], [3]]);
   });
 
+  test("Should resolve stop() from the done-event listener", async ({
+    harness: h,
+    makeLimiter,
+  }) => {
+    const limiter = makeLimiter({ maxConcurrent: 2 });
+
+    // Two jobs held EXECUTING with nothing queued behind them. The weight-0
+    // waitForExecuting job stop() enqueues dispatches immediately (weight 0
+    // passes the capacity check), so its initial finished() check fails
+    // (counts = 3) and stop can only resolve via the done-event listener
+    // once both jobs complete.
+    const hold1 = deferred();
+    const hold2 = deferred();
+    const p1 = limiter.schedule({ id: "1" }, h.deferredPromise, hold1.signal, null, 1);
+    const p2 = limiter.schedule({ id: "2" }, h.deferredPromise, hold2.signal, null, 2);
+
+    await waitForState(() => {
+      expect(limiter.counts().EXECUTING).toBe(2);
+    });
+
+    const stopPromise = limiter.stop({ dropWaitingJobs: false });
+    hold1.release();
+    hold2.release();
+
+    await Promise.all([
+      stopPromise,
+      expect(p1).resolves.toEqual([1]),
+      expect(p2).resolves.toEqual([2]),
+    ]);
+    expect(limiter.counts().EXECUTING).toBe(0);
+  });
+
   test("Should still resolve when rejectOnDrop is false", async ({ harness: h, makeLimiter }) => {
     const limiter = makeLimiter({
       maxConcurrent: 1,

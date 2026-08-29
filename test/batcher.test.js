@@ -122,4 +122,10 @@ describe("Batcher", () => {
     ]);
     expect(batchTimes[1] - t1).toBe(100);
   });
+
+  test("Should default to no time/size limits when constructed without options", () => {
+    const batcher = new Bottleneck.Batcher();
+    expect(batcher.maxTime).toBeNull();
+    expect(batcher.maxSize).toBeNull();
+  });
 });

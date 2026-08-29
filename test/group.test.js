@@ -7,6 +7,11 @@ const Bottleneck = require("./bottleneck");
 useFakeClock();
 
 describe("Group", () => {
+  test("Should construct without options", () => {
+    const group = new Bottleneck.Group();
+    expect(group.limiterOptions).toStrictEqual({});
+  });
+
   test("Should create limiters", async ({ makeGroup }) => {
     expect.hasAssertions();
     const group = makeGroup({
