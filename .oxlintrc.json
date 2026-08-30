@@ -16,11 +16,11 @@
   "ignorePatterns": ["**/.gitignore", "**/node_modules", "dist/**", ".context/**", "test.ts"],
   "rules": {
     "no-unused-vars": [
-      "warn",
+      "error",
       {
         "vars": "all",
         "varsIgnorePattern": "^_",
-        "args": "after-used",
+        "args": "all",
         "argsIgnorePattern": "^_",
         "ignoreRestSiblings": true,
         "fix": {

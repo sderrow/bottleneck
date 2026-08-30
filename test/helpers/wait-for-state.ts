@@ -1,5 +1,5 @@
 import { vi } from "vitest";
-import { realSetTimeout } from "./clock.js";
+import { realSetTimeout } from "./clock";
 
 /**
  * Poll until `callback` succeeds (does not throw).
@@ -40,7 +40,11 @@ const DEFAULTS = {
 // monopolize the CPU for the entire real-time deadline.
 const ADVANCES_PER_YIELD = 50;
 
-export function waitForState(callback, options) {
+type WaitForStateOptions = { timeout?: number; interval?: number };
+
+type WaitPredicate = () => unknown | Promise<unknown>;
+
+export function waitForState(callback: WaitPredicate, options?: WaitForStateOptions) {
   const opts = { ...DEFAULTS, ...options };
 
   if (!vi.isFakeTimers()) {
@@ -50,7 +54,10 @@ export function waitForState(callback, options) {
   return pollUnderFakeClock(callback, opts);
 }
 
-async function pollUnderFakeClock(callback, opts) {
+async function pollUnderFakeClock(
+  callback: WaitPredicate,
+  opts: { timeout: number; interval: number },
+) {
   // Deadline on the real clock: Date/performance/hrtime are all faked.
   const deadline = vi.getRealSystemTime() + opts.timeout;
   let advances = 0;

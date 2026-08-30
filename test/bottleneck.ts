@@ -1,34 +1,34 @@
-const resolveEntry = async () => {
-  switch (process.env.BOTTLENECK_ENTRY ?? "source") {
-    case "light":
-      return (await import("../dist/light.js")).default;
-    case "lib":
-      return (await import("../dist/index.cjs")).default;
-    default:
-      return (await import("../src/index.ts")).default;
-  }
-};
-const Bottleneck = await resolveEntry();
+import SourceBottleneck from "../src/index.ts";
+
+type BottleneckClass = typeof SourceBottleneck;
+
+// dist/ is generated on demand by the smoke-test globalSetup (`tsdown --filter
+// ...`) and does not exist for a plain `pnpm tsc`, so the dist entries are
+// imported via a non-literal specifier: dynamic import of a `string` yields
+// `Promise<any>`, which tsc accepts without resolving and assigns without a
+// cast. `/* @vite-ignore */` leaves the specifier untouched so Vitest performs
+// a native runtime import once dist exists on disk.
+const entry = process.env.BOTTLENECK_ENTRY ?? "source";
+const distPath: string | null =
+  entry === "light" ? "../dist/light.js" : entry === "lib" ? "../dist/index.cjs" : null;
+const Bottleneck: BottleneckClass =
+  distPath == null ? SourceBottleneck : (await import(/* @vite-ignore */ distPath)).default;
 
 // A limiter (or group) is Redis-backed if its options either name a Redis
 // datastore explicitly OR provide a pre-built `connection` (in which case
 // the Bottleneck constructor infers the datastore from the connection).
 // Both paths must get the test heartbeat override applied, otherwise
 // child limiters created from a "connection-only" Group inherit the 5000ms
-// production default and produce 5-second flakes (see cluster.test.js:75
+// production default and produce 5-second flakes (see cluster.test.ts:75
 // and similar).
-const isRedisBacked = (options) =>
+const isRedisBacked = (options: Record<string, any> | undefined): options is Record<string, any> =>
   options != null &&
   typeof options === "object" &&
   (options.datastore === "redis" || options.datastore === "ioredis" || options.connection != null);
 
 const usingRedis = process.env.DATASTORE === "redis" || process.env.DATASTORE === "ioredis";
 
-let ExportedBottleneck;
-
-if (!usingRedis) {
-  ExportedBottleneck = Bottleneck;
-} else {
+async function makeTestBottleneck(Base: BottleneckClass): Promise<BottleneckClass> {
   const Redis =
     process.env.DATASTORE === "redis"
       ? (await import("redis")).default
@@ -57,11 +57,11 @@ if (!usingRedis) {
   // The shape is datastore-specific: ioredis accepts flat { host, port }, but
   // node-redis v4/v5 requires { socket: { host, port } } and silently ignores
   // top-level host/port (defaulting to localhost:6379).
-  const buildClientOptions = (await import("./redis-client-options.js")).default;
+  const buildClientOptions = (await import("./redis-client-options.ts")).default;
 
-  const withRedis = (options) => {
+  const withRedis = (options: Record<string, any> | undefined) => {
     if (!isRedisBacked(options)) return options;
-    const next = { ...options };
+    const next = { ...options } as Record<string, any>;
     // Only inject the Redis library / clientOptions when the test isn't
     // bringing its own pre-built client or connection. Both of those carry
     // their own clientOptions and the Bottleneck constructor would reject
@@ -81,7 +81,7 @@ if (!usingRedis) {
     // 250ms heartbeat closes the worst-case recovery window without
     // affecting tests that don't depend on heartbeat timing. Tests that
     // DO depend on heartbeat timing already set their own value explicitly
-    // (e.g. heartbeatInterval: 75 in general.test.js auto-refresh tests).
+    // (e.g. heartbeatInterval: 75 in general.test.ts auto-refresh tests).
     if (next.heartbeatInterval == null) next.heartbeatInterval = 250;
     // Namespace every limiter id with the fork-local FILE_PREFIX so this fork's
     // Redis keys don't collide with keys from any other parallel fork on the
@@ -104,20 +104,20 @@ if (!usingRedis) {
 
   // `Group.limiters()` returns instances of the real `Bottleneck`, so we override
   // `Symbol.hasInstance` to keep `instanceof` checks in tests behaving as expected.
-  class TestBottleneck extends Bottleneck {
-    static [Symbol.hasInstance](instance) {
-      return instance instanceof Bottleneck;
+  class TestBottleneck extends Base {
+    static override [Symbol.hasInstance](instance: unknown) {
+      return instance instanceof Base;
     }
-    constructor(options) {
+    constructor(options?: Record<string, any>) {
       super(withRedis(options));
     }
   }
 
-  TestBottleneck.Group = class TestGroup extends Bottleneck.Group {
-    static [Symbol.hasInstance](instance) {
-      return instance instanceof Bottleneck.Group;
+  TestBottleneck.Group = class TestGroup extends Base.Group {
+    static override [Symbol.hasInstance](instance: unknown) {
+      return instance instanceof Base.Group;
     }
-    constructor(options) {
+    constructor(options?: Record<string, any>) {
       super(withRedis(options));
       // Group.key() instantiates child limiters via `this.Bottleneck`, which
       // the parent Group constructor sets to the library's Bottleneck class.
@@ -129,7 +129,7 @@ if (!usingRedis) {
     }
   };
 
-  ExportedBottleneck = TestBottleneck;
+  return TestBottleneck;
 }
 
-export default ExportedBottleneck;
+export default usingRedis ? await makeTestBottleneck(Bottleneck) : Bottleneck;

@@ -1,4 +1,5 @@
 import { describe, test, expect, vi } from "vitest";
+import type { IORedisConnectionOptions, RedisConnectionOptions } from "../src/types";
 import IORedisConnection from "../src/cluster/IORedisConnection";
 import RedisConnection from "../src/cluster/RedisConnection";
 import * as Scripts from "../src/cluster/Scripts";
@@ -7,30 +8,37 @@ import * as Scripts from "../src/cluster/Scripts";
 // driven with fake clients, so the file is deterministic in every test
 // project (local + redis) without touching the shared Redis container.
 
-const makeNodeClient = (overrides = {}, dupOverrides = {}) => {
-  const handlers = {};
-  const client = {
+const makeNodeClient = (
+  overrides: Record<string, any> = {},
+  dupOverrides: Record<string, any> = {},
+) => {
+  const handlers: Record<string, any> = {};
+  const client: any = {
     isOpen: true,
-    on(name, cb) {
+    on(name: string, cb: (...args: any[]) => void) {
       (handlers[name] ??= []).push(cb);
     },
-    emit(name, ...args) {
+    emit(name: string, ...args: any[]) {
       for (const cb of handlers[name] ?? []) cb(...args);
     },
-    removeAllListeners(name) {
+    removeAllListeners(name?: string) {
       if (name != null) delete handlers[name];
     },
-    scriptLoad: vi.fn(async (payload) => `sha-${payload.length}`),
-    evalSha: vi.fn(async () => 1),
-    sendCommand: vi.fn(async () => "OK"),
-    subscribe: vi.fn(async (channel, cb) => {
-      (handlers.__subscriptions ??= {})[channel] = cb;
-    }),
-    unsubscribe: vi.fn(async () => {}),
-    close: vi.fn(async () => {}),
-    quit: vi.fn(async () => {}),
-    destroy: vi.fn(async () => {}),
-    disconnect: vi.fn(),
+    scriptLoad: vi.fn<(payload: string) => Promise<string>>(
+      async (payload) => `sha-${payload.length}`,
+    ),
+    evalSha: vi.fn<() => Promise<number>>(async () => 1),
+    sendCommand: vi.fn<() => Promise<string>>(async () => "OK"),
+    subscribe: vi.fn<(channel: string, cb: (...args: any[]) => void) => Promise<void>>(
+      async (channel, cb) => {
+        (handlers.__subscriptions ??= {})[channel] = cb;
+      },
+    ),
+    unsubscribe: vi.fn<() => Promise<void>>(async () => {}),
+    close: vi.fn<() => Promise<void>>(async () => {}),
+    quit: vi.fn<() => Promise<void>>(async () => {}),
+    destroy: vi.fn<() => Promise<void>>(async () => {}),
+    disconnect: vi.fn<() => void>(),
     ...overrides,
   };
   client._handlers = handlers;
@@ -38,36 +46,39 @@ const makeNodeClient = (overrides = {}, dupOverrides = {}) => {
   return client;
 };
 
-const makeIOClient = (overrides = {}) => {
-  const handlers = {};
-  const client = {
+const makeIOClient = (overrides: Record<string, any> = {}) => {
+  const handlers: Record<string, any> = {};
+  const client: any = {
     status: "connect",
-    on(name, cb) {
+    on(name: string, cb: (...args: any[]) => void) {
       (handlers[name] ??= []).push(cb);
     },
-    once(name, cb) {
+    once(name: string, cb: (...args: any[]) => void) {
       (handlers[name] ??= []).push(cb);
     },
-    emit(name, ...args) {
+    emit(name: string, ...args: any[]) {
       for (const cb of handlers[name] ?? []) cb(...args);
     },
     setMaxListeners() {},
-    defineCommand: vi.fn(),
-    subscribe: vi.fn(async () => 1),
-    unsubscribe: vi.fn(async () => 1),
+    defineCommand: vi.fn<(...args: any[]) => void>(),
+    subscribe: vi.fn<(...args: any[]) => Promise<number>>(async () => 1),
+    unsubscribe: vi.fn<(...args: any[]) => Promise<number>>(async () => 1),
     ...overrides,
   };
   client._handlers = handlers;
   return client;
 };
 
-const makeFakeRedis = (mainOverrides = {}, subOverrides = {}) => {
+const makeFakeRedis = (
+  mainOverrides: Record<string, any> = {},
+  subOverrides: Record<string, any> = {},
+) => {
   // Plain functions, not vi.fn(): `new FakeRedis(...)` must return the fake
   // client object the factory builds.
-  const FakeRedis = function () {
+  const FakeRedis: any = function () {
     return makeIOClient({ ...mainOverrides, duplicate: () => makeIOClient(subOverrides) });
   };
-  FakeRedis.Cluster = function (nodes, options) {
+  FakeRedis.Cluster = function (nodes: any, options: any) {
     FakeRedis.Cluster.calls.push({ nodes, options });
     return makeIOClient({ status: "ready" });
   };
@@ -78,18 +89,19 @@ const makeFakeRedis = (mainOverrides = {}, subOverrides = {}) => {
 const makeLimiterInstance = () => ({
   channel: () => "ch-one",
   channel_client: () => "ch-two",
-  _store: { onMessage: vi.fn() },
+  _store: { onMessage: vi.fn<(...args: any[]) => void>() },
 });
 
 describe("RedisConnection (node-redis)", () => {
   test("Should refuse to build without a Redis reference or a pre-built client", () => {
-    expect(() => new RedisConnection({})).toThrow(
+    // {} is not a valid RedisConnectionOptions; the runtime rejection is the contract
+    expect(() => new RedisConnection({} as unknown as RedisConnectionOptions)).toThrow(
       /requires a `Redis` library reference or a pre-built `client`/,
     );
   });
 
   test("Should connect a client that is not open", async () => {
-    const connect = vi.fn(async () => {});
+    const connect = vi.fn<() => Promise<void>>(async () => {});
     const client = makeNodeClient({ isOpen: false, connect });
     const conn = new RedisConnection({ client });
 
@@ -113,7 +125,7 @@ describe("RedisConnection (node-redis)", () => {
 
   test("Should reject ready when script loading fails", async () => {
     const client = makeNodeClient({
-      scriptLoad: vi.fn(async () => {
+      scriptLoad: vi.fn<() => Promise<string>>(async () => {
         throw new Error("script load failed");
       }),
     });
@@ -124,7 +136,7 @@ describe("RedisConnection (node-redis)", () => {
 
   test("Should swallow script loading failures after termination", async () => {
     const client = makeNodeClient({
-      scriptLoad: vi.fn(async () => {
+      scriptLoad: vi.fn<() => Promise<string>>(async () => {
         throw new Error("script load failed");
       }),
     });
@@ -139,16 +151,16 @@ describe("RedisConnection (node-redis)", () => {
     const conn = new RedisConnection({ client });
     await conn.ready;
 
-    const errors = [];
-    conn.on("error", (e) => errors.push(e));
+    const errors: unknown[] = [];
+    (conn as any).on("error", (e: unknown) => errors.push(e));
 
     client.emit("error", new Error("boom"));
-    conn.subscriber.emit("error", new Error("boom"));
+    (conn.subscriber as any).emit("error", new Error("boom"));
     expect(errors.length).toBe(2);
 
     conn.terminated = true;
     client.emit("error", new Error("ignored"));
-    conn.subscriber.emit("error", new Error("ignored"));
+    (conn.subscriber as any).emit("error", new Error("ignored"));
     expect(errors.length).toBe(2);
   });
 
@@ -157,11 +169,11 @@ describe("RedisConnection (node-redis)", () => {
     const conn = new RedisConnection({ client });
     await conn.ready;
 
-    const instance = makeLimiterInstance();
+    const instance = makeLimiterInstance() as any;
     await conn.__addLimiter__(instance);
     expect(conn.subscriber.subscribe).toHaveBeenCalledTimes(2);
 
-    const onMessage = conn.subscriber._handlers.__subscriptions["ch-one"];
+    const onMessage = (conn.subscriber as any)._handlers.__subscriptions["ch-one"];
     onMessage("hello");
     expect(instance._store.onMessage).toHaveBeenCalledWith("ch-one", "hello");
 
@@ -177,26 +189,26 @@ describe("RedisConnection (node-redis)", () => {
     await conn1.disconnect(true);
     expect(client1.close).toHaveBeenCalledTimes(1);
     expect(client1.subscriber).toBeUndefined();
-    expect(conn1.subscriber.quit).toHaveBeenCalledTimes(1);
-    expect(conn1.subscriber.close).toBeUndefined();
+    expect((conn1.subscriber as any).quit).toHaveBeenCalledTimes(1);
+    expect((conn1.subscriber as any).close).toBeUndefined();
 
     // The no-op error handlers installed by disconnect() must absorb late
     // client error events.
-    conn1.client.emit("error", new Error("late"));
-    conn1.subscriber.emit("error", new Error("late"));
+    (conn1.client as any).emit("error", new Error("late"));
+    (conn1.subscriber as any).emit("error", new Error("late"));
 
     const client2 = makeNodeClient({}, { close: undefined, destroy: undefined });
     const conn2 = new RedisConnection({ client: client2 });
     await conn2.ready;
     await conn2.disconnect(false);
     expect(client2.destroy).toHaveBeenCalledTimes(1);
-    expect(conn2.subscriber.disconnect).toHaveBeenCalledTimes(1);
+    expect((conn2.subscriber as any).disconnect).toHaveBeenCalledTimes(1);
   });
 });
 
 describe("IORedisConnection", () => {
   test("Should refuse to build without a Redis reference or a pre-built client", () => {
-    expect(() => new IORedisConnection({})).toThrow(
+    expect(() => new IORedisConnection({} as unknown as IORedisConnectionOptions)).toThrow(
       /requires a `Redis` library reference or a pre-built `client`/,
     );
   });
@@ -223,7 +235,7 @@ describe("IORedisConnection", () => {
     await Promise.resolve();
     expect(resolved).toBe(false);
 
-    conn.subscriber.emit("ready");
+    (conn.subscriber as any).emit("ready");
     await conn.ready;
     expect(resolved).toBe(true);
   });
@@ -246,11 +258,11 @@ describe("IORedisConnection", () => {
     const conn = new IORedisConnection({ Redis, clientOptions: {} });
     await conn.ready;
 
-    const instance = makeLimiterInstance();
+    const instance = makeLimiterInstance() as any;
     await conn.__addLimiter__(instance);
     expect(conn.subscriber.subscribe).toHaveBeenCalledTimes(2);
 
-    conn.subscriber.emit("message", "ch-one", "hello");
+    (conn.subscriber as any).emit("message", "ch-one", "hello");
     expect(instance._store.onMessage).toHaveBeenCalledWith("ch-one", "hello");
 
     await conn.__removeLimiter__(instance);
@@ -264,14 +276,14 @@ describe("IORedisConnection", () => {
     await conn.ready;
 
     const errors = [];
-    conn.on("error", (e) => errors.push(e));
+    (conn as any).on("error", (e: unknown) => errors.push(e));
 
-    conn.client.emit("error", new Error("boom"));
-    conn.subscriber.emit("error", new Error("boom"));
+    (conn.client as any).emit("error", new Error("boom"));
+    (conn.subscriber as any).emit("error", new Error("boom"));
     expect(errors.length).toBe(2);
 
     conn.terminated = true;
-    conn.client.emit("error", new Error("ignored"));
+    (conn.client as any).emit("error", new Error("ignored"));
     expect(errors.length).toBe(2);
   });
 
@@ -279,23 +291,23 @@ describe("IORedisConnection", () => {
     const Redis1 = makeFakeRedis({ status: "ready" }, { status: "ready" });
     const conn1 = new IORedisConnection({ Redis: Redis1, clientOptions: {} });
     await conn1.ready;
-    conn1.client.quit = vi.fn(async () => "OK");
-    conn1.subscriber.quit = vi.fn(async () => "OK");
+    (conn1.client as any).quit = vi.fn<() => Promise<string>>(async () => "OK");
+    (conn1.subscriber as any).quit = vi.fn<() => Promise<string>>(async () => "OK");
     await conn1.disconnect(true);
-    expect(conn1.client.quit).toHaveBeenCalledTimes(1);
-    expect(conn1.subscriber.quit).toHaveBeenCalledTimes(1);
+    expect((conn1.client as any).quit).toHaveBeenCalledTimes(1);
+    expect((conn1.subscriber as any).quit).toHaveBeenCalledTimes(1);
 
     // Late errors are absorbed by the no-op handlers disconnect() installs.
-    conn1.client.emit("error", new Error("late"));
-    conn1.subscriber.emit("error", new Error("late"));
+    (conn1.client as any).emit("error", new Error("late"));
+    (conn1.subscriber as any).emit("error", new Error("late"));
 
     const Redis2 = makeFakeRedis({ status: "ready" }, { status: "ready" });
     const conn2 = new IORedisConnection({ Redis: Redis2, clientOptions: {} });
     await conn2.ready;
-    conn2.client.disconnect = vi.fn();
-    conn2.subscriber.disconnect = vi.fn();
+    (conn2.client as any).disconnect = vi.fn<() => void>();
+    (conn2.subscriber as any).disconnect = vi.fn<() => void>();
     await conn2.disconnect(false);
-    expect(conn2.client.disconnect).toHaveBeenCalledTimes(1);
+    expect((conn2.client as any).disconnect).toHaveBeenCalledTimes(1);
     expect(conn2.subscriber.disconnect).toHaveBeenCalledTimes(1);
   });
 });

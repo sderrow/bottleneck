@@ -1,18 +1,21 @@
 import { describe, expect } from "vitest";
+import type BottleneckBase from "../src/Bottleneck";
 import * as Scripts from "../src/cluster/Scripts";
 import sleep from "../src/sleep";
-import Bottleneck from "./bottleneck.mjs";
-import { test, waitForState, deferred, enqueued } from "./helpers/test-api.js";
+import Bottleneck from "./bottleneck";
+import { test, waitForState, deferred, enqueued } from "./helpers/test-api";
 
 // Causality policy (Workstream B): observe product-timer effects via waitForState
 // and state counts — never assert wall-clock bounds around real network time.
 
-const limiterKeys = (limiter) => Scripts.allKeys(limiter._store.originalId);
-const countKeys = (limiter) => runCommand(limiter, "exists", limiterKeys(limiter));
-const deleteKeys = (limiter) => runCommand(limiter, "del", limiterKeys(limiter));
-const runCommand = (limiter, command, args) =>
-  limiter._store.connection.__runCommand__([command, ...args]);
-const runningOrExecuting = (limiter) => {
+type Limiter = BottleneckBase;
+const limiterKeys = (limiter: Limiter): any[] =>
+  Scripts.allKeys((limiter._store as any).originalId);
+const countKeys = (limiter: Limiter) => runCommand(limiter, "exists", limiterKeys(limiter));
+const deleteKeys = (limiter: Limiter) => runCommand(limiter, "del", limiterKeys(limiter));
+const runCommand = (limiter: Limiter, command: string, args: string[]) =>
+  (limiter._store as any).connection.__runCommand__([command, ...args]);
+const runningOrExecuting = (limiter: Limiter) => {
   const counts = limiter.counts();
   return counts.RUNNING + counts.EXECUTING;
 };
@@ -21,12 +24,12 @@ const runningOrExecuting = (limiter) => {
 const SETTINGS_KEY_NOT_FOUND = /^(.*\s)?SETTINGS_KEY_NOT_FOUND$/;
 const UNKNOWN_CLIENT = /^(.*\s)?UNKNOWN_CLIENT$/;
 
-async function captureFirstScriptError(limiter, trigger) {
-  const connection = limiter._store.connection;
+async function captureFirstScriptError(limiter: Limiter, trigger: () => unknown) {
+  const connection = (limiter._store as any).connection;
   const original = connection.__runScript__.bind(connection);
-  let captured;
+  let captured: any;
 
-  connection.__runScript__ = async (name, id, args) => {
+  connection.__runScript__ = async (name: string, id: string, args: unknown[]) => {
     try {
       return await original(name, id, args);
     } catch (e) {
@@ -49,9 +52,9 @@ async function captureFirstScriptError(limiter, trigger) {
  * datastore when a capacity grant targets that client — in firing order.
  * Each limiter is tagged with its 1-based argument position.
  */
-function captureCapacityPriorityTargets(...limiters) {
-  const targeted = [];
-  limiters.forEach((limiter, i) => {
+function captureCapacityPriorityTargets(...limiters: Limiter[]) {
+  const targeted: number[] = [];
+  limiters.forEach((limiter: Limiter, i: number) => {
     limiter.on("capacity-priority", () => targeted.push(i + 1));
   });
   return targeted;
@@ -364,7 +367,7 @@ describe("Cluster coordination", () => {
       minTime: 100,
       id: "nope",
     });
-    const received = [];
+    const received: any[] = [];
 
     rootLimiter.on("message", (msg) => {
       received.push(1, msg);
@@ -378,7 +381,7 @@ describe("Cluster coordination", () => {
 
     await Promise.all([rootLimiter.ready(), limiter1.ready(), limiter2.ready()]);
 
-    limiter1.publish(555);
+    limiter1.publish(555 as unknown as string);
     await waitForState(() => {
       expect(received.length).toBeGreaterThanOrEqual(4);
     });
@@ -396,9 +399,9 @@ describe("Cluster coordination", () => {
       minTime: 100,
       datastore: process.env.DATASTORE,
     });
-    const received = [];
+    const received: any[] = [];
 
-    await new Promise((resolve, _reject) => {
+    await new Promise<void>((resolve, _reject) => {
       const limiter = group.key("A");
 
       limiter.on("message", (msg) => {
@@ -408,7 +411,7 @@ describe("Cluster coordination", () => {
       limiter.publish("Bonjour!");
     });
 
-    await new Promise((resolve, _reject) => {
+    await new Promise<void>((resolve, _reject) => {
       const limiter = group.key("B");
 
       limiter.on("message", (msg) => {
@@ -420,7 +423,7 @@ describe("Cluster coordination", () => {
 
     await group.deleteKey("A");
 
-    await new Promise((resolve, _reject) => {
+    await new Promise<void>((resolve, _reject) => {
       const limiter = group.key("A");
 
       limiter.on("message", (msg) => {
@@ -460,8 +463,8 @@ describe("Cluster coordination", () => {
     });
 
     const t0 = Date.now();
-    const results = {};
-    const job = (x) => {
+    const results: Record<string, number> = {};
+    const job = (x: string) => {
       results[x] = Date.now() - t0;
       return Promise.resolve();
     };
@@ -503,17 +506,17 @@ describe("Cluster coordination", () => {
     // minTime assertions live in the simpler priority/general-traffic
     // tests where we control the event loop directly.
     expect(Object.keys(results).length).toEqual(6);
-    expect(results.a).toBeLessThanOrEqual(results.b);
-    expect(results.b).toBeLessThanOrEqual(results.c);
-    expect(results.d).toBeLessThanOrEqual(results.e);
+    expect(results.a!).toBeLessThanOrEqual(results.b!);
+    expect(results.b!).toBeLessThanOrEqual(results.c!);
+    expect(results.d!).toBeLessThanOrEqual(results.e!);
 
     // Different limiters in the same group should dispatch in parallel
     // (no shared minTime/maxConcurrent). Tolerate dispatch jitter —
     // simultaneous dispatches across separate limiters drift slightly
     // under load even though the intended behavior is "fire together".
-    expect(Math.abs(results.a - results.d)).toBeLessThanOrEqual(100);
-    expect(Math.abs(results.d - results.f)).toBeLessThanOrEqual(100);
-    expect(Math.abs(results.b - results.e)).toBeLessThanOrEqual(100);
+    expect(Math.abs(results.a! - results.d!)).toBeLessThanOrEqual(100);
+    expect(Math.abs(results.d! - results.f!)).toBeLessThanOrEqual(100);
+    expect(Math.abs(results.b! - results.e!)).toBeLessThanOrEqual(100);
 
     // Poll for autocleanup AND the underlying disconnect to settle.
     // group.deleteKey removes from instances synchronously but awaits
@@ -521,7 +524,7 @@ describe("Cluster coordination", () => {
     // need to be flushed before the assertions below.
     await waitForState(() => {
       expect(group.keys().length).toBe(0);
-      expect(Object.keys(group.connection.limiters).length).toBe(0);
+      expect(Object.keys((group.connection as any).limiters).length).toBe(0);
     });
 
     const countsAfterCleanup = await Promise.all([
@@ -531,7 +534,7 @@ describe("Cluster coordination", () => {
     ]);
     expect(countsAfterCleanup).toEqual([0, 0, 0]);
     expect(group.keys().length).toEqual(0);
-    expect(Object.keys(group.connection.limiters).length).toEqual(0);
+    expect(Object.keys((group.connection as any).limiters).length).toEqual(0);
   });
 
   test("Should not recreate a key when running heartbeat", async ({ harness: h, makeGroup }) => {
@@ -769,7 +772,7 @@ describe("Cluster coordination", () => {
     //   - Per-limiter FIFO: 4 before 6 (limiter3), 5 before 7 (limiter4) —
     //     each client drains its own queue in order no matter which slots
     //     it wins.
-    const calls = h.results().calls.map((call) => call.result[0]);
+    const calls = h.results().calls.map((call) => (call.result as any)[0]);
     expect(calls.length).toEqual(11);
     expect(calls.slice(0, 5)).toEqual(["A", "B", "C", "D", 1]);
     expect(calls.slice(5, 9).sort()).toEqual([4, 5, 6, 7]);
@@ -840,7 +843,7 @@ describe("Cluster coordination", () => {
     // capacity-priority tiebreak is covered at the broadcast level below.
     // What is guaranteed: warm-ups + [1] first, all three 50ms jobs ran
     // before the 550ms job, and limiter4's own FIFO ([4] before [5]).
-    const calls = h.results().calls.map((call) => call.result[0]);
+    const calls = h.results().calls.map((call) => (call.result as any)[0]);
     expect(calls.length).toEqual(9);
     expect(calls.slice(0, 5)).toEqual(["A", "B", "C", "D", 1]);
     expect(calls.slice(5, 8).sort()).toEqual([3, 4, 5]);

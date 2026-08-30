@@ -1,8 +1,8 @@
 import { describe, expect } from "vitest";
 import sleep from "../src/sleep";
-import Bottleneck from "./bottleneck.mjs";
-import { useFakeClock } from "./helpers/clock.js";
-import { test } from "./helpers/test-api.js";
+import Bottleneck from "./bottleneck";
+import { useFakeClock } from "./helpers/clock";
+import { test } from "./helpers/test-api";
 
 // Batcher is datastore-independent, so this file only runs in the `local`
 // project (excluded from the redis projects in vitest.config.mts) and always
@@ -12,8 +12,8 @@ useFakeClock();
 describe("Batcher", () => {
   test("Should batch by time and size", async () => {
     const batcher = new Bottleneck.Batcher({ maxTime: 100, maxSize: 3 });
-    const batches = [];
-    const batchTimes = [];
+    const batches: number[][] = [];
+    const batchTimes: number[] = [];
 
     batcher.on("batch", (groups) => {
       batchTimes.push(Date.now());
@@ -27,14 +27,14 @@ describe("Batcher", () => {
       [1, 2, 3],
       [4, 5],
     ]);
-    expect(batchTimes[0] - t0).toBe(0);
-    expect(batchTimes[1] - batchTimes[0]).toBe(100);
+    expect(batchTimes[0]! - t0).toBe(0);
+    expect(batchTimes[1]! - batchTimes[0]!).toBe(100);
   });
 
   test("Should batch by time", async () => {
     const batcher = new Bottleneck.Batcher({ maxTime: 100 });
-    const batches = [];
-    const batchTimes = [];
+    const batches: number[][] = [];
+    const batchTimes: number[] = [];
 
     batcher.on("batch", (groups) => {
       batchTimes.push(Date.now());
@@ -45,7 +45,7 @@ describe("Batcher", () => {
     await Promise.all([batcher.add(1), batcher.add(2)]);
 
     expect(batches).toStrictEqual([[1, 2]]);
-    expect(batchTimes[0] - t0).toBe(100);
+    expect(batchTimes[0]! - t0).toBe(100);
 
     const t1 = Date.now();
     await Promise.all([batcher.add(3), batcher.add(4)]);
@@ -54,12 +54,12 @@ describe("Batcher", () => {
       [1, 2],
       [3, 4],
     ]);
-    expect(batchTimes[1] - t1).toBe(100);
+    expect(batchTimes[1]! - t1).toBe(100);
   });
 
   test("Should batch by size", async () => {
     const batcher = new Bottleneck.Batcher({ maxSize: 2 });
-    const batches = [];
+    const batches: number[][] = [];
 
     batcher.on("batch", (groups) => {
       batches.push(groups);
@@ -77,8 +77,8 @@ describe("Batcher", () => {
 
   test("Should stagger flushes", async () => {
     const batcher = new Bottleneck.Batcher({ maxTime: 100, maxSize: 3 });
-    const batches = [];
-    const batchTimes = [];
+    const batches: number[][] = [];
+    const batchTimes: number[] = [];
 
     batcher.on("batch", (groups) => {
       batchTimes.push(Date.now());
@@ -92,13 +92,13 @@ describe("Batcher", () => {
     await Promise.all([p1, p2]);
 
     expect(batches).toStrictEqual([[1, 2]]);
-    expect(batchTimes[0] - t0).toBe(100);
+    expect(batchTimes[0]! - t0).toBe(100);
   });
 
   test("Should force then stagger flushes", async () => {
     const batcher = new Bottleneck.Batcher({ maxTime: 100, maxSize: 3 });
-    const batches = [];
-    const batchTimes = [];
+    const batches: number[][] = [];
+    const batchTimes: number[] = [];
 
     batcher.on("batch", (groups) => {
       batchTimes.push(Date.now());
@@ -108,7 +108,7 @@ describe("Batcher", () => {
     const t0 = Date.now();
     await Promise.all([batcher.add(1), batcher.add(2), batcher.add(3)]);
     expect(batches).toStrictEqual([[1, 2, 3]]);
-    expect(batchTimes[0] - t0).toBe(0);
+    expect(batchTimes[0]! - t0).toBe(0);
 
     const t1 = Date.now();
     const p4 = batcher.add(4);
@@ -120,7 +120,7 @@ describe("Batcher", () => {
       [1, 2, 3],
       [4, 5],
     ]);
-    expect(batchTimes[1] - t1).toBe(100);
+    expect(batchTimes[1]! - t1).toBe(100);
   });
 
   test("Should default to no time/size limits when constructed without options", () => {

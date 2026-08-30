@@ -61,7 +61,7 @@
     "build:light": "tsdown --filter light",
     "format": "oxfmt",
     "format:check": "oxfmt --check",
-    "lint": "oxlint --quiet",
+    "lint": "oxlint",
     "lint:fix": "oxlint --fix",
     "prepare": "husky",
     "prepublishOnly": "pnpm run build && tsc",

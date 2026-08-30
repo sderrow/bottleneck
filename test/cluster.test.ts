@@ -1,7 +1,9 @@
 import { describe, expect } from "vitest";
+import type BottleneckBase from "../src/Bottleneck";
+import type { JobOptions } from "../src/types";
 import * as Scripts from "../src/cluster/Scripts";
 import sleep from "../src/sleep";
-import { test, waitForState, deferred, enqueued } from "./helpers/test-api.js";
+import { test, waitForState, deferred, enqueued } from "./helpers/test-api";
 const assert = require("assert");
 
 // Causality policy (Workstream B): observe product-timer effects via waitForState
@@ -9,10 +11,13 @@ const assert = require("assert");
 // Job duration is never an assertion; use deferredJob/deferredPromise with explicit
 // release. "Must NOT happen" uses bounded sleeps only after positive preconditions.
 
-const limiterKeys = (limiter) => Scripts.allKeys(limiter._store.originalId);
-const runCommand = (limiter, command, args) =>
-  limiter._store.connection.__runCommand__([command, ...args]);
-const sumWeights = (weights) => Object.keys(weights).reduce((acc, x) => acc + ~~weights[x], 0);
+type Limiter = BottleneckBase;
+const limiterKeys = (limiter: Limiter): any[] =>
+  Scripts.allKeys((limiter._store as any).originalId);
+const runCommand = (limiter: Limiter, command: string, args: string[]) =>
+  (limiter._store as any).connection.__runCommand__([command, ...args]);
+const sumWeights = (weights: Record<string, any>) =>
+  Object.keys(weights).reduce((acc: number, x: string) => acc + ~~weights[x], 0);
 
 describe("Cluster-only", () => {
   if (process.env.DATASTORE !== "redis" && process.env.DATASTORE !== "ioredis") {
@@ -31,7 +36,7 @@ describe("Cluster-only", () => {
     const rootLimiter = makeLimiter({ maxConcurrent: 2 });
 
     const clients = await rootLimiter.ready();
-    expect(Object.keys(clients)).toEqual(["client", "subscriber"]);
+    expect(Object.keys(clients as Record<string, unknown>)).toEqual(["client", "subscriber"]);
     expect(Object.keys(rootLimiter.clients())).toEqual(["client", "subscriber"]);
   });
 
@@ -48,14 +53,14 @@ describe("Cluster-only", () => {
     makeLimiter,
   }) => {
     const rootLimiter = makeLimiter();
-    rootLimiter.connection.id = "some-id";
+    (rootLimiter.connection as any).id = "some-id";
     const limiter = makeLimiter({
       minTime: 50,
       connection: rootLimiter.connection,
     });
 
     await Promise.all([rootLimiter.ready(), limiter.ready()]);
-    expect(limiter.connection.id).toEqual("some-id");
+    expect((limiter.connection as any).id).toEqual("some-id");
     expect(limiter.datastore).toEqual(process.env.DATASTORE);
 
     await Promise.all([
@@ -72,7 +77,7 @@ describe("Cluster-only", () => {
     makeGroup,
   }) => {
     const rootLimiter = makeLimiter();
-    rootLimiter.connection.id = "some-id";
+    (rootLimiter.connection as any).id = "some-id";
     const group = makeGroup({
       minTime: 50,
       connection: rootLimiter.connection,
@@ -81,8 +86,8 @@ describe("Cluster-only", () => {
     const limiter2 = group.key("B");
 
     await Promise.all([rootLimiter.ready(), limiter1.ready(), limiter2.ready()]);
-    expect(limiter1.connection.id).toEqual("some-id");
-    expect(limiter2.connection.id).toEqual("some-id");
+    expect((limiter1.connection as any).id).toEqual("some-id");
+    expect((limiter2.connection as any).id).toEqual("some-id");
     expect(limiter1.datastore).toEqual(process.env.DATASTORE);
     expect(limiter2.datastore).toEqual(process.env.DATASTORE);
 
@@ -106,7 +111,7 @@ describe("Cluster-only", () => {
       datastore: process.env.DATASTORE,
       clearDatastore: true,
     });
-    group.connection.id = "some-id";
+    (group.connection as any).id = "some-id";
 
     const limiter1 = group.key("A");
     const limiter2 = makeLimiter({
@@ -115,8 +120,8 @@ describe("Cluster-only", () => {
     });
 
     await Promise.all([limiter1.ready(), limiter2.ready()]);
-    expect(limiter1.connection.id).toEqual("some-id");
-    expect(limiter2.connection.id).toEqual("some-id");
+    expect((limiter1.connection as any).id).toEqual("some-id");
+    expect((limiter2.connection as any).id).toEqual("some-id");
     expect(limiter1.datastore).toEqual(process.env.DATASTORE);
     expect(limiter2.datastore).toEqual(process.env.DATASTORE);
 
@@ -139,7 +144,7 @@ describe("Cluster-only", () => {
       datastore: process.env.DATASTORE,
       clearDatastore: true,
     });
-    group1.connection.id = "some-id";
+    (group1.connection as any).id = "some-id";
 
     const group2 = makeGroup({
       minTime: 50,
@@ -153,12 +158,12 @@ describe("Cluster-only", () => {
     const limiter4 = group1.key("DDD");
 
     await Promise.all([limiter1.ready(), limiter2.ready(), limiter3.ready(), limiter4.ready()]);
-    expect(group1.connection.id).toEqual("some-id");
-    expect(group2.connection.id).toEqual("some-id");
-    expect(limiter1.connection.id).toEqual("some-id");
-    expect(limiter2.connection.id).toEqual("some-id");
-    expect(limiter3.connection.id).toEqual("some-id");
-    expect(limiter4.connection.id).toEqual("some-id");
+    expect((group1.connection as any).id).toEqual("some-id");
+    expect((group2.connection as any).id).toEqual("some-id");
+    expect((limiter1.connection as any).id).toEqual("some-id");
+    expect((limiter2.connection as any).id).toEqual("some-id");
+    expect((limiter3.connection as any).id).toEqual("some-id");
+    expect((limiter4.connection as any).id).toEqual("some-id");
     expect(limiter1.datastore).toEqual(process.env.DATASTORE);
     expect(limiter2.datastore).toEqual(process.env.DATASTORE);
     expect(limiter3.datastore).toEqual(process.env.DATASTORE);
@@ -329,7 +334,7 @@ describe("Cluster-only", () => {
       "lastReservoirIncrease",
     ]);
     const timestamps = values.slice(-2);
-    timestamps.forEach((t) => {
+    timestamps.forEach((t: string) => {
       const num = parseInt(t);
       expect(num).toBeGreaterThanOrEqual(testStart); // timestamp written during this test
       expect(num).toBeLessThanOrEqual(Date.now()); // not somehow in the future
@@ -366,12 +371,18 @@ describe("Cluster-only", () => {
 
     const job0 = deferred();
 
-    const p0 = rootLimiter.schedule({ id: 0 }, h.deferredPromise, job0.signal, null, 0);
+    const p0 = rootLimiter.schedule(
+      { id: 0 } as unknown as JobOptions,
+      h.deferredPromise,
+      job0.signal,
+      null,
+      0,
+    );
     await enqueued(rootLimiter);
 
-    const p1 = rootLimiter.schedule({ id: 1 }, h.promise, null, 1);
-    const p2 = rootLimiter.schedule({ id: 2 }, h.promise, null, 2);
-    const p3 = limiter2.schedule({ id: 3 }, h.promise, null, 3);
+    const p1 = rootLimiter.schedule({ id: 1 } as unknown as JobOptions, h.promise, null, 1);
+    const p2 = rootLimiter.schedule({ id: 2 } as unknown as JobOptions, h.promise, null, 2);
+    const p3 = limiter2.schedule({ id: 3 } as unknown as JobOptions, h.promise, null, 3);
 
     await Promise.all([enqueued(rootLimiter), enqueued(limiter2)]);
 
@@ -414,13 +425,25 @@ describe("Cluster-only", () => {
     // original ~200ms total duration so capacity-published-to-limiter2
     // semantics are still exercised end-to-end).
     const jobs = deferred();
-    rootLimiter.schedule({ id: 1 }, h.deferredPromise, jobs.signal, null, 1);
-    rootLimiter.schedule({ id: 2 }, h.deferredPromise, jobs.signal, null, 2);
+    rootLimiter.schedule(
+      { id: 1 } as unknown as JobOptions,
+      h.deferredPromise,
+      jobs.signal,
+      null,
+      1,
+    );
+    rootLimiter.schedule(
+      { id: 2 } as unknown as JobOptions,
+      h.deferredPromise,
+      jobs.signal,
+      null,
+      2,
+    );
 
-    await rootLimiter.schedule({ id: 0, weight: 0 }, h.promise, null, 0);
+    await rootLimiter.schedule({ id: 0, weight: 0 } as unknown as JobOptions, h.promise, null, 0);
     await enqueued(rootLimiter);
     expect(rootLimiter.counts().EXECUTING).toEqual(2);
-    const p3 = limiter2.schedule({ id: 3 }, h.promise, null, 3);
+    const p3 = limiter2.schedule({ id: 3 } as unknown as JobOptions, h.promise, null, 3);
     // Drain limiter2's lock — job 3 was submitted on limiter2, so only
     // its own enqueued() barrier guarantees the registration reached redis.
     await enqueued(limiter2);
@@ -445,13 +468,25 @@ describe("Cluster-only", () => {
     await limiter2.ready();
 
     const held = deferred();
-    rootLimiter.schedule({ id: 1 }, h.deferredPromise, held.signal, null, 1);
-    rootLimiter.schedule({ id: 2 }, h.deferredPromise, held.signal, null, 2);
+    rootLimiter.schedule(
+      { id: 1 } as unknown as JobOptions,
+      h.deferredPromise,
+      held.signal,
+      null,
+      1,
+    );
+    rootLimiter.schedule(
+      { id: 2 } as unknown as JobOptions,
+      h.deferredPromise,
+      held.signal,
+      null,
+      2,
+    );
 
-    await rootLimiter.schedule({ id: 0, weight: 0 }, h.promise, null, 0);
+    await rootLimiter.schedule({ id: 0, weight: 0 } as unknown as JobOptions, h.promise, null, 0);
     const drainedReservoir = await rootLimiter.currentReservoir();
     expect(drainedReservoir).toEqual(0);
-    const p3 = limiter2.schedule({ id: 3, weight: 2 }, h.promise, null, 3);
+    const p3 = limiter2.schedule({ id: 3, weight: 2 } as unknown as JobOptions, h.promise, null, 3);
     await rootLimiter.updateSettings({ reservoir: 1 });
     const incrementedReservoir = await rootLimiter.incrementReservoir(1);
     expect(incrementedReservoir).toEqual(2);
@@ -475,7 +510,7 @@ describe("Cluster-only", () => {
       id: "lost",
       heartbeatInterval: 150,
     });
-    const getData = (limiter) => {
+    const getData = (limiter: Limiter) => {
       expect(limiterKeys(limiter).length).toEqual(8); // Asserting, to remember to edit this test when keys change
       const [
         settings_key,
@@ -501,7 +536,7 @@ describe("Cluster-only", () => {
     };
     const job1 = deferred();
     let numExpirations = 0;
-    const errorHandler = (err) => {
+    const errorHandler = (err: any) => {
       if (err.message.indexOf("This job timed out") === 0) {
         numExpirations++;
       }
@@ -563,7 +598,7 @@ describe("Cluster-only", () => {
     expect(sumWeights(job_weights)).toEqual(1);
     expect(job_expirations).toEqual(0);
     expect(job_clients.length).toEqual(1);
-    job_clients.forEach((id) => expect(id).toEqual(clientId));
+    job_clients.forEach((id: string) => expect(id).toEqual(clientId));
     expect(sumWeights(client_running)).toEqual(1);
     expect(client_num_queued).toEqual(["0", "0"]);
     expect(client_last_registered[1]).toEqual("0");
@@ -732,7 +767,7 @@ describe("Cluster-only", () => {
     try {
       await job;
     } catch (e) {
-      if (e.message === "This job timed out after 250 ms.") {
+      if ((e as Error).message === "This job timed out after 250 ms.") {
         dropped = true;
       } else {
         throw e;
@@ -817,7 +852,7 @@ describe("Cluster-only", () => {
         : { port: 1 };
     const rootLimiter = makeLimiter({ clientOptions: failingOptions }, { expectErrors: true });
 
-    return new Promise((resolve, reject) => {
+    return new Promise<void>((resolve, reject) => {
       rootLimiter.on("error", (err) => {
         expect(err).toBeTruthy();
         resolve();
@@ -851,11 +886,13 @@ describe("Cluster-only", () => {
   }) => {
     const limiter = makeLimiter({ maxConcurrent: 2 });
     await limiter.ready();
-    const store = limiter._store;
-    const published = [];
-    store.clients.client = { publish: async (ch, msg) => published.push([ch, msg]) };
+    const store = limiter._store as any;
+    const published: any[] = [];
+    store.clients.client = {
+      publish: async (ch: string, msg: string) => published.push([ch, msg]),
+    };
 
-    const capacities = [];
+    const capacities: (number | undefined)[] = [];
     limiter.on("capacity-priority", (capacity) => capacities.push(capacity));
 
     await store.onMessage(limiter.channel(), `capacity-priority:5:${store.clientId}:0`);
@@ -874,7 +911,7 @@ describe("Cluster-only", () => {
   }) => {
     const limiter = makeLimiter({ maxConcurrent: 2 });
     await limiter.ready();
-    const store = limiter._store;
+    const store = limiter._store as any;
 
     // No timeout should be scheduled, and the drain must run to completion.
     await store.onMessage(limiter.channel(), "capacity-priority:5::0");
@@ -884,8 +921,8 @@ describe("Cluster-only", () => {
   test("Should surface onMessage errors unless disconnecting", async ({ makeLimiter }) => {
     const limiter = makeLimiter({ maxConcurrent: 2 }, { expectErrors: true });
     await limiter.ready();
-    const store = limiter._store;
-    const errors = [];
+    const store = limiter._store as any;
+    const errors: any[] = [];
     limiter.on("error", (e) => errors.push(e));
 
     store.instance._drainAll = async () => {
@@ -905,8 +942,8 @@ describe("Cluster-only", () => {
       { expectErrors: true },
     );
     await limiter.ready();
-    const store = limiter._store;
-    const errors = [];
+    const store = limiter._store as any;
+    const errors: any[] = [];
     limiter.on("error", (e) => errors.push(e));
 
     const originalRunScript = store.runScript.bind(store);
@@ -930,7 +967,7 @@ describe("Cluster-only", () => {
   }) => {
     const limiter = makeLimiter({ maxConcurrent: 2 });
     await limiter.ready();
-    const store = limiter._store;
+    const store = limiter._store as any;
 
     await store.onMessage(limiter.channel(), "capacity-priority:5:some-other-client:0");
     expect(Object.keys(store.capacityPriorityCounters)).toEqual(["0"]);
@@ -944,7 +981,7 @@ describe("Cluster-only", () => {
   test("Should rethrow non-OVERWEIGHT submit errors", async ({ makeLimiter }) => {
     const limiter = makeLimiter({ maxConcurrent: 2 });
     await limiter.ready();
-    limiter._store.runScript = async () => {
+    (limiter._store as any).runScript = async () => {
       throw new Error("redis exploded");
     };
 

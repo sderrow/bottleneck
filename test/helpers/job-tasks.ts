@@ -8,20 +8,20 @@ import sleep from "../../src/sleep";
  *   ...observe held state...
  *   d.release();
  */
-export function deferred() {
-  let release;
-  const signal = new Promise((resolve) => {
+export function deferred(): { signal: Promise<unknown>; release: () => void } {
+  let release: (() => void) | undefined;
+  const signal = new Promise<void>((resolve) => {
     release = resolve;
   });
-  return { signal, release };
+  return { signal, release: release as () => void };
 }
 
 /**
  * Bottleneck task functions that record into `log.record(err, result)`.
  * Expects a `log` with a `record(err, result)` method.
  */
-export function createTaskFns(log) {
-  async function promise(err, ...result) {
+export function createTaskFns(log: { record: (err: unknown, result: unknown) => void }) {
+  async function promise(err: unknown, ...result: unknown[]) {
     log.record(err, result);
     if (err === null) {
       return result;
@@ -29,7 +29,7 @@ export function createTaskFns(log) {
     throw err;
   }
 
-  async function slowPromise(duration, err, ...result) {
+  async function slowPromise(duration: number, err: unknown, ...result: unknown[]) {
     await sleep(duration);
     log.record(err, result);
     if (err === null) {
@@ -38,7 +38,7 @@ export function createTaskFns(log) {
     throw err;
   }
 
-  async function deferredPromise(signal, err, ...result) {
+  async function deferredPromise(signal: Promise<unknown>, err: unknown, ...result: unknown[]) {
     await signal;
     log.record(err, result);
     if (err === null) {

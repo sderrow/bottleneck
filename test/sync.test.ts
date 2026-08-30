@@ -4,7 +4,7 @@ import Sync from "../src/Sync";
 describe("Sync", () => {
   test("A rejected task rejects its caller and does not block the queue", async () => {
     const sync = new Sync("test");
-    const ran = [];
+    const ran: string[] = [];
 
     const failing = sync.schedule(() => Promise.reject(new Error("task failed")));
     const following = sync.schedule(async () => {

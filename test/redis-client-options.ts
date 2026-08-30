@@ -24,7 +24,7 @@
 // timing-sensitive tests in `priority.test.js` and `general-traffic.test.js`).
 // Tests with a 500 ms upper bound that previously fit inside the heartbeat
 // budget have been widened slightly to absorb a single timeout+retry cycle.
-export default function buildClientOptions(datastore) {
+export default function buildClientOptions(datastore: string): Record<string, unknown> {
   const host = process.env.REDIS_HOST;
   const port = process.env.REDIS_PORT;
   if (datastore === "redis") {
@@ -33,7 +33,7 @@ export default function buildClientOptions(datastore) {
         host,
         port: port ? Number(port) : undefined,
         connectTimeout: 500,
-        reconnectStrategy: (retries) => Math.min(retries * 50, 500),
+        reconnectStrategy: (retries: number) => Math.min(retries * 50, 500),
       },
     };
   }
@@ -41,6 +41,6 @@ export default function buildClientOptions(datastore) {
     host,
     port: port ? Number(port) : undefined,
     connectTimeout: 500,
-    retryStrategy: (times) => Math.min(times * 50, 500),
+    retryStrategy: (times: number) => Math.min(times * 50, 500),
   };
 }

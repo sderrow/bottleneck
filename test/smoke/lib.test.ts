@@ -18,10 +18,20 @@
 // `lib-smoke` project's globalSetup builds the lib bundle before any
 // test file is collected.
 
+import { createRequire } from "node:module";
 import { describe, it, expect } from "vitest";
-import Bottleneck from "../bottleneck.mjs";
+import Bottleneck from "../bottleneck";
 
 describe("dist/index full smoke", () => {
+  it("exposes .default on the CJS build for non-interop consumers", () => {
+    // The CJS build sets `module.exports = Bottleneck`; TypeScript compiled
+    // to CommonJS without `esModuleInterop` reads the default import via
+    // `.default`, so the class must reference itself there.
+    const require = createRequire(import.meta.url);
+    const Cjs = require("../../dist/index.cjs") as typeof Bottleneck;
+    expect(typeof Cjs).toBe("function");
+    expect(Cjs.default).toBe(Cjs);
+  });
   it("loads", () => {
     expect(Bottleneck).toBeDefined();
     expect(typeof Bottleneck).toBe("function");
@@ -51,7 +61,7 @@ describe("dist/index full smoke", () => {
     });
     try {
       const clients = await limiter.ready();
-      expect(Object.keys(clients)).toEqual(["client", "subscriber"]);
+      expect(Object.keys(clients as Record<string, unknown>)).toEqual(["client", "subscriber"]);
 
       const result = await limiter.schedule(() => "ok");
       expect(result).toBe("ok");

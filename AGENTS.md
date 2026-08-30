@@ -35,7 +35,7 @@ only makes the race rarer. Replace the race with an ordering guarantee:
   anything, so queue contents at the first capacity event don't depend on
   round-trip ordering.
 - **Observe transient states inside their transition events, not by polling.**
-  In src/Job.js every lifecycle method transitions state BEFORE triggering its
+  In src/Job.ts every lifecycle method transitions state BEFORE triggering its
   event, and `doExecute` is timer-gated — so a state read inside the job's own
   handler is guaranteed, while a polled window (e.g. RUNNING) that a late
   register can skip entirely (`wait = max(nextRequest - now, 0)`) is
@@ -72,7 +72,7 @@ keep the per-run file around until the work is done.
   `Failed Tests` blocks, not memory or scrollback. Single-file reruns usually
   pass because event-loop congestion is part of the failure.
 
-Canonical examples: test/priority.test.js, test/general.test.js ("Counts and
-statuses"), test/stop.test.js (incl. the DATASTORE-gated scheduled-job drop),
-test/cluster-coordination.test.js (causality policy at top of file),
-test/cluster.test.js ("missed intervals" — measured bounds).
+Canonical examples: test/priority.test.ts, test/general.test.ts ("Counts and
+statuses"), test/stop.test.ts (incl. the DATASTORE-gated scheduled-job drop),
+test/cluster-coordination.test.ts (causality policy at top of file),
+test/cluster.test.ts ("missed intervals" — measured bounds).

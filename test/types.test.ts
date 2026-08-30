@@ -1,4 +1,4 @@
-import { describe, expectTypeOf, it } from "vitest";
+import { describe, expect, expectTypeOf, it } from "vitest";
 import type {
   BatcherOptions,
   ClientsList,
@@ -9,13 +9,26 @@ import type {
   Status,
   StopOptions,
 } from "../src/types";
-import Bottleneck from "../src/index";
+import Bottleneck, {
+  Batcher,
+  BottleneckError,
+  Group,
+  IORedisConnection,
+  RedisConnection,
+} from "../src/index";
 
 /*
  * Type-level contract test for the published surface. The generated dts
  * (dist/index.d.mts / dist/index.d.cts) is produced from these same source
  * types, so asserting on them here guards the published type contract.
  */
+
+const makeFakeRedisClient = () => ({
+  setMaxListeners() {},
+  on() {},
+  once() {},
+  duplicate: () => makeFakeRedisClient(),
+});
 
 describe("Bottleneck type contract", () => {
   it("exposes the strategy constants as literal types", () => {
@@ -25,7 +38,21 @@ describe("Bottleneck type contract", () => {
     expectTypeOf(Bottleneck.strategy.OVERFLOW_PRIORITY).toEqualTypeOf<4>();
   });
 
-  it("accepts ConstructorOptions", () => {
+  it("exposes helper classes as named exports matching the statics", () => {
+    expect(BottleneckError).toBe(Bottleneck.BottleneckError);
+    expect(Group).toBe(Bottleneck.Group);
+    expect(Batcher).toBe(Bottleneck.Batcher);
+    expect(RedisConnection).toBe(Bottleneck.RedisConnection);
+    expect(IORedisConnection).toBe(Bottleneck.IORedisConnection);
+  });
+
+  it("exposes itself as .default for CJS interop", () => {
+    // The CJS build sets `module.exports = Bottleneck`, so `require()` callers
+    // without esModuleInterop read the class via `.default`.
+    expect(Bottleneck.default).toBe(Bottleneck);
+  });
+
+  it("accepts BottleneckOptions", () => {
     const limiter = new Bottleneck({ maxConcurrent: 2, minTime: 100, id: "l" });
     expectTypeOf(limiter).toExtend<Bottleneck>();
   });
@@ -114,6 +141,37 @@ describe("Bottleneck type contract", () => {
     const limiter = new Bottleneck();
     expectTypeOf(limiter.clients()).toEqualTypeOf<ClientsList>();
     expectTypeOf(limiter.channel()).toEqualTypeOf<string>();
+  });
+
+  it("rejects connection options with both Redis and client", () => {
+    // Minimal stand-ins: the constructor runs for real (ready() stays pending
+    // because these fakes never emit "ready"), the assertions here are
+    // compile-time. They must satisfy _setup's synchronous calls.
+    const nodeRedisFake = {
+      createClient: makeFakeRedisClient,
+    };
+    const clientFake = makeFakeRedisClient();
+    class IORedisFake {
+      setMaxListeners() {}
+      on() {}
+      once() {}
+      duplicate() {
+        return makeFakeRedisClient();
+      }
+    }
+
+    // Valid: either branch alone constructs.
+    void new Bottleneck.RedisConnection({ Redis: nodeRedisFake });
+    void new Bottleneck.RedisConnection({ client: clientFake });
+    void new Bottleneck.IORedisConnection({ Redis: IORedisFake });
+
+    // @ts-expect-error Redis and client are mutually exclusive
+    void new Bottleneck.RedisConnection({ Redis: nodeRedisFake, client: clientFake });
+    // @ts-expect-error ditto for ioredis
+    void new Bottleneck.IORedisConnection({ Redis: IORedisFake, client: clientFake });
+
+    expect(typeof Bottleneck.RedisConnection).toBe("function");
+    expect(typeof Bottleneck.IORedisConnection).toBe("function");
   });
 
   it("keeps option types structural", () => {

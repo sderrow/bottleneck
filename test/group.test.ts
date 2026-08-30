@@ -1,8 +1,8 @@
 import { describe, expect } from "vitest";
 import sleep from "../src/sleep";
-import Bottleneck from "./bottleneck.mjs";
-import { useFakeClock } from "./helpers/clock.js";
-import { test, waitForState } from "./helpers/test-api.js";
+import Bottleneck from "./bottleneck";
+import { useFakeClock } from "./helpers/clock";
+import { test, waitForState } from "./helpers/test-api";
 
 useFakeClock();
 
@@ -19,9 +19,9 @@ describe("Group", () => {
       minTime: 100,
     });
 
-    const results = [];
+    const results: any[][] = [];
 
-    const job = async (...result) => {
+    const job = async (...result: any[]) => {
       results.push(result);
       await sleep(50);
     };
@@ -42,9 +42,9 @@ describe("Group", () => {
     await group.key("A").schedule(async () => {
       expect(results.length).toStrictEqual(6);
 
-      const byGroup = {};
+      const byGroup: Record<string, number[]> = {};
       for (let i = 0; i < results.length; i++) {
-        const v = results[i][0];
+        const v = results[i]![0];
         const key = v === 1 || v === 3 || v === 4 ? "A" : v === 5 ? "B" : "C";
         byGroup[key] = byGroup[key] || [];
         byGroup[key].push(v);
@@ -100,10 +100,10 @@ describe("Group", () => {
       minTime: 100,
     });
 
-    const keys = [];
-    const ids = [];
-    const promises = [];
-    const recordId = async (created, key) => {
+    const keys: string[] = [];
+    const ids: string[] = [];
+    const promises: Promise<void>[] = [];
+    const recordId = async (created: InstanceType<typeof Bottleneck>, key: string) => {
       const lim = await created.updateSettings({ id: key });
       ids.push(lim.id);
     };
@@ -134,9 +134,9 @@ describe("Group", () => {
     });
     expect(Object.keys(group.limiters)).toStrictEqual([]);
 
-    const results = [];
+    const results: any[][] = [];
 
-    const job = async (...result) => {
+    const job = async (...result: any[]) => {
       results.push(result);
       await sleep(50);
     };

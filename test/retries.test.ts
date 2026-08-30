@@ -1,14 +1,14 @@
 import { describe, expect } from "vitest";
-import { useFakeClock, isFakeClock } from "./helpers/clock.js";
-import { test } from "./helpers/test-api.js";
+import { useFakeClock, isFakeClock } from "./helpers/clock";
+import { test } from "./helpers/test-api";
 
 useFakeClock();
 
 const badJob = () => Promise.reject(new Error("boom"));
 
-const assertBackoffs = (attemptTimes, backoffMs) => {
+const assertBackoffs = (attemptTimes: number[], backoffMs: number) => {
   for (let i = 1; i < attemptTimes.length; i++) {
-    const delta = attemptTimes[i] - attemptTimes[i - 1];
+    const delta = attemptTimes[i]! - attemptTimes[i - 1]!;
     if (isFakeClock()) {
       expect(delta).toBe(backoffMs);
     } else {
@@ -22,9 +22,9 @@ describe("Retries", () => {
     const limiter = makeLimiter({ trackDoneStatus: true });
     let failedEvents = 0;
     let retryEvents = 0;
-    const attemptTimes = [];
+    const attemptTimes: number[] = [];
 
-    limiter.on("failed", (error, info) => {
+    limiter.on("failed", (_error, info) => {
       expect(limiter.counts().EXECUTING).toStrictEqual(1);
       expect(info.retryCount).toStrictEqual(failedEvents);
       failedEvents++;
@@ -59,9 +59,9 @@ describe("Retries", () => {
     const limiter = makeLimiter({ trackDoneStatus: true });
     let failedEvents = 0;
     let retryEvents = 0;
-    const attemptTimes = [];
+    const attemptTimes: number[] = [];
 
-    limiter.on("failed", (error, info) => {
+    limiter.on("failed", (_error, info) => {
       expect(limiter.counts().EXECUTING).toStrictEqual(1);
       expect(info.retryCount).toStrictEqual(failedEvents);
       failedEvents++;
@@ -99,7 +99,7 @@ describe("Retries", () => {
     let errorEvents = 0;
     let caught = false;
 
-    limiter.on("failed", (error, info) => {
+    limiter.on("failed", (_error, info) => {
       expect(limiter.counts().EXECUTING).toStrictEqual(1);
       expect(info.retryCount).toStrictEqual(failedEvents);
       failedEvents++;
@@ -110,7 +110,7 @@ describe("Retries", () => {
       retryEvents++;
     });
 
-    limiter.on("error", (error, _info) => {
+    limiter.on("error", (error: any, _info: any) => {
       expect(error.message).toStrictEqual("Nope");
       errorEvents++;
     });
@@ -118,7 +118,7 @@ describe("Retries", () => {
     try {
       await limiter.schedule(badJob);
       throw new Error("Should not reach");
-    } catch (error) {
+    } catch (error: any) {
       expect(error.message).toStrictEqual("boom");
       caught = true;
     }
@@ -137,7 +137,7 @@ describe("Retries", () => {
     let errorEvents = 0;
     let caught = false;
 
-    limiter.on("failed", (error, info) => {
+    limiter.on("failed", (_error, info) => {
       expect(limiter.counts().EXECUTING).toStrictEqual(1);
       expect(info.retryCount).toStrictEqual(failedEvents);
       failedEvents++;
@@ -148,7 +148,7 @@ describe("Retries", () => {
       retryEvents++;
     });
 
-    limiter.on("error", (error, _info) => {
+    limiter.on("error", (error: any, _info: any) => {
       expect(error.message).toStrictEqual("Nope");
       errorEvents++;
     });
@@ -156,7 +156,7 @@ describe("Retries", () => {
     try {
       await limiter.schedule(badJob);
       throw new Error("Should not reach");
-    } catch (error) {
+    } catch (error: any) {
       expect(error.message).toStrictEqual("boom");
       caught = true;
     }
@@ -174,7 +174,7 @@ describe("Retries", () => {
     let retryEvents = 0;
     let caught = false;
 
-    limiter.on("failed", (error, info) => {
+    limiter.on("failed", (_error, info) => {
       expect(limiter.counts().EXECUTING).toStrictEqual(1);
       expect(info.retryCount).toStrictEqual(failedEvents);
       failedEvents++;
@@ -188,7 +188,7 @@ describe("Retries", () => {
     try {
       await limiter.schedule(badJob);
       throw new Error("Should not reach");
-    } catch (error) {
+    } catch (error: any) {
       expect(error.message).toStrictEqual("boom");
       caught = true;
     }
@@ -205,7 +205,7 @@ describe("Retries", () => {
     let retryEvents = 0;
     let caught = false;
 
-    limiter.on("failed", (error, info) => {
+    limiter.on("failed", (_error, info) => {
       expect(limiter.counts().EXECUTING).toStrictEqual(1);
       expect(info.retryCount).toStrictEqual(failedEvents);
       failedEvents++;
@@ -219,7 +219,7 @@ describe("Retries", () => {
     try {
       await limiter.schedule(badJob);
       throw new Error("Should not reach");
-    } catch (error) {
+    } catch (error: any) {
       expect(error.message).toStrictEqual("boom");
       caught = true;
     }
