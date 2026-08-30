@@ -1,7 +1,7 @@
 import { describe, expect } from "vitest";
-import Bottleneck from "./bottleneck.mjs";
-import { useFakeClock, isFakeClock } from "./helpers/clock.js";
-import { test, waitForState, deferred, enqueued } from "./helpers/test-api.js";
+import Bottleneck from "./bottleneck";
+import { useFakeClock, isFakeClock } from "./helpers/clock";
+import { test, waitForState, deferred, enqueued } from "./helpers/test-api";
 
 useFakeClock();
 
@@ -232,7 +232,7 @@ describe("Priority", () => {
     let called = 0;
 
     let p1, p2, p3, p4;
-    const unblocked = new Promise((resolve) => {
+    const unblocked = new Promise<void>((resolve) => {
       const first = deferred();
 
       limiter.on("dropped", (dropped) => {

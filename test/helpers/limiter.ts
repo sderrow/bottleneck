@@ -1,10 +1,12 @@
 import IORedis from "ioredis";
 import { ConnectionTimeoutError, SocketClosedUnexpectedlyError } from "redis";
 import RedisClient from "redis";
-import Bottleneck from "../bottleneck.mjs";
+import type BottleneckBase from "../../src/Bottleneck";
+import type { ConstructorOptions } from "../../src/types";
+import Bottleneck from "../bottleneck";
 import buildClientOptions from "../redis-client-options";
 
-function setRedisClientOptions(options) {
+function setRedisClientOptions(options: Record<string, any>) {
   if (options.clientOptions == null) {
     options.clientOptions = buildClientOptions(options.datastore);
   }
@@ -17,19 +19,22 @@ function setRedisClientOptions(options) {
  * @param {{ expectErrors?: boolean }} [meta] - Test-level flags kept separate from Bottleneck options
  * @returns {import("../../src/Bottleneck").default}
  */
-function makeLimiter(options, meta) {
-  options = Object.assign({}, options);
-  meta = meta || {};
+function makeLimiter(
+  options: Record<string, any> = {},
+  meta: { expectErrors?: boolean } = {},
+): BottleneckBase {
+  const assigned = Object.assign({}, options) as Record<string, any>;
+  options = assigned;
 
   if (options.datastore == null) {
     if (process.env.DATASTORE === "redis") {
-      options.datastore = "redis";
-      options.Redis ??= RedisClient;
+      assigned.datastore = "redis";
+      assigned.Redis ??= RedisClient;
     } else if (process.env.DATASTORE === "ioredis") {
-      options.datastore = "ioredis";
-      options.Redis ??= IORedis;
+      assigned.datastore = "ioredis";
+      assigned.Redis ??= IORedis;
     } else {
-      options.datastore = "local";
+      assigned.datastore = "local";
     }
   }
 
@@ -37,11 +42,12 @@ function makeLimiter(options, meta) {
     setRedisClientOptions(options);
   }
 
-  const limiter = new Bottleneck(options);
+  const limiter = new Bottleneck(options as ConstructorOptions);
 
   if (!meta.expectErrors) {
     limiter.on("error", (err) => {
-      const isIoredisConnectTimeout = err?.code === "ETIMEDOUT" && err?.syscall === "connect";
+      const e = err as { code?: string; syscall?: string };
+      const isIoredisConnectTimeout = e?.code === "ETIMEDOUT" && e?.syscall === "connect";
       const isTransientNodeRedisError =
         err instanceof ConnectionTimeoutError || err instanceof SocketClosedUnexpectedlyError;
       if (isIoredisConnectTimeout || isTransientNodeRedisError) return;

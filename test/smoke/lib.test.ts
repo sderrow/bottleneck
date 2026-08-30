@@ -19,7 +19,7 @@
 // test file is collected.
 
 import { describe, it, expect } from "vitest";
-import Bottleneck from "../bottleneck.mjs";
+import Bottleneck from "../bottleneck";
 
 describe("dist/index full smoke", () => {
   it("loads", () => {
@@ -51,7 +51,7 @@ describe("dist/index full smoke", () => {
     });
     try {
       const clients = await limiter.ready();
-      expect(Object.keys(clients)).toEqual(["client", "subscriber"]);
+      expect(Object.keys(clients as Record<string, unknown>)).toEqual(["client", "subscriber"]);
 
       const result = await limiter.schedule(() => "ok");
       expect(result).toBe("ok");

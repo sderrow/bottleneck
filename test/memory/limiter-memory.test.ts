@@ -1,6 +1,6 @@
 import { describe, it } from "vitest";
 const assert = require("assert");
-import Bottleneck from "../bottleneck.mjs";
+import Bottleneck from "../bottleneck";
 import { iterateAsync } from "../leakage";
 
 describe("Limiter memory", () => {

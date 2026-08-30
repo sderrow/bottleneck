@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import Bottleneck from "../bottleneck.mjs";
+import Bottleneck from "../bottleneck";
 
 describe("dist/light smoke", () => {
   it("loads", () => {

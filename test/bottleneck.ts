@@ -1,4 +1,8 @@
-const resolveEntry = async () => {
+import type BottleneckBase from "../src/Bottleneck";
+
+type BottleneckClass = typeof BottleneckBase;
+
+const resolveEntry = async (): Promise<BottleneckClass> => {
   switch (process.env.BOTTLENECK_ENTRY ?? "source") {
     case "light":
       return (await import("../dist/light.js")).default;
@@ -17,14 +21,14 @@ const Bottleneck = await resolveEntry();
 // child limiters created from a "connection-only" Group inherit the 5000ms
 // production default and produce 5-second flakes (see cluster.test.js:75
 // and similar).
-const isRedisBacked = (options) =>
+const isRedisBacked = (options: Record<string, any> | undefined): options is Record<string, any> =>
   options != null &&
   typeof options === "object" &&
   (options.datastore === "redis" || options.datastore === "ioredis" || options.connection != null);
 
 const usingRedis = process.env.DATASTORE === "redis" || process.env.DATASTORE === "ioredis";
 
-let ExportedBottleneck;
+let ExportedBottleneck!: BottleneckClass;
 
 if (!usingRedis) {
   ExportedBottleneck = Bottleneck;
@@ -57,11 +61,11 @@ if (!usingRedis) {
   // The shape is datastore-specific: ioredis accepts flat { host, port }, but
   // node-redis v4/v5 requires { socket: { host, port } } and silently ignores
   // top-level host/port (defaulting to localhost:6379).
-  const buildClientOptions = (await import("./redis-client-options.js")).default;
+  const buildClientOptions = (await import("./redis-client-options.ts")).default;
 
-  const withRedis = (options) => {
+  const withRedis = (options: Record<string, any> | undefined) => {
     if (!isRedisBacked(options)) return options;
-    const next = { ...options };
+    const next = { ...options } as Record<string, any>;
     // Only inject the Redis library / clientOptions when the test isn't
     // bringing its own pre-built client or connection. Both of those carry
     // their own clientOptions and the Bottleneck constructor would reject
@@ -105,19 +109,19 @@ if (!usingRedis) {
   // `Group.limiters()` returns instances of the real `Bottleneck`, so we override
   // `Symbol.hasInstance` to keep `instanceof` checks in tests behaving as expected.
   class TestBottleneck extends Bottleneck {
-    static [Symbol.hasInstance](instance) {
+    static override [Symbol.hasInstance](instance: unknown) {
       return instance instanceof Bottleneck;
     }
-    constructor(options) {
+    constructor(options?: Record<string, any>) {
       super(withRedis(options));
     }
   }
 
   TestBottleneck.Group = class TestGroup extends Bottleneck.Group {
-    static [Symbol.hasInstance](instance) {
+    static override [Symbol.hasInstance](instance: unknown) {
       return instance instanceof Bottleneck.Group;
     }
-    constructor(options) {
+    constructor(options?: Record<string, any>) {
       super(withRedis(options));
       // Group.key() instantiates child limiters via `this.Bottleneck`, which
       // the parent Group constructor sets to the library's Bottleneck class.

@@ -1,4 +1,4 @@
-import Bottleneck from "../../bottleneck.mjs";
+import Bottleneck from "../../bottleneck.ts";
 
 const now = Date.now();
 const limiter = new Bottleneck({

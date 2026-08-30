@@ -2,11 +2,11 @@ import { describe, expect } from "vitest";
 import Events from "../src/Events";
 import Job from "../src/Job";
 import States from "../src/States";
-import { test } from "./helpers/test-api.js";
+import { test } from "./helpers/test-api";
 
 const jobDefaults = { priority: 5, weight: 1, expiration: null, id: "<no-id>" };
 
-const makeJob = (options) => {
+const makeJob = (options: object) => {
   const states = new States(["RECEIVED", "QUEUED", "RUNNING", "EXECUTING"]);
   const job = new Job(
     () => Promise.resolve(),

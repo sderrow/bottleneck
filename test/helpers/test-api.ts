@@ -1,11 +1,40 @@
 import { test as baseTest, expect as vitestExpect, vi } from "vitest";
-import Bottleneck from "../bottleneck.mjs";
-import { isFakeClock } from "./clock.js";
-import { createTaskFns } from "./job-tasks.js";
-import makeLimiterHelper from "./limiter.js";
+import type BottleneckBase from "../../src/Bottleneck";
+import type { ConstructorOptions, JobOptions } from "../../src/types";
+import Bottleneck from "../bottleneck";
+import { isFakeClock } from "./clock";
+import { createTaskFns } from "./job-tasks";
+import makeLimiterHelper from "./limiter";
 
-export { waitForState } from "./wait-for-state.js";
-export { deferred } from "./job-tasks.js";
+export { waitForState } from "./wait-for-state";
+export { deferred } from "./job-tasks";
+
+type Limiter = BottleneckBase;
+type Group = InstanceType<(typeof Bottleneck)["Group"]>;
+type Connection =
+  | InstanceType<(typeof BottleneckBase)["RedisConnection"]>
+  | InstanceType<(typeof BottleneckBase)["IORedisConnection"]>;
+type LimiterOptions = Record<string, any>;
+type Disconnectable = { disconnect(flush?: boolean): unknown };
+type Track = <T extends Disconnectable>(resource: T) => T;
+
+/** Return shape of the `harness` fixture (createJobHarness below). */
+export type JobHarness = ReturnType<typeof createJobHarness>;
+
+type MakeLimiter = (opts?: LimiterOptions, meta?: { expectErrors?: boolean }) => Limiter;
+type MakeGroup = (opts?: LimiterOptions) => Group;
+type MakeConnection = (opts?: LimiterOptions) => Connection;
+
+export interface TestFixtures {
+  harness: JobHarness;
+  track: Track;
+  makeLimiter: MakeLimiter;
+  makeGroup: MakeGroup;
+  makeConnection: MakeConnection;
+  limiter: Limiter;
+  limiterOptions: LimiterOptions;
+  limiterMeta: { expectErrors?: boolean };
+}
 
 /**
  * Enqueue barrier: resolves once every schedule() issued so far on this
@@ -16,13 +45,13 @@ export { deferred } from "./job-tasks.js";
  * library ever hardens privacy (#fields), replace this body with a per-job
  * "queued"/"dropped" event race.
  */
-export const enqueued = (limiter) => limiter._submitLock.schedule(() => Promise.resolve());
+export const enqueued = (limiter: Limiter) => limiter._submitLock.schedule(() => Promise.resolve());
 
 function createJobHarness() {
   const start = Date.now();
-  const callTimes = [];
+  const callTimes: number[] = [];
 
-  const record = vi.fn((_err, _result) => {
+  const record = vi.fn<(_err: unknown, _result: unknown) => void>((_err, _result) => {
     callTimes.push(Date.now() - start);
   });
 
@@ -37,15 +66,15 @@ function createJobHarness() {
     return {
       elapsed: Date.now() - start,
       callsDuration: callTimes.length > 0 ? callTimes.at(-1) : null,
-      calls: record.mock.calls.map((call, i) => {
+      calls: record.mock.calls.map((call: unknown[], i: number) => {
         return { err: call[0], result: call[1], time: callTimes[i] };
       }),
     };
   }
 
-  function flushLimiter(limiter, scheduleOptions) {
+  function flushLimiter(limiter: Limiter, scheduleOptions?: ConstructorOptions | JobOptions) {
     const opt = scheduleOptions != null ? scheduleOptions : {};
-    return limiter.schedule(opt, () => Promise.resolve(getResults()));
+    return limiter.schedule(opt as JobOptions, () => Promise.resolve(getResults()));
   }
 
   return {
@@ -60,30 +89,53 @@ function createJobHarness() {
   };
 }
 
-function callResultArgs(call) {
+function callResultArgs(call: unknown[]) {
   const result = call[1];
   return Array.isArray(result) ? result : [result];
 }
 
+// Custom matchers are attached to vitest's expect; declare them on the
+// Assertion/AsyncAssertion interfaces so `expect(x).toHaveCallOrder(...)`
+// typechecks across the suite.
+declare module "vitest" {
+  interface Assertion {
+    toHaveCallOrder(expected: unknown[]): void;
+    toHaveFinalCallAt(expectedMs: number, minBound?: number): void;
+    toHaveCallAt(index: number, expectedMs: number, minBound?: number): void;
+  }
+  interface AsymmetricMatchersContaining {
+    toHaveCallOrder(expected: unknown[]): void;
+  }
+}
+
 vitestExpect.extend({
-  toHaveCallOrder(received, expected) {
+  toHaveCallOrder(this: unknown, received: { mock: { calls: unknown[][] } }, expected: unknown[]) {
     const calls = received.mock.calls;
     const pass =
       calls.length === expected.length &&
-      expected.every((order, i) => this.equals(callResultArgs(calls[i]), order));
+      expected.every((order, i) => vitestExpect(callResultArgs(calls[i]!)).toEqual(order));
 
     const message = () =>
       pass
         ? "expected call order not to match"
-        : `expected call order ${this.utils.printExpected(expected)}, got ${this.utils.printReceived(calls.map(callResultArgs))}`;
+        : `expected call order ${JSON.stringify(expected).slice(0, 200)}, got ${JSON.stringify(
+            calls.map(callResultArgs),
+          ).slice(0, 200)}`;
 
     return { pass, message };
   },
 
-  toHaveFinalCallAt(received, expectedMs, minBound) {
+  toHaveFinalCallAt(
+    this: unknown,
+    received: JobHarness | { callTimes?: number[] },
+    expectedMs: number,
+    minBound?: number,
+  ) {
     const lo = minBound !== undefined ? minBound : 10;
     const duration =
-      received.callTimes != null ? received.callTimes.at(-1) : received.getResults().callsDuration;
+      (received as { callTimes?: number[] }).callTimes != null
+        ? (received as { callTimes?: number[] }).callTimes!.at(-1)
+        : (received as JobHarness).getResults().callsDuration;
 
     if (isFakeClock()) {
       const pass = duration === expectedMs;
@@ -104,7 +156,13 @@ vitestExpect.extend({
     return { pass, message };
   },
 
-  toHaveCallAt(received, index, expectedMs, minBound) {
+  toHaveCallAt(
+    this: unknown,
+    received: { calls?: { time: number }[]; callTimes?: number[] },
+    index: number,
+    expectedMs: number,
+    minBound?: number,
+  ) {
     const lo = minBound !== undefined ? minBound : 5;
     const time = received.calls != null ? received.calls[index]?.time : received.callTimes?.[index];
 
@@ -135,10 +193,16 @@ vitestExpect.extend({
   },
 });
 
-export const test = baseTest.extend({
-  // Vitest requires fixture functions to destructure their first argument —
-  // it parses the pattern to build the dependency graph — so the empty
-  // pattern is mandatory for dependency-free fixtures.
+export const test = baseTest.extend<{
+  harness: JobHarness;
+  track: <T extends Disconnectable>(resource: T) => T;
+  makeLimiter: MakeLimiter;
+  makeGroup: MakeGroup;
+  makeConnection: MakeConnection;
+  limiter: Limiter;
+  limiterOptions: Record<string, unknown>;
+  limiterMeta: { expectErrors?: boolean };
+}>({
   // oxlint-disable-next-line no-empty-pattern
   async harness({}, use) {
     await use(createJobHarness());
@@ -147,32 +211,36 @@ export const test = baseTest.extend({
   limiterMeta: {},
   // oxlint-disable-next-line no-empty-pattern
   async track({}, use) {
-    const resources = [];
-    await use((resource) => {
+    const resources: Disconnectable[] = [];
+    await use(<T extends Disconnectable>(resource: T): T => {
       resources.push(resource);
       return resource;
     });
     for (let i = resources.length - 1; i >= 0; i--) {
       try {
-        await resources[i].disconnect(false);
+        await resources[i]!.disconnect(false);
       } catch {
         // tolerate mid-test disconnects
       }
     }
   },
   async makeLimiter({ track }, use) {
-    await use((opts, meta) => track(makeLimiterHelper(opts, meta)));
+    await use((opts?: LimiterOptions, meta?: { expectErrors?: boolean }) =>
+      track(makeLimiterHelper(opts, meta)),
+    );
   },
   async makeGroup({ track }, use) {
-    await use((opts) => track(new Bottleneck.Group(opts ?? {})));
+    await use((opts?: LimiterOptions) =>
+      track(new Bottleneck.Group(opts ?? {}) as unknown as Group),
+    );
   },
   async makeConnection({ track }, use) {
-    await use((opts) => {
+    await use((opts?: LimiterOptions) => {
       const Connection =
         process.env.DATASTORE === "ioredis"
           ? Bottleneck.IORedisConnection
           : Bottleneck.RedisConnection;
-      return track(new Connection(opts));
+      return track(new Connection(opts as ConstructorOptions) as unknown as Connection);
     });
   },
   async limiter({ makeLimiter, limiterOptions, limiterMeta }, use) {

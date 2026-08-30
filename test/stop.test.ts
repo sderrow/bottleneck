@@ -1,6 +1,6 @@
 import { describe, expect } from "vitest";
-import { useFakeClock } from "./helpers/clock.js";
-import { test, waitForState, deferred } from "./helpers/test-api.js";
+import { useFakeClock } from "./helpers/clock";
+import { test, waitForState, deferred } from "./helpers/test-api";
 
 useFakeClock();
 
