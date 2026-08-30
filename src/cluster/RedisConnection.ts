@@ -1,54 +1,81 @@
-const parser = require("../parser");
-const Events = require("../Events");
-const BottleneckError = require("../BottleneckError");
-const Scripts = require("./Scripts");
-const { normalizeReply } = require("./normalizeReply");
+import type Bottleneck from "../Bottleneck";
+import type { RedisConnectionOptions } from "../types";
+import type { RedisLib, RedisLikeClient } from "./redis-types";
+import BottleneckError from "../BottleneckError";
+import Events from "../Events";
+import { load } from "../parser";
+import { normalizeReply } from "./normalizeReply";
+import * as Scripts from "./Scripts";
 
-const closeClient = (c) => (typeof c.close === "function" ? c.close() : c.quit());
-const destroyClient = (c) => (typeof c.destroy === "function" ? c.destroy() : c.disconnect());
-const safe = async (run) => {
+const closeClient = (c: RedisLikeClient) => (typeof c.close === "function" ? c.close() : c.quit!());
+const destroyClient = (c: RedisLikeClient) =>
+  typeof c.destroy === "function" ? c.destroy() : c.disconnect!();
+const safe = async (run: () => unknown): Promise<undefined> => {
   try {
-    return await run();
+    await run();
+    return undefined;
   } catch {
     return undefined;
   }
 };
 
-const connectIfNeeded = async (c) => {
+const connectIfNeeded = async (c: RedisLikeClient) => {
   if (typeof c.connect === "function" && c.isOpen === false) {
     await c.connect();
   }
 };
 
-const stringifyArgs = (args) =>
+const stringifyArgs = (args: unknown[]): string[] =>
   args.map((a) => (a == null ? "" : typeof a === "string" ? a : String(a)));
 
 class RedisConnection {
-  defaults = {
-    Redis: null,
-    clientOptions: {},
-    client: null,
-    Events: null,
-  };
+  /** @internal */
+  Redis: RedisLib | null = null;
+  /** @internal */
+  clientOptions: object = {};
+  /** @internal */
+  client: RedisLikeClient | null = null;
+  /** @internal */
+  Events: Events | null = null;
+  /** @internal */
   datastore = "redis";
+  /** @internal */
+  terminated = false;
+  /** @internal */
+  shas: Record<string, string> = {};
+  /** @internal */
+  subscriber: RedisLikeClient;
+  /** @internal */
+  limiters: Record<string, Bottleneck> = {};
+  ready: Promise<{ client: RedisLikeClient; subscriber: RedisLikeClient }>;
 
-  constructor(options) {
-    options ??= {};
-    parser.load(options, this.defaults, this);
+  // Installed on the instance by Events (see Events constructor).
+  declare on: {
+    (event: "error", listener: (error: unknown) => void): unknown;
+    (event: string, listener: (...args: any[]) => unknown): unknown;
+  };
+  declare once: {
+    (event: "error", listener: (error: unknown) => void): unknown;
+    (event: string, listener: (...args: any[]) => unknown): unknown;
+  };
+  declare removeAllListeners: (name?: string | null) => void;
+
+  constructor(options?: RedisConnectionOptions) {
+    load(options ?? {}, this.defaults, this);
 
     if (this.Redis == null && this.client == null) {
       throw new BottleneckError(
         "Bottleneck cluster mode requires a `Redis` library reference or a pre-built `client`. " +
           "Pass it explicitly: `new Bottleneck({ datastore: 'redis', Redis: require('redis'), clientOptions })`.",
+        "MISSING_CLIENT",
       );
     }
 
     this.Events ??= new Events(this);
     this.terminated = false;
-    this.shas = {};
 
-    this.client ??= this.Redis.createClient(this.clientOptions);
-    this.subscriber = this.client.duplicate();
+    this.client ??= this.Redis!.createClient!(this.clientOptions);
+    this.subscriber = this.client.duplicate!();
     this.limiters = {};
 
     this.ready = this._initReady();
@@ -57,28 +84,40 @@ class RedisConnection {
     this.ready.catch(() => {});
   }
 
+  /** @internal */
+  defaults = {
+    Redis: null,
+    clientOptions: {},
+    client: null,
+    Events: null,
+  };
+
+  /** @internal */
   async _initReady() {
-    await Promise.all([this._setup(this.client, false), this._setup(this.subscriber, true)]);
+    await Promise.all([this._setup(this.client!, false), this._setup(this.subscriber, true)]);
     await this._loadScripts();
-    return { client: this.client, subscriber: this.subscriber };
+    return { client: this.client!, subscriber: this.subscriber };
   }
 
-  async _setup(client, _sub) {
+  /** @internal */
+  async _setup(client: RedisLikeClient, _sub: boolean): Promise<void> {
     client.setMaxListeners?.(0);
-    client.on("error", (e) => {
+    client.on!("error", (e: unknown) => {
       if (!this.terminated) {
-        this.Events.trigger("error", e);
+        this.Events!.trigger("error", e);
       }
     });
     await connectIfNeeded(client);
   }
 
-  async _loadScript(name) {
-    this.shas[name] = await this.client.scriptLoad(Scripts.payload(name));
-    return this.shas[name];
+  /** @internal */
+  async _loadScript(name: string): Promise<string> {
+    this.shas[name] = await this.client!.scriptLoad!(Scripts.payload(name));
+    return this.shas[name]!;
   }
 
-  _loadScripts() {
+  /** @internal */
+  _loadScripts(): Promise<unknown[]> {
     return Promise.all(
       Scripts.names.map(async (k) => {
         try {
@@ -90,73 +129,84 @@ class RedisConnection {
     );
   }
 
-  async __runCommand__(cmd) {
+  /** @internal */
+  async __runCommand__(cmd: unknown[]): Promise<unknown> {
     await this.ready;
-    const reply = await this.client.sendCommand(stringifyArgs(cmd));
+    const reply = await this.client!.sendCommand!(stringifyArgs(cmd));
     return normalizeReply(cmd, reply);
   }
 
-  async __runScript__(name, id, args) {
+  /** @internal */
+  async __runScript__(name: string, id: string, args: unknown[]): Promise<unknown> {
     const keys = Scripts.keys(name, id);
     const stringArgs = stringifyArgs(args);
     try {
-      return await this.client.evalSha(this.shas[name], { keys, arguments: stringArgs });
+      return await this.client!.evalSha!(this.shas[name]!, { keys, arguments: stringArgs });
     } catch (e) {
-      if (typeof e?.message === "string" && e.message.startsWith("NOSCRIPT")) {
+      if (
+        typeof (e as Error)?.message === "string" &&
+        (e as Error).message.startsWith("NOSCRIPT")
+      ) {
         await this._loadScript(name);
-        return await this.client.evalSha(this.shas[name], { keys, arguments: stringArgs });
+        return await this.client!.evalSha!(this.shas[name]!, { keys, arguments: stringArgs });
       }
       throw e;
     }
   }
 
-  async __addLimiter__(instance) {
+  /** @internal */
+  async __addLimiter__(instance: Bottleneck): Promise<void> {
     await Promise.all(
       [instance.channel(), instance.channel_client()].map(async (channel) => {
-        await this.subscriber.subscribe(channel, (message) => {
-          this.limiters[channel]?._store.onMessage(channel, message);
+        await this.subscriber.subscribe!(channel, (message: string) => {
+          (
+            this.limiters[channel]?._store as unknown as {
+              onMessage?: (channel: string, message: string) => Promise<unknown>;
+            }
+          )?.onMessage?.(channel, message);
         });
         this.limiters[channel] = instance;
       }),
     );
   }
 
-  async __removeLimiter__(instance) {
+  /** @internal */
+  async __removeLimiter__(instance: Bottleneck): Promise<void> {
     await Promise.all(
       [instance.channel(), instance.channel_client()].map(async (channel) => {
         if (!this.terminated) {
-          await this.subscriber.unsubscribe(channel);
+          await this.subscriber.unsubscribe!(channel);
         }
         delete this.limiters[channel];
       }),
     );
   }
 
-  async disconnect(flush = true) {
+  async disconnect(flush = true): Promise<void> {
     for (const v of Object.values(this.limiters)) {
-      clearInterval(v._store.heartbeat);
+      clearInterval(v._store?.heartbeat);
     }
     this.limiters = {};
     if (this.terminated) return;
     this.terminated = true;
 
-    this.client.removeAllListeners?.("error");
-    this.client.on?.("error", () => {});
+    this.client!.removeAllListeners?.("error");
+    this.client!.on?.("error", () => {});
     this.subscriber.removeAllListeners?.("error");
     this.subscriber.on?.("error", () => {});
 
     if (flush) {
       await Promise.all([
-        safe(() => closeClient(this.client)),
+        safe(() => closeClient(this.client!)),
         safe(() => closeClient(this.subscriber)),
       ]);
     } else {
       await Promise.all([
-        safe(() => destroyClient(this.client)),
+        safe(() => destroyClient(this.client!)),
         safe(() => destroyClient(this.subscriber)),
       ]);
     }
   }
 }
 
-module.exports = RedisConnection;
+export default RedisConnection;

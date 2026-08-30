@@ -1,5 +1,5 @@
 import { describe, it, assert, expect } from "vitest";
-const { iterateAsync } = require("../leakage");
+import { iterateAsync } from "../leakage";
 
 describe("iterateAsync helper", { timeout: 8000 }, () => {
   it("Should resolve when memory is stable", async () => {

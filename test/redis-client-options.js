@@ -1,5 +1,5 @@
 // Shared helper: returns the `clientOptions` object for the given datastore.
-// Used by test/bottleneck.js (withRedis) and test/helpers/limiter.js (makeLimiter).
+// Used by test/bottleneck.mjs (withRedis) and test/helpers/limiter.js (makeLimiter).
 // Keeping it in one place ensures the socket-resilience settings below stay
 // consistent across all Redis connections opened during tests.
 //
@@ -24,7 +24,7 @@
 // timing-sensitive tests in `priority.test.js` and `general-traffic.test.js`).
 // Tests with a 500 ms upper bound that previously fit inside the heartbeat
 // budget have been widened slightly to absorb a single timeout+retry cycle.
-module.exports = function buildClientOptions(datastore) {
+export default function buildClientOptions(datastore) {
   const host = process.env.REDIS_HOST;
   const port = process.env.REDIS_PORT;
   if (datastore === "redis") {
@@ -43,4 +43,4 @@ module.exports = function buildClientOptions(datastore) {
     connectTimeout: 500,
     retryStrategy: (times) => Math.min(times * 50, 500),
   };
-};
+}

@@ -1,7 +1,7 @@
 import { describe, expect } from "vitest";
-import sleep from "../src/sleep.js";
+import * as Scripts from "../src/cluster/Scripts";
+import sleep from "../src/sleep";
 import { test, waitForState, deferred, enqueued } from "./helpers/test-api.js";
-const Scripts = require("../src/cluster/Scripts.js");
 const assert = require("assert");
 
 // Causality policy (Workstream B): observe product-timer effects via waitForState

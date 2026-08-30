@@ -1,7 +1,7 @@
 import { describe, expect } from "vitest";
 import { test } from "./helpers/test-api.js";
 const Redis = require("ioredis");
-const buildClientOptions = require("./redis-client-options");
+import buildClientOptions from "./redis-client-options";
 
 describe("ioredis-only", () => {
   test("Should accept ioredis lib override", ({ makeLimiter }) => {

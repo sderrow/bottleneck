@@ -1,5 +1,5 @@
 import { describe, test, expect, vi } from "vitest";
-const Events = require("../src/Events.js");
+import Events from "../src/Events";
 
 const noop = () => {};
 

@@ -1,16 +1,16 @@
-const lua = require("./lua");
+import lua from "./lua/index";
 
-const headers = {
-  refs: lua["refs.lua"],
-  validate_keys: lua["validate_keys.lua"],
-  validate_client: lua["validate_client.lua"],
-  refresh_expiration: lua["refresh_expiration.lua"],
-  process_tick: lua["process_tick.lua"],
-  conditions_check: lua["conditions_check.lua"],
-  get_time: lua["get_time.lua"],
+const headers: Record<string, string> = {
+  refs: lua["refs.lua"] as string,
+  validate_keys: lua["validate_keys.lua"] as string,
+  validate_client: lua["validate_client.lua"] as string,
+  refresh_expiration: lua["refresh_expiration.lua"] as string,
+  process_tick: lua["process_tick.lua"] as string,
+  conditions_check: lua["conditions_check.lua"] as string,
+  get_time: lua["get_time.lua"] as string,
 };
 
-exports.allKeys = (id) => [
+export const allKeys = (id: string): string[] => [
   // HASH
   `b_${id}_settings`,
 
@@ -43,105 +43,112 @@ exports.allKeys = (id) => [
   `b_${id}_client_last_seen`,
 ];
 
-const templates = {
+type Template = {
+  keys: typeof allKeys;
+  headers: string[];
+  refresh_expiration: boolean;
+  code: string;
+};
+
+const templates: Record<string, Template> = {
   init: {
-    keys: exports.allKeys,
+    keys: allKeys,
     headers: ["process_tick"],
     refresh_expiration: true,
-    code: lua["init.lua"],
+    code: lua["init.lua"] as string,
   },
   group_check: {
-    keys: exports.allKeys,
+    keys: allKeys,
     headers: [],
     refresh_expiration: false,
-    code: lua["group_check.lua"],
+    code: lua["group_check.lua"] as string,
   },
   register_client: {
-    keys: exports.allKeys,
+    keys: allKeys,
     headers: ["validate_keys"],
     refresh_expiration: true,
-    code: lua["register_client.lua"],
+    code: lua["register_client.lua"] as string,
   },
   blacklist_client: {
-    keys: exports.allKeys,
+    keys: allKeys,
     headers: ["validate_keys", "validate_client"],
     refresh_expiration: false,
-    code: lua["blacklist_client.lua"],
+    code: lua["blacklist_client.lua"] as string,
   },
   heartbeat: {
-    keys: exports.allKeys,
+    keys: allKeys,
     headers: ["validate_keys", "validate_client", "process_tick"],
     refresh_expiration: false,
-    code: lua["heartbeat.lua"],
+    code: lua["heartbeat.lua"] as string,
   },
   update_settings: {
-    keys: exports.allKeys,
+    keys: allKeys,
     headers: ["validate_keys", "validate_client", "process_tick"],
     refresh_expiration: true,
-    code: lua["update_settings.lua"],
+    code: lua["update_settings.lua"] as string,
   },
   running: {
-    keys: exports.allKeys,
+    keys: allKeys,
     headers: ["validate_keys", "validate_client", "process_tick"],
     refresh_expiration: false,
-    code: lua["running.lua"],
+    code: lua["running.lua"] as string,
   },
   queued: {
-    keys: exports.allKeys,
+    keys: allKeys,
     headers: ["validate_keys", "validate_client"],
     refresh_expiration: false,
-    code: lua["queued.lua"],
+    code: lua["queued.lua"] as string,
   },
   done: {
-    keys: exports.allKeys,
+    keys: allKeys,
     headers: ["validate_keys", "validate_client", "process_tick"],
     refresh_expiration: false,
-    code: lua["done.lua"],
+    code: lua["done.lua"] as string,
   },
   check: {
-    keys: exports.allKeys,
+    keys: allKeys,
     headers: ["validate_keys", "validate_client", "process_tick", "conditions_check"],
     refresh_expiration: false,
-    code: lua["check.lua"],
+    code: lua["check.lua"] as string,
   },
   submit: {
-    keys: exports.allKeys,
+    keys: allKeys,
     headers: ["validate_keys", "validate_client", "process_tick", "conditions_check"],
     refresh_expiration: true,
-    code: lua["submit.lua"],
+    code: lua["submit.lua"] as string,
   },
   register: {
-    keys: exports.allKeys,
+    keys: allKeys,
     headers: ["validate_keys", "validate_client", "process_tick", "conditions_check"],
     refresh_expiration: true,
-    code: lua["register.lua"],
+    code: lua["register.lua"] as string,
   },
   free: {
-    keys: exports.allKeys,
+    keys: allKeys,
     headers: ["validate_keys", "validate_client", "process_tick"],
     refresh_expiration: true,
-    code: lua["free.lua"],
+    code: lua["free.lua"] as string,
   },
   current_reservoir: {
-    keys: exports.allKeys,
+    keys: allKeys,
     headers: ["validate_keys", "validate_client", "process_tick"],
     refresh_expiration: false,
-    code: lua["current_reservoir.lua"],
+    code: lua["current_reservoir.lua"] as string,
   },
   increment_reservoir: {
-    keys: exports.allKeys,
+    keys: allKeys,
     headers: ["validate_keys", "validate_client", "process_tick"],
     refresh_expiration: true,
-    code: lua["increment_reservoir.lua"],
+    code: lua["increment_reservoir.lua"] as string,
   },
 };
 
-exports.names = Object.keys(templates);
+export const names = Object.keys(templates);
 
-exports.keys = (name, id) => templates[name].keys(id);
+export const keys = (name: string, id: string): string[] => templates[name]!.keys(id);
 
-exports.payload = function (name) {
-  const template = templates[name];
+export const payload = (name: string): string => {
+  const template = templates[name]!;
   return Array.prototype
     .concat(
       headers.refs,

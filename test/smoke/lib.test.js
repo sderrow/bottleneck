@@ -11,7 +11,7 @@
 // keeps a stray fs.read at runtime — all of which fail the moment a
 // Redis-backed limiter actually evaluates a script.
 //
-// Loaded via `test/bottleneck.js` with `BOTTLENECK_ENTRY=lib` and
+// Loaded via `test/bottleneck.mjs` with `BOTTLENECK_ENTRY=lib` and
 // `DATASTORE=redis` so the wrapper injects the test heartbeat override,
 // the per-fork id prefix, and node-redis client options pointing at the
 // shared testcontainer Redis (started by the root globalSetup). The
@@ -19,7 +19,7 @@
 // test file is collected.
 
 import { describe, it, expect } from "vitest";
-const Bottleneck = require("../bottleneck.js");
+import Bottleneck from "../bottleneck.mjs";
 
 describe("dist/index full smoke", () => {
   it("loads", () => {

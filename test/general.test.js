@@ -1,7 +1,7 @@
 import { describe, expect } from "vitest";
+import Bottleneck from "./bottleneck.mjs";
 import { useFakeClock } from "./helpers/clock.js";
 import { test, waitForState, deferred, enqueued } from "./helpers/test-api.js";
-const Bottleneck = require("./bottleneck");
 
 useFakeClock();
 
@@ -575,7 +575,7 @@ describe("General", () => {
       const returned = limiter.on("ready", () => {});
       // The contract is that `.on()` returns the limiter itself for chaining;
       // compare to `limiter.id` rather than the literal "test-limiter" so this
-      // works in Redis projects where test/bottleneck.js prefixes ids per fork.
+      // works in Redis projects where test/bottleneck.mjs prefixes ids per fork.
       expect(returned.id).toEqual(limiter.id);
     });
 

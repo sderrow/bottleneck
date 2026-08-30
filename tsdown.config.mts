@@ -10,9 +10,10 @@ const pkg = JSON.parse(fs.readFileSync(path.join(here, "package.json"), "utf8"))
 
 const toPosix = (id: string) => id.replace(/\\/g, "/");
 const isClusterModule = (id: string) => toPosix(id).includes("/src/cluster/");
-const isLuaIndex = (id: string) => toPosix(id).endsWith("/src/cluster/lua/index.js");
+const isLuaIndex = (id: string) => toPosix(id).endsWith("/src/cluster/lua/index.ts");
 
-const cleanFor = (basename: string) => [`dist/${basename}.js`, `dist/${basename}.js.map`];
+const cleanFor = (...basenames: string[]) =>
+  basenames.flatMap((b) => [`dist/${b}`, `dist/${b}.map`]);
 
 const inlineLua: TsdownPlugin = {
   name: "inline-lua",
@@ -58,6 +59,16 @@ const inlinePkgVersion: TsdownPlugin = {
   },
 };
 
+// The lib entry has both a default export and named class exports. Rolldown
+// therefore emits CJS as `exports.default = ...; exports.Group = ...`, which
+// would change `require("bottleneck")` from the Bottleneck class (v2 shape)
+// to a namespace object. The named values are the same references as
+// Bottleneck's statics, so reassigning module.exports restores the v2 shape
+// while ESM keeps real named exports. A `footer` (not a renderChunk plugin)
+// keeps sourcemaps intact; it only applies to the CJS output.
+const cjsFooter = (ctx: { format: string }): string | undefined =>
+  ctx.format === "cjs" ? "\nmodule.exports = exports.default;\n" : undefined;
+
 const lightBanner = [
   "/**",
   "  * This file contains the Bottleneck library (MIT) without Clustering support.",
@@ -69,33 +80,40 @@ const libBanner = `/** Bottleneck v${pkg.version} (MIT). https://github.com/sder
 
 export default defineConfig([
   {
+    // Dual-format Node build: ESM (dist/index.mjs) + CJS (dist/index.cjs).
+    // No `fixedExtension`: under "type": "module" the ESM output gets .mjs and
+    // the CJS output .cjs, which is exactly what Node infers from.
     name: "lib",
-    entry: ["src/index.js"],
-    format: "cjs",
+    entry: ["src/index.ts"],
+    format: ["esm", "cjs"],
     outDir: "dist",
     platform: "node",
     target: "es2023",
     plugins: [inlineLua, inlinePkgVersion],
-    clean: cleanFor("index"),
+    // Named + default exports: "named" is the intended CJS shape (the footer
+    // below then restores `module.exports` for v2 compatibility).
+    outputOptions: { exports: "named" },
+    footer: cjsFooter,
+    clean: cleanFor("index.mjs", "index.cjs"),
     sourcemap: true,
-    dts: false,
+    dts: true,
     report: false,
-    fixedExtension: false,
     hash: false,
     banner: { js: libBanner },
   },
   {
+    // Browser build: ESM for `<script type="module">` and bundlers.
+    // Clustering is stubbed out (it is Node-only) so the bundle stays small.
     name: "light",
-    entry: { light: "src/index.js" },
-    format: "umd",
-    globalName: "Bottleneck",
+    entry: { light: "src/index.ts" },
+    format: "esm",
     outDir: "dist",
-    platform: "neutral",
+    platform: "browser",
     target: "es2023",
     plugins: [excludeClustering, inlinePkgVersion],
-    clean: cleanFor("light"),
+    clean: cleanFor("light.js"),
     sourcemap: true,
-    dts: false,
+    dts: true,
     report: false,
     hash: false,
     outputOptions: { entryFileNames: "[name].js" },
