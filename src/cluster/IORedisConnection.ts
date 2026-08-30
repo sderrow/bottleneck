@@ -18,6 +18,17 @@ class IORedisConnection {
   limiters: Record<string, Bottleneck> = {};
   ready: Promise<{ client: RedisLikeClient; subscriber: RedisLikeClient }>;
 
+  // Installed on the instance by Events (see Events constructor).
+  declare on: {
+    (event: "error", listener: (error: unknown) => void): unknown;
+    (event: string, listener: (...args: any[]) => unknown): unknown;
+  };
+  declare once: {
+    (event: "error", listener: (error: unknown) => void): unknown;
+    (event: string, listener: (...args: any[]) => unknown): unknown;
+  };
+  declare removeAllListeners: (name?: string | null) => void;
+
   defaults = {
     Redis: null,
     clientOptions: {},
