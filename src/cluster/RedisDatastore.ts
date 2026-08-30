@@ -7,6 +7,8 @@ import IORedisConnection from "./IORedisConnection";
 import RedisConnection from "./RedisConnection";
 
 class RedisDatastore {
+  /** @internal */
+  /** @internal */
   _disconnecting = false;
   instance: Bottleneck;
   storeOptions: StoreOptions;
@@ -67,6 +69,7 @@ class RedisDatastore {
     this.ready.catch(() => {});
   }
 
+  /** @internal */
   async _initReady(): Promise<Record<string, RedisLikeClient>> {
     this.clients = (await this.connection.ready) as Record<string, RedisLikeClient>;
     await this.runScript("init", this.prepareInitSettings(this.clearDatastore));
@@ -86,6 +89,8 @@ class RedisDatastore {
     return this.clients;
   }
 
+  /** @internal */
+  /** @internal */
   async __publish__(message: string): Promise<unknown> {
     const client = (await this.ready).client!;
     return client.publish!(this.instance.channel(), `message:${message.toString()}`);
@@ -138,6 +143,8 @@ class RedisDatastore {
     }
   }
 
+  /** @internal */
+  /** @internal */
   async __disconnect__(flush?: boolean): Promise<unknown> {
     this._disconnecting = true;
     clearInterval(this.heartbeat);
@@ -207,39 +214,57 @@ class RedisDatastore {
     return !!b;
   }
 
+  /** @internal */
+  /** @internal */
   async __updateSettings__(options: StoreOptions): Promise<StoreOptions> {
     await this.runScript("update_settings", this.prepareObject(options));
     return overwrite(options, options, this.storeOptions);
   }
 
+  /** @internal */
+  /** @internal */
   __running__(): Promise<unknown> {
     return this.runScript("running", []);
   }
 
+  /** @internal */
+  /** @internal */
   __queued__(): Promise<unknown> {
     return this.runScript("queued", []);
   }
 
+  /** @internal */
+  /** @internal */
   __done__(): Promise<unknown> {
     return this.runScript("done", []);
   }
 
+  /** @internal */
+  /** @internal */
   async __groupCheck__(): Promise<boolean> {
     return this.convertBool(await this.runScript("group_check", []));
   }
 
+  /** @internal */
+  /** @internal */
   __incrementReservoir__(incr: number): Promise<unknown> {
     return this.runScript("increment_reservoir", [incr]);
   }
 
+  /** @internal */
+  /** @internal */
   __currentReservoir__(): Promise<unknown> {
     return this.runScript("current_reservoir", []);
   }
 
+  /** @internal */
+  /** @internal */
   async __check__(weight: number): Promise<boolean> {
     return this.convertBool(await this.runScript("check", this.prepareArray([weight])));
   }
 
+  /** @internal */
+  /** @internal */
   async __register__(
     index: string,
     weight: number,
@@ -261,6 +286,8 @@ class RedisDatastore {
     };
   }
 
+  /** @internal */
+  /** @internal */
   async __submit__(
     queueLength: number,
     weight: number,
@@ -290,6 +317,8 @@ class RedisDatastore {
     }
   }
 
+  /** @internal */
+  /** @internal */
   async __free__(index: string, _weight: number): Promise<{ running: unknown }> {
     const running = await this.runScript("free", this.prepareArray([index]));
     return { running };

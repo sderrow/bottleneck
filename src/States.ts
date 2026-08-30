@@ -2,6 +2,8 @@ import BottleneckError from "./BottleneckError";
 
 class States {
   status: string[];
+  /** @internal */
+  /** @internal */
   _jobs: Record<string, number> = {};
   counts: number[];
 

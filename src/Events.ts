@@ -10,6 +10,8 @@ type Listener = {
  */
 class Events {
   instance: object;
+  /** @internal */
+  /** @internal */
   _events: Record<string, Listener[]> = {};
 
   constructor(instance: object) {
@@ -28,6 +30,8 @@ class Events {
       }
     };
   }
+  /** @internal */
+  /** @internal */
   _addListener(name: string, status: Listener["status"], cb: ListenerCb): object {
     this._events[name] ??= [];
     this._events[name].push({ cb, status });

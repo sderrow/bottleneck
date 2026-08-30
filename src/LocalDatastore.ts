@@ -17,13 +17,27 @@ class LocalDatastore {
   timeout: number | null = null;
   heartbeatInterval: number = 250;
   heartbeat: ReturnType<typeof setInterval> | undefined;
+  /** @internal */
+  /** @internal */
   _disconnecting = false;
   clientId: string;
+  /** @internal */
+  /** @internal */
   _nextRequest: number;
+  /** @internal */
+  /** @internal */
   _lastReservoirRefresh: number;
+  /** @internal */
+  /** @internal */
   _lastReservoirIncrease: number;
+  /** @internal */
+  /** @internal */
   _running = 0;
+  /** @internal */
+  /** @internal */
   _done = 0;
+  /** @internal */
+  /** @internal */
   _unblockTime = 0;
   ready: Promise<unknown> = Promise.resolve();
   clients: Record<string, unknown> = {};
@@ -46,6 +60,8 @@ class LocalDatastore {
     this._startHeartbeat();
   }
 
+  /** @internal */
+  /** @internal */
   _startHeartbeat(): void {
     if (this.heartbeat) {
       clearInterval(this.heartbeat);
@@ -91,11 +107,15 @@ class LocalDatastore {
     }
   }
 
+  /** @internal */
+  /** @internal */
   async __publish__(message: string): Promise<unknown> {
     await this.yieldLoop();
     return this.instance.Events.trigger("message", message.toString());
   }
 
+  /** @internal */
+  /** @internal */
   async __disconnect__(_flush?: boolean): Promise<void> {
     await this.yieldLoop();
     clearInterval(this.heartbeat);
@@ -111,6 +131,8 @@ class LocalDatastore {
       : 15 * this.storeOptions.minTime || 5000;
   }
 
+  /** @internal */
+  /** @internal */
   async __updateSettings__(options: StoreOptions): Promise<boolean> {
     await this.yieldLoop();
     overwrite(options, options, this.storeOptions);
@@ -119,21 +141,29 @@ class LocalDatastore {
     return true;
   }
 
+  /** @internal */
+  /** @internal */
   async __running__(): Promise<number> {
     await this.yieldLoop();
     return this._running;
   }
 
+  /** @internal */
+  /** @internal */
   async __queued__(): Promise<number> {
     await this.yieldLoop();
     return this.instance.queued();
   }
 
+  /** @internal */
+  /** @internal */
   async __done__(): Promise<number> {
     await this.yieldLoop();
     return this._done;
   }
 
+  /** @internal */
+  /** @internal */
   async __groupCheck__(time: number): Promise<boolean> {
     await this.yieldLoop();
     return this._nextRequest + (this.timeout ?? 0) < time;
@@ -157,6 +187,8 @@ class LocalDatastore {
     return capacity == null || weight <= capacity;
   }
 
+  /** @internal */
+  /** @internal */
   async __incrementReservoir__(incr: number): Promise<number | null> {
     await this.yieldLoop();
     this.storeOptions.reservoir = (this.storeOptions.reservoir ?? 0) + incr;
@@ -165,6 +197,8 @@ class LocalDatastore {
     return reservoir;
   }
 
+  /** @internal */
+  /** @internal */
   async __currentReservoir__(): Promise<number | null> {
     await this.yieldLoop();
     return this.storeOptions.reservoir;
@@ -178,12 +212,16 @@ class LocalDatastore {
     return this.conditionsCheck(weight) && this._nextRequest - now <= 0;
   }
 
+  /** @internal */
+  /** @internal */
   async __check__(weight: number): Promise<boolean> {
     await this.yieldLoop();
     const now = Date.now();
     return this.check(weight, now);
   }
 
+  /** @internal */
+  /** @internal */
   async __register__(
     _index: string,
     weight: number,
@@ -208,6 +246,8 @@ class LocalDatastore {
     return this.storeOptions.strategy === 3;
   }
 
+  /** @internal */
+  /** @internal */
   async __submit__(
     queueLength: number,
     weight: number,
@@ -236,6 +276,8 @@ class LocalDatastore {
     return { reachedHWM, blocked, strategy: this.storeOptions.strategy };
   }
 
+  /** @internal */
+  /** @internal */
   async __free__(_index: string, weight: number): Promise<{ running: number }> {
     await this.yieldLoop();
     this._running -= weight;

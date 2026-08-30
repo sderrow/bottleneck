@@ -70,12 +70,14 @@ class RedisConnection {
     Events: null,
   };
 
+  /** @internal */
   async _initReady() {
     await Promise.all([this._setup(this.client!, false), this._setup(this.subscriber, true)]);
     await this._loadScripts();
     return { client: this.client!, subscriber: this.subscriber };
   }
 
+  /** @internal */
   async _setup(client: RedisLikeClient, _sub: boolean): Promise<void> {
     client.setMaxListeners?.(0);
     client.on!("error", (e: unknown) => {
@@ -86,11 +88,14 @@ class RedisConnection {
     await connectIfNeeded(client);
   }
 
+  /** @internal */
   async _loadScript(name: string): Promise<string> {
     this.shas[name] = await this.client!.scriptLoad!(Scripts.payload(name));
     return this.shas[name]!;
   }
 
+  /** @internal */
+  /** @internal */
   _loadScripts(): Promise<unknown[]> {
     return Promise.all(
       Scripts.names.map(async (k) => {
@@ -103,12 +108,16 @@ class RedisConnection {
     );
   }
 
+  /** @internal */
+  /** @internal */
   async __runCommand__(cmd: unknown[]): Promise<unknown> {
     await this.ready;
     const reply = await this.client!.sendCommand!(stringifyArgs(cmd));
     return normalizeReply(cmd, reply);
   }
 
+  /** @internal */
+  /** @internal */
   async __runScript__(name: string, id: string, args: unknown[]): Promise<unknown> {
     const keys = Scripts.keys(name, id);
     const stringArgs = stringifyArgs(args);
@@ -126,6 +135,8 @@ class RedisConnection {
     }
   }
 
+  /** @internal */
+  /** @internal */
   async __addLimiter__(instance: Bottleneck): Promise<void> {
     await Promise.all(
       [instance.channel(), instance.channel_client()].map(async (channel) => {
@@ -141,6 +152,8 @@ class RedisConnection {
     );
   }
 
+  /** @internal */
+  /** @internal */
   async __removeLimiter__(instance: Bottleneck): Promise<void> {
     await Promise.all(
       [instance.channel(), instance.channel_client()].map(async (channel) => {

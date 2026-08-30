@@ -6,7 +6,11 @@ type JobLike = { options: { priority: number } };
 
 class Queues<J extends JobLike = Job> {
   Events: Events;
+  /** @internal */
+  /** @internal */
   _length = 0;
+  /** @internal */
+  /** @internal */
   _lists: DLList<J>[];
 
   // Installed on the instance by Events (see Events constructor).

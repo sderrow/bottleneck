@@ -2,14 +2,16 @@ import type BottleneckBase from "../src/Bottleneck";
 
 type BottleneckClass = typeof BottleneckBase;
 
+// The three entrypoints are structurally the same class; internal (stripped)
+// members differ between source and generated dts, so bridge through a cast.
 const resolveEntry = async (): Promise<BottleneckClass> => {
   switch (process.env.BOTTLENECK_ENTRY ?? "source") {
     case "light":
-      return (await import("../dist/light.js")).default;
+      return (await import("../dist/light.js")).default as unknown as BottleneckClass;
     case "lib":
-      return (await import("../dist/index.cjs")).default;
+      return (await import("../dist/index.cjs")).default as unknown as BottleneckClass;
     default:
-      return (await import("../src/index.ts")).default;
+      return (await import("../src/index.ts")).default as BottleneckClass;
   }
 };
 const Bottleneck = await resolveEntry();

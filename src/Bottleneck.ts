@@ -124,14 +124,30 @@ class Bottleneck {
   trackDoneStatus: boolean = false;
   Promise: PromiseConstructor = Promise;
 
+  /** @internal */
+  /** @internal */
   _addToQueue: (job: Job) => Promise<boolean>;
+  /** @internal */
+  /** @internal */
   _queues: Queues;
+  /** @internal */
+  /** @internal */
   _scheduled: Record<string, ScheduledJob> = {};
+  /** @internal */
+  /** @internal */
   _states: States;
+  /** @internal */
+  /** @internal */
   _limiter: Bottleneck | null = null;
   Events: Events;
+  /** @internal */
+  /** @internal */
   _submitLock: Sync;
+  /** @internal */
+  /** @internal */
   _registerLock: Sync;
+  /** @internal */
+  /** @internal */
   _store: LocalDatastore | RedisDatastore;
 
   // Installed on the instance by Events (see Events constructor); declared so
@@ -177,6 +193,8 @@ class Bottleneck {
     this._queues.on("zero", () => this._store.heartbeat?.unref?.());
   }
 
+  /** @internal */
+  /** @internal */
   _validateOptions(options: object | null | undefined, invalid: unknown[]): void {
     if (options == null || typeof options !== "object" || invalid.length !== 0) {
       throw new BottleneckError(
@@ -246,6 +264,8 @@ class Bottleneck {
     return this._states.statusCounts() as Counts;
   }
 
+  /** @internal */
+  /** @internal */
   _randomIndex(): string {
     return randomIndex();
   }
@@ -254,6 +274,9 @@ class Bottleneck {
     return this._store.__check__(weight);
   }
 
+  //** @internal */
+  /** @internal */
+  /** @internal */
   _clearGlobalState(index: string): boolean {
     const scheduled = this._scheduled[index];
     if (scheduled != null) {
@@ -265,6 +288,7 @@ class Bottleneck {
     }
   }
 
+  /** @internal */
   async _free(
     index: string,
     _job: Job,
@@ -287,6 +311,8 @@ class Bottleneck {
     }
   }
 
+  /** @internal */
+  /** @internal */
   _run(index: string, job: Job, wait: number): unknown {
     job.doRun();
     const clearGlobalState = this._clearGlobalState.bind(this, index);
@@ -308,6 +334,7 @@ class Bottleneck {
     });
   }
 
+  /** @internal */
   async _drainOne(capacity: number | null | undefined): Promise<number | null> {
     return this._registerLock.schedule(async (): Promise<number | null> => {
       if (this.queued() === 0) {
@@ -347,6 +374,7 @@ class Bottleneck {
     });
   }
 
+  /** @internal */
   async _drainAll(capacity?: number | null, total = 0): Promise<number | undefined> {
     try {
       const drained = await this._drainOne(capacity);
@@ -366,6 +394,8 @@ class Bottleneck {
     }
   }
 
+  /** @internal */
+  /** @internal */
   _dropAllQueued(message?: string): void {
     this._queues.shiftAll((job) => job.doDrop({ message }));
   }
@@ -428,6 +458,7 @@ class Bottleneck {
     return done as Promise<void>;
   }
 
+  /** @internal */
   async _addToQueueImpl(job: Job): Promise<boolean> {
     let blocked: boolean, reachedHWM: boolean, strategy: unknown;
     const { args, options } = job;
@@ -471,6 +502,8 @@ class Bottleneck {
     return reachedHWM;
   }
 
+  /** @internal */
+  /** @internal */
   _receive: (job: Job) => unknown = (job: Job): unknown => {
     if (this._states.jobStatus(job.options.id) != null) {
       job._reject(

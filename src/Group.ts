@@ -124,6 +124,8 @@ class Group {
     return keys;
   }
 
+  /** @internal */
+  /** @internal */
   _startAutoCleanup(): void {
     clearInterval(this.interval);
 

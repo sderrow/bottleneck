@@ -13,10 +13,20 @@ class Batcher<T = any> {
   maxSize: number | null = null;
   options: BatcherOptions;
   Events: Events;
+  /** @internal */
+  /** @internal */
   _arr: T[];
+  /** @internal */
+  /** @internal */
   _timeout: ReturnType<typeof setTimeout> | undefined;
+  /** @internal */
+  /** @internal */
   _lastFlush: number;
+  /** @internal */
+  /** @internal */
   _promise: Promise<void> = null as never;
+  /** @internal */
+  /** @internal */
   _resolve: (value: void) => void = null as never;
 
   // Installed on the instance by Events (see Events constructor).
@@ -39,12 +49,16 @@ class Batcher<T = any> {
     this._lastFlush = Date.now();
   }
 
+  /** @internal */
+  /** @internal */
   _resetPromise(): void {
     this._promise = new Promise((res) => {
       this._resolve = res;
     });
   }
 
+  /** @internal */
+  /** @internal */
   _flush(): void {
     clearTimeout(this._timeout);
     this._lastFlush = Date.now();

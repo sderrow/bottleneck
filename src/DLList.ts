@@ -7,7 +7,11 @@ type Node<T> = {
 class DLList<T = unknown> {
   incr?: () => void;
   decr?: () => void;
+  /** @internal */
+  /** @internal */
   _first: Node<T> | null = null;
+  /** @internal */
+  /** @internal */
   _last: Node<T> | null = null;
   length = 0;
 

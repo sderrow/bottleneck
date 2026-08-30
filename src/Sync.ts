@@ -10,7 +10,11 @@ type QueuedTask = {
 class Sync {
   schedule: <R, A extends unknown[]>(task: (...args: A) => R, ...args: A) => Promise<R>;
   name: string;
+  /** @internal */
+  /** @internal */
   _running = 0;
+  /** @internal */
+  /** @internal */
   _queue: DLList<QueuedTask>;
 
   constructor(name: string) {
@@ -21,6 +25,7 @@ class Sync {
   isEmpty(): boolean {
     return this._queue.length === 0;
   }
+  /** @internal */
   async _tryToRun(): Promise<void> {
     if (this._running < 1 && this._queue.length > 0) {
       this._running++;
@@ -37,6 +42,7 @@ class Sync {
       cb();
     }
   }
+  /** @internal */
   _schedule<R, A extends unknown[]>(task: (...args: A) => R, ...args: A): Promise<R> {
     let reject: (reason?: unknown) => void;
     let resolve: (value: R) => void = (reject = null as never);

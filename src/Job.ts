@@ -14,11 +14,17 @@ class Job {
   args: never[] | null;
   rejectOnDrop: boolean;
   Events: Events;
+  /** @internal */
+  /** @internal */
   _states: States;
   options: ResolvedJobOptions;
   promise: Promise<unknown>;
   retryCount = 0;
+  /** @internal */
+  /** @internal */
   _resolve: (value: unknown) => void = null as never;
+  /** @internal */
+  /** @internal */
   _reject: (reason?: unknown) => void = null as never;
 
   constructor(
@@ -47,6 +53,8 @@ class Job {
     this.retryCount = 0;
   }
 
+  /** @internal */
+  /** @internal */
   _sanitizePriority(priority: unknown): number {
     const sProperty = ~~(priority as number) !== priority ? DEFAULT_PRIORITY : (priority as number);
     if (sProperty < 0) {
@@ -76,6 +84,8 @@ class Job {
     }
   }
 
+  /** @internal */
+  /** @internal */
   _assertStatus(expected: string): void {
     const status = this._states.jobStatus(this.options.id);
     if (!(status === expected || (expected === "DONE" && status === null))) {
@@ -164,6 +174,7 @@ class Job {
     return this._onFailure(error, eventInfo, clearGlobalState, run, free);
   }
 
+  /** @internal */
   async _onFailure(
     error: unknown,
     eventInfo: EventInfo,
