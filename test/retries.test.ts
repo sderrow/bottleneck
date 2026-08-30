@@ -24,7 +24,7 @@ describe("Retries", () => {
     let retryEvents = 0;
     const attemptTimes: number[] = [];
 
-    limiter.on("failed", (error, info) => {
+    limiter.on("failed", (_error, info) => {
       expect(limiter.counts().EXECUTING).toStrictEqual(1);
       expect(info.retryCount).toStrictEqual(failedEvents);
       failedEvents++;
@@ -61,7 +61,7 @@ describe("Retries", () => {
     let retryEvents = 0;
     const attemptTimes: number[] = [];
 
-    limiter.on("failed", (error, info) => {
+    limiter.on("failed", (_error, info) => {
       expect(limiter.counts().EXECUTING).toStrictEqual(1);
       expect(info.retryCount).toStrictEqual(failedEvents);
       failedEvents++;
@@ -99,7 +99,7 @@ describe("Retries", () => {
     let errorEvents = 0;
     let caught = false;
 
-    limiter.on("failed", (error, info) => {
+    limiter.on("failed", (_error, info) => {
       expect(limiter.counts().EXECUTING).toStrictEqual(1);
       expect(info.retryCount).toStrictEqual(failedEvents);
       failedEvents++;
@@ -137,7 +137,7 @@ describe("Retries", () => {
     let errorEvents = 0;
     let caught = false;
 
-    limiter.on("failed", (error, info) => {
+    limiter.on("failed", (_error, info) => {
       expect(limiter.counts().EXECUTING).toStrictEqual(1);
       expect(info.retryCount).toStrictEqual(failedEvents);
       failedEvents++;
@@ -174,7 +174,7 @@ describe("Retries", () => {
     let retryEvents = 0;
     let caught = false;
 
-    limiter.on("failed", (error, info) => {
+    limiter.on("failed", (_error, info) => {
       expect(limiter.counts().EXECUTING).toStrictEqual(1);
       expect(info.retryCount).toStrictEqual(failedEvents);
       failedEvents++;
@@ -205,7 +205,7 @@ describe("Retries", () => {
     let retryEvents = 0;
     let caught = false;
 
-    limiter.on("failed", (error, info) => {
+    limiter.on("failed", (_error, info) => {
       expect(limiter.counts().EXECUTING).toStrictEqual(1);
       expect(info.retryCount).toStrictEqual(failedEvents);
       failedEvents++;

@@ -185,7 +185,7 @@ class LocalDatastore {
   }
 
   async __register__(
-    index: string,
+    _index: string,
     weight: number,
     _expiration: number | null,
   ): Promise<{ success: boolean; wait?: number; reservoir?: number | null }> {
@@ -236,7 +236,7 @@ class LocalDatastore {
     return { reachedHWM, blocked, strategy: this.storeOptions.strategy };
   }
 
-  async __free__(index: string, weight: number): Promise<{ running: number }> {
+  async __free__(_index: string, weight: number): Promise<{ running: number }> {
     await this.yieldLoop();
     this._running -= weight;
     this._done += weight;

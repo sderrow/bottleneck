@@ -16,7 +16,7 @@ describe("dist/light smoke", () => {
 
   it("throws when clustering datastore is requested", () => {
     expect(() => {
-      const _limiter = new Bottleneck({ datastore: "redis" });
+      void new Bottleneck({ datastore: "redis" });
     }).toThrow(/full version of Bottleneck/i);
   });
 });

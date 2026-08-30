@@ -400,7 +400,7 @@ class Bottleneck {
       enqueueErrorMessage: string;
     };
     if (opts.dropWaitingJobs) {
-      this._run = (index: string, next: Job) => next.doDrop({ message: opts.dropErrorMessage });
+      this._run = (_index: string, next: Job) => next.doDrop({ message: opts.dropErrorMessage });
       this._drainOne = (): Promise<null> => this.Promise.resolve(null);
       done = this._registerLock.schedule(() =>
         this._submitLock.schedule(() => {

@@ -91,7 +91,7 @@ class RedisDatastore {
     return client.publish!(this.instance.channel(), `message:${message.toString()}`);
   }
 
-  async onMessage(channel: string, message: string): Promise<unknown> {
+  async onMessage(_channel: string, message: string): Promise<unknown> {
     try {
       const pos = message.indexOf(":");
       const [type, data] = [message.slice(0, pos), message.slice(pos + 1)];

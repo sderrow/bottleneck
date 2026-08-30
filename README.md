@@ -1193,7 +1193,7 @@ pnpm run test:cluster        # valkey/valkey:9-alpine (the default)
 
 - Framework primitives (`describe`, `expect`, `vi`) are imported directly from
   `vitest`; the fixture-extended `test` (plus `waitForState`, `deferred`, and
-  `enqueued`) comes from `test/helpers/test-api.js`.
+  `enqueued`) comes from `test/helpers/test-api.ts`.
 - Tests declare the fixtures they use: `harness` (job task fns + call log),
   `makeLimiter` (env-aware, auto-disconnected), and `track` (teardown for
   limiters/groups constructed directly).

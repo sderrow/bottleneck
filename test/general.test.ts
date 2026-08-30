@@ -17,7 +17,7 @@ const disconnectError = () => {
 describe("General", () => {
   test("Should prompt to upgrade", () => {
     expect(() => {
-      const _limiter = new (Bottleneck as any)(1, 250);
+      void new (Bottleneck as any)(1, 250);
     }).toThrow(/Bottleneck v2 takes a single object argument/);
   });
 
