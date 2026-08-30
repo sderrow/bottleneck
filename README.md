@@ -19,7 +19,8 @@ More importantly, this library has been rewritten with modern-day JS (courtesy o
 ### Breaking changes in v4
 
 - The callback-style `submit()` method has been removed — Bottleneck is now Promise-only. Use `schedule()`, wrapping callback-style functions with [`util.promisify`](https://nodejs.org/api/util.html#utilpromisifyoriginal). The `Bottleneck.Callback` type is gone from the typings.
-- The ES5 build has been removed (`require("bottleneck/es5")` no longer exists). If you need broad-browser support, use the UMD `@sderrow/bottleneck/light` build instead.
+- TypeScript: the `Bottleneck.*` type namespace is gone. `Bottleneck.ConstructorOptions` is now a top-level `BottleneckOptions` import (renamed), and the other option/event types are top-level named imports too. Helper classes (`BottleneckError`, `Group`, `Batcher`, `RedisConnection`, `IORedisConnection`) are now named ESM exports as well as `Bottleneck.*` statics.
+- The ES5 build has been removed (`require("bottleneck/es5")` no longer exists). If you need broad-browser support, use the ESM `@sderrow/bottleneck/light` build instead.
 - Cluster mode now requires `redis` v4+ (drops v2/v3) or `ioredis` v5+. The unsupported `redis` v2/v3 client API has been removed.
 - `ioredis` and `redis` are now optional **peer dependencies**. Your application must install whichever client it uses.
 - The `Redis` constructor option is now required when `datastore` is `"redis"` or `"ioredis"` (unless you pass a pre-built `client` or `connection`). Bottleneck no longer implicitly does `require("ioredis")` for you.
@@ -206,7 +207,7 @@ limiter.schedule(object.doSomething.bind(object));
 limiter.schedule(() => object.doSomething());
 ```
 
-- Bottleneck targets modern Node.js. For browser usage, a UMD build without cluster support ships under the `@sderrow/bottleneck/light` subpath import.
+- Bottleneck targets modern Node.js. For browser usage, an ESM build without cluster support ships under the `@sderrow/bottleneck/light` subpath import.
 
 - Make sure you're catching `"error"` events emitted by your limiters!
 
@@ -1027,6 +1028,32 @@ limiter
   });
 ```
 
+Branch on `error.code`, not on the message — messages can be customized (`dropErrorMessage`, `enqueueErrorMessage`) but the code is stable:
+
+```js
+const { BottleneckError } = require("@sderrow/bottleneck");
+// or: import { BottleneckError } from "@sderrow/bottleneck";
+
+try {
+  await limiter.schedule(fn);
+} catch (error) {
+  if (error instanceof BottleneckError && error.code === "EXPIRED") {
+    // the job ran longer than its `expiration`
+  }
+}
+```
+
+| `code`              | Meaning                                                             |
+| ------------------- | ------------------------------------------------------------------- |
+| `DROPPED`           | The job was shed by the queue strategy, or dropped by `stop()`.     |
+| `EXPIRED`           | The job ran longer than its `expiration`.                           |
+| `STOPPED`           | The job was submitted after `stop()`, or `stop()` was called twice. |
+| `DUPLICATE_JOB_ID`  | A job with the same `id` already exists.                            |
+| `OVERWEIGHT`        | The job's `weight` exceeds the limiter's `maxConcurrent`.           |
+| `INVALID_DATASTORE` | Unknown `datastore` value.                                          |
+| `INVALID_ARGUMENTS` | The constructor received a non-object argument (v1-style usage).    |
+| `MISSING_CLIENT`    | Cluster mode without a `Redis` library or pre-built `client`.       |
+
 ## Upgrading to v2
 
 The internal algorithms essentially haven't changed from v1, but many small changes to the interface were made to introduce new features.
@@ -1115,13 +1142,37 @@ limiter.schedule(util.promisify(someAsyncCall), arg1, arg2).then(result => /* ..
 
 Job options move over unchanged: `limiter.schedule({ priority: 4 }, fn, ...args)`.
 
+### TypeScript users
+
+The `Bottleneck.*` type namespace from v2 is gone. Types are top-level named imports, and `ConstructorOptions` has been renamed to `BottleneckOptions`:
+
+```diff
+- import Bottleneck from "bottleneck";
++ import Bottleneck, {
++   type BatcherOptions,
++   type BottleneckOptions,
++   type EventInfoDropped,
++ } from "bottleneck";
+
+- function makeLimiter(options: Bottleneck.ConstructorOptions) { /* ... */ }
++ function makeLimiter(options: BottleneckOptions) { /* ... */ }
+```
+
+Helper classes work both ways — `new Bottleneck.Group(...)` is unchanged, and ESM consumers can also import them directly:
+
+```js
+import Bottleneck, { BottleneckError, Group, Batcher } from "bottleneck";
+```
+
+`BottleneckError` carries a stable `code` for programmatic handling (see [Debugging your application](#debugging-your-application)). CommonJS consumers are unaffected: `require("bottleneck")` still returns the class, and `require("bottleneck").default` now resolves too, so `import Bottleneck from "bottleneck"` works even when TypeScript compiles without `esModuleInterop`.
+
 ### Legacy `redis` v2/v3 users
 
 The minimum supported `redis` package version is now v4. The v2/v3 callback-style client API is no longer supported. Follow node-redis's own [v3-to-v4 migration guide](https://github.com/redis/node-redis/blob/master/docs/v3-to-v4.md) to upgrade your client. v5 is also fully supported.
 
 ### ES5 users
 
-The `bottleneck/es5` import path has been removed. If you still need a build that runs in older browsers, use the UMD `@sderrow/bottleneck/light` build (which excludes cluster mode) and transpile in your own toolchain.
+The `bottleneck/es5` import path has been removed. If you still need a build that runs in older browsers, use the ESM `@sderrow/bottleneck/light` build (which excludes cluster mode) and transpile in your own toolchain.
 
 ## Contributing
 
@@ -1142,16 +1193,16 @@ Suggestions and bug reports are also welcome.
 Make changes only inside `src/`:
 
 - `src/` — the local-mode core (browser-safe, no Redis dependencies).
-- `src/cluster/` — Redis-only modules (RedisDatastore, RedisConnection, IORedisConnection, Scripts, and `lua/*.lua`). Anything in this folder is excluded from the `dist/light.js` UMD build by the `excludeClustering` plugin in [tsdown.config.mts](tsdown.config.mts).
+- `src/cluster/` — Redis-only modules (RedisDatastore, RedisConnection, IORedisConnection, Scripts, and `lua/*.lua`). Anything in this folder is excluded from the `dist/light.js` ESM build by the `excludeClustering` plugin in [tsdown.config.mts](tsdown.config.mts).
 
 ### Common commands
 
 ```bash
 pnpm install                # install dependencies
-pnpm run build              # build dist/index.js (CJS) and dist/light.js (UMD)
+pnpm run build              # build dist/index.mjs + dist/index.cjs (dual ESM/CJS) and dist/light.js (ESM)
 pnpm run lint               # oxlint
 pnpm run format:check       # oxfmt --check (use `pnpm run format` to auto-fix)
-pnpm tsc                    # type-check src, test tree, and bottleneck.d.ts (via test.ts)
+pnpm tsc                    # type-check src, test tree, and scripts
 pnpm test                   # build + all non-memory Vitest projects in parallel
 pnpm run test:memory        # heap / iterateAsync checks (`--expose-gc`; slower)
 pnpm run test:all           # `pnpm test` + memory project (matches CI)
@@ -1165,7 +1216,7 @@ Vitest projects:
 | ------------------------ | --------------------------------------------------------------------------------------------------------------------- |
 | `local`                  | Full suite, local datastore (cluster tests excluded).                                                                 |
 | `ioredis` / `node-redis` | Same suite against Redis via Testcontainers (per-file container isolation, `maxWorkers: 3`, `FLUSHDB` between tests). |
-| `light-smoke`            | Loads `dist/light.js`, basic schedule, clustering stub error.                                                         |
+| `light-smoke`            | Loads `dist/light.js` (ESM), basic schedule, clustering stub error.                                                   |
 | `memory`                 | Heap stability tests only (`pnpm run test:memory` or `pnpm run test`).                                                |
 
 You need a container runtime (Docker Desktop, Colima, OrbStack, …) for the Redis-backed projects.

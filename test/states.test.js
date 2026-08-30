@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-const States = require("../src/States");
-const BottleneckError = require("../src/BottleneckError");
+import BottleneckError from "../src/BottleneckError";
+import States from "../src/States";
 
 describe("States", () => {
   it("Should be created and be empty", () => {

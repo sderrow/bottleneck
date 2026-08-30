@@ -1,13 +1,49 @@
-const parser = require("./parser");
-const BottleneckError = require("./BottleneckError");
-const sleep = require("./sleep");
+import type Bottleneck from "./Bottleneck";
+import type { StoreOptions } from "./types";
+import BottleneckError from "./BottleneckError";
+import { load, overwrite } from "./parser";
+import sleep from "./sleep";
+
+type LocalStoreInstanceOptions = {
+  Promise: PromiseConstructor;
+  timeout: number | null;
+  heartbeatInterval: number;
+};
 
 class LocalDatastore {
-  constructor(instance, storeOptions, storeInstanceOptions) {
+  instance: Bottleneck;
+  storeOptions: StoreOptions;
+  Promise: PromiseConstructor = Promise;
+  timeout: number | null = null;
+  heartbeatInterval: number = 250;
+  heartbeat: ReturnType<typeof setInterval> | undefined;
+  /** @internal */
+  _disconnecting = false;
+  clientId: string;
+  /** @internal */
+  _nextRequest: number;
+  /** @internal */
+  _lastReservoirRefresh: number;
+  /** @internal */
+  _lastReservoirIncrease: number;
+  /** @internal */
+  _running = 0;
+  /** @internal */
+  _done = 0;
+  /** @internal */
+  _unblockTime = 0;
+  ready: Promise<unknown> = Promise.resolve();
+  clients: Record<string, unknown> = {};
+
+  constructor(
+    instance: Bottleneck,
+    storeOptions: StoreOptions,
+    storeInstanceOptions: Partial<LocalStoreInstanceOptions>,
+  ) {
     this.instance = instance;
     this.storeOptions = storeOptions;
     this.clientId = this.instance._randomIndex();
-    parser.load(storeInstanceOptions, storeInstanceOptions, this);
+    load(storeInstanceOptions, storeInstanceOptions as object, this);
     this._nextRequest = this._lastReservoirRefresh = this._lastReservoirIncrease = Date.now();
     this._running = 0;
     this._done = 0;
@@ -17,7 +53,8 @@ class LocalDatastore {
     this._startHeartbeat();
   }
 
-  _startHeartbeat() {
+  /** @internal */
+  _startHeartbeat(): void {
     if (this.heartbeat) {
       clearInterval(this.heartbeat);
     }
@@ -49,65 +86,75 @@ class LocalDatastore {
             reservoir,
           } = this.storeOptions;
           this._lastReservoirIncrease = now;
-          const incr = maximum != null ? Math.min(amount, maximum - reservoir) : amount;
-          if (incr > 0) {
-            this.storeOptions.reservoir += incr;
-            return this.instance._drainAll(this.computeCapacity());
+          const incr =
+            maximum != null && amount != null
+              ? Math.min(amount, maximum - (reservoir ?? 0))
+              : amount;
+          if (incr != null && incr > 0) {
+            this.storeOptions.reservoir = (this.storeOptions.reservoir ?? 0) + incr;
+            this.instance._drainAll(this.computeCapacity());
           }
         }
       }, this.heartbeatInterval).unref?.();
     }
   }
 
-  async __publish__(message) {
+  /** @internal */
+  async __publish__(message: string): Promise<unknown> {
     await this.yieldLoop();
     return this.instance.Events.trigger("message", message.toString());
   }
 
-  async __disconnect__() {
+  /** @internal */
+  async __disconnect__(_flush?: boolean): Promise<void> {
     await this.yieldLoop();
     clearInterval(this.heartbeat);
   }
 
-  yieldLoop(t) {
+  yieldLoop(t?: number): Promise<void> {
     return sleep(t ?? 0);
   }
 
-  computePenalty() {
+  computePenalty(): number {
     return this.storeOptions.penalty != null
       ? this.storeOptions.penalty
       : 15 * this.storeOptions.minTime || 5000;
   }
 
-  async __updateSettings__(options) {
+  /** @internal */
+  async __updateSettings__(options: StoreOptions): Promise<boolean> {
     await this.yieldLoop();
-    parser.overwrite(options, options, this.storeOptions);
+    overwrite(options, options, this.storeOptions);
     this._startHeartbeat();
     this.instance._drainAll(this.computeCapacity());
     return true;
   }
 
-  async __running__() {
+  /** @internal */
+  async __running__(): Promise<number> {
     await this.yieldLoop();
     return this._running;
   }
 
-  async __queued__() {
+  /** @internal */
+  async __queued__(): Promise<number> {
     await this.yieldLoop();
     return this.instance.queued();
   }
 
-  async __done__() {
+  /** @internal */
+  async __done__(): Promise<number> {
     await this.yieldLoop();
     return this._done;
   }
 
-  async __groupCheck__(time) {
+  /** @internal */
+  async __groupCheck__(time: number): Promise<boolean> {
     await this.yieldLoop();
-    return this._nextRequest + this.timeout < time;
+    return this._nextRequest + (this.timeout ?? 0) < time;
   }
 
-  computeCapacity() {
+  computeCapacity(): number | null {
     const { maxConcurrent, reservoir } = this.storeOptions;
     if (maxConcurrent != null && reservoir != null) {
       return Math.min(maxConcurrent - this._running, reservoir);
@@ -120,38 +167,47 @@ class LocalDatastore {
     }
   }
 
-  conditionsCheck(weight) {
+  conditionsCheck(weight: number): boolean {
     const capacity = this.computeCapacity();
     return capacity == null || weight <= capacity;
   }
 
-  async __incrementReservoir__(incr) {
+  /** @internal */
+  async __incrementReservoir__(incr: number): Promise<number | null> {
     await this.yieldLoop();
-    const reservoir = (this.storeOptions.reservoir += incr);
+    this.storeOptions.reservoir = (this.storeOptions.reservoir ?? 0) + incr;
+    const reservoir = this.storeOptions.reservoir;
     this.instance._drainAll(this.computeCapacity());
     return reservoir;
   }
 
-  async __currentReservoir__() {
+  /** @internal */
+  async __currentReservoir__(): Promise<number | null> {
     await this.yieldLoop();
     return this.storeOptions.reservoir;
   }
 
-  isBlocked(now) {
+  isBlocked(now: number): boolean {
     return this._unblockTime >= now;
   }
 
-  check(weight, now) {
+  check(weight: number, now: number): boolean {
     return this.conditionsCheck(weight) && this._nextRequest - now <= 0;
   }
 
-  async __check__(weight) {
+  /** @internal */
+  async __check__(weight: number): Promise<boolean> {
     await this.yieldLoop();
     const now = Date.now();
     return this.check(weight, now);
   }
 
-  async __register__(index, weight, _expiration) {
+  /** @internal */
+  async __register__(
+    _index: string,
+    weight: number,
+    _expiration: number | null,
+  ): Promise<{ success: boolean; wait?: number; reservoir?: number | null }> {
     await this.yieldLoop();
     const now = Date.now();
     if (this.conditionsCheck(weight)) {
@@ -167,15 +223,24 @@ class LocalDatastore {
     }
   }
 
-  strategyIsBlock() {
+  strategyIsBlock(): boolean {
     return this.storeOptions.strategy === 3;
   }
 
-  async __submit__(queueLength, weight) {
+  /** @internal */
+  async __submit__(
+    queueLength: number,
+    weight: number,
+  ): Promise<{
+    reachedHWM: boolean;
+    blocked: boolean;
+    strategy: number | null;
+  }> {
     await this.yieldLoop();
     if (this.storeOptions.maxConcurrent != null && weight > this.storeOptions.maxConcurrent) {
       throw new BottleneckError(
         `Impossible to add a job having a weight of ${weight} to a limiter having a maxConcurrent setting of ${this.storeOptions.maxConcurrent}`,
+        "OVERWEIGHT",
       );
     }
     const now = Date.now();
@@ -192,7 +257,8 @@ class LocalDatastore {
     return { reachedHWM, blocked, strategy: this.storeOptions.strategy };
   }
 
-  async __free__(index, weight) {
+  /** @internal */
+  async __free__(_index: string, weight: number): Promise<{ running: number }> {
     await this.yieldLoop();
     this._running -= weight;
     this._done += weight;
@@ -201,4 +267,4 @@ class LocalDatastore {
   }
 }
 
-module.exports = LocalDatastore;
+export default LocalDatastore;

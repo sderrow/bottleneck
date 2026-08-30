@@ -1,43 +1,87 @@
+import type {
+  BottleneckEvents,
+  BottleneckOptions,
+  ClientsList,
+  Counts,
+  EventInfo,
+  JobDefaults,
+  JobOptions,
+  ResolvedJobOptions,
+  Status,
+  StopOptions,
+  StoreOptions,
+  StrategyConstants,
+} from "./types";
+import pkg from "../package.json" with { type: "json" };
+import Batcher from "./Batcher";
+import BottleneckError from "./BottleneckError";
+import IORedisConnection from "./cluster/IORedisConnection";
+import RedisConnection from "./cluster/RedisConnection";
+import RedisDatastore from "./cluster/RedisDatastore";
+import Events from "./Events";
+import Group from "./Group";
+import Job from "./Job";
+import LocalDatastore from "./LocalDatastore";
+import { load, overwrite } from "./parser";
+import Queues from "./Queues";
+import randomIndex from "./random-index";
+import States from "./States";
+import Sync from "./Sync";
+
 const NUM_PRIORITIES = 10;
 const DEFAULT_PRIORITY = 5;
 
-const parser = require("./parser");
-const Queues = require("./Queues");
-const Job = require("./Job");
-const LocalDatastore = require("./LocalDatastore");
-const RedisDatastore = require("./cluster/RedisDatastore");
-const Events = require("./Events");
-const States = require("./States");
-const Sync = require("./Sync");
-const BottleneckError = require("./BottleneckError");
-const randomIndex = require("./random-index");
-const Group = require("./Group");
-const RedisConnection = require("./cluster/RedisConnection");
-const IORedisConnection = require("./cluster/IORedisConnection");
-const Batcher = require("./Batcher");
-const version = require("../package.json").version;
+const version = (pkg as { version: string }).version;
+
+// Group <-> Bottleneck ESM cycle: assignment target for `static set Group`.
+// Read through the getter; never referenced during module evaluation.
+let groupOverride: typeof Group | undefined;
+
+type ScheduledJob = {
+  timeout: ReturnType<typeof setTimeout>;
+  expiration: ReturnType<typeof setTimeout> | undefined;
+  job: Job;
+};
+
 class Bottleneck {
   static BottleneckError = BottleneckError;
-  static Group = Group;
+  // CJS interop: the CJS build sets `module.exports = Bottleneck`, so without
+  // this `require("bottleneck").default` is undefined and TypeScript consumers
+  // compiled to CommonJS without `esModuleInterop` get undefined from
+  // `import Bottleneck from "bottleneck"` (it compiles to `.default` access).
+  static default: typeof Bottleneck;
+  // Lazy accessors: Group <-> Bottleneck form an ESM module cycle (Group
+  // instantiates Bottleneck at runtime). A static field initializer would
+  // evaluate during the cycle and hit the TDZ when Group.mts is imported
+  // first; accessors defer resolution until after both modules initialize.
+  static get Group() {
+    return groupOverride ?? Group;
+  }
+  static set Group(value) {
+    groupOverride = value;
+  }
   static RedisConnection = RedisConnection;
   static IORedisConnection = IORedisConnection;
   static Batcher = Batcher;
   static Events = Events;
-  static strategy = {
+  static readonly strategy: StrategyConstants = {
     LEAK: 1,
     OVERFLOW: 2,
     OVERFLOW_PRIORITY: 4,
     BLOCK: 3,
   };
 
+  /** @internal */
   version = version;
-  jobDefaults = {
+  /** @internal */
+  jobDefaults: JobDefaults = {
     priority: DEFAULT_PRIORITY,
     weight: 1,
     expiration: null,
     id: "<no-id>",
   };
-  storeDefaults = {
+  /** @internal */
+  storeDefaults: StoreOptions = {
     maxConcurrent: null,
     minTime: 0,
     highWater: null,
@@ -50,22 +94,25 @@ class Bottleneck {
     reservoirIncreaseAmount: null,
     reservoirIncreaseMaximum: null,
   };
+  /** @internal */
   localStoreDefaults = {
     Promise,
-    timeout: null,
+    timeout: null as number | null,
     heartbeatInterval: 250,
   };
+  /** @internal */
   redisStoreDefaults = {
     Promise,
-    timeout: null,
+    timeout: null as number | null,
     heartbeatInterval: 5000,
     clientTimeout: 10000,
     Redis: null,
-    clientOptions: {},
-    clusterNodes: null,
+    clientOptions: {} as object,
+    clusterNodes: null as unknown,
     clearDatastore: false,
     connection: null,
   };
+  /** @internal */
   instanceDefaults = {
     datastore: "local",
     connection: null,
@@ -74,17 +121,60 @@ class Bottleneck {
     trackDoneStatus: false,
     Promise,
   };
+  /** @internal */
   stopDefaults = {
     enqueueErrorMessage: "This limiter has been stopped and cannot accept new jobs.",
     dropWaitingJobs: true,
     dropErrorMessage: "This limiter has been stopped.",
   };
 
-  constructor(options, ...invalid) {
-    this._addToQueue = this._addToQueue.bind(this);
+  // Populated from instanceDefaults via parser.load in the constructor.
+  datastore: string = "local";
+  connection: RedisConnection | IORedisConnection | null = null;
+  id: string = "<no-id>";
+  /** @internal */
+  rejectOnDrop: boolean = true;
+  /** @internal */
+  trackDoneStatus: boolean = false;
+  /** @internal */
+  Promise: PromiseConstructor = Promise;
+
+  /** @internal */
+  _addToQueue: (job: Job) => Promise<boolean>;
+  /** @internal */
+  _queues: Queues;
+  /** @internal */
+  _scheduled: Record<string, ScheduledJob> = {};
+  /** @internal */
+  _states: States;
+  /** @internal */
+  _limiter: Bottleneck | null = null;
+  Events: Events;
+  /** @internal */
+  _submitLock: Sync;
+  /** @internal */
+  _registerLock: Sync;
+  /** @internal */
+  _store: LocalDatastore | RedisDatastore;
+
+  // Installed on the instance by Events (see Events constructor); declared so
+  // this class typechecks against its own runtime behavior. The listener map
+  // is the public event contract.
+  declare on: {
+    <E extends keyof BottleneckEvents>(event: E, listener: BottleneckEvents[E]): unknown;
+    (event: string, listener: (...args: any[]) => unknown): unknown;
+  };
+  declare once: {
+    <E extends keyof BottleneckEvents>(event: E, listener: BottleneckEvents[E]): unknown;
+    (event: string, listener: (...args: any[]) => unknown): unknown;
+  };
+  declare removeAllListeners: (name?: string | null) => void;
+
+  constructor(options?: BottleneckOptions, ...invalid: unknown[]) {
+    this._addToQueue = this._addToQueueImpl.bind(this);
     options ??= {};
     this._validateOptions(options, invalid);
-    parser.load(options, this.instanceDefaults, this);
+    load(options, this.instanceDefaults, this);
     this._queues = new Queues(NUM_PRIORITIES);
     this._scheduled = {};
     this._states = new States(
@@ -94,102 +184,108 @@ class Bottleneck {
     this.Events = new Events(this);
     this._submitLock = new Sync("submit");
     this._registerLock = new Sync("register");
-    const storeOptions = parser.load(options, this.storeDefaults, {});
+    const storeOptions = load(options, this.storeDefaults, {});
 
     if (this.datastore === "redis" || this.datastore === "ioredis" || this.connection != null) {
-      const opts = parser.load(options, this.redisStoreDefaults, {});
+      const opts = load(options, this.redisStoreDefaults, {});
       this._store = new RedisDatastore(this, storeOptions, opts);
     } else if (this.datastore === "local") {
-      const opts = parser.load(options, this.localStoreDefaults, {});
+      const opts = load(options, this.localStoreDefaults, {});
       this._store = new LocalDatastore(this, storeOptions, opts);
     } else {
-      throw new BottleneckError(`Invalid datastore type: ${this.datastore}`);
+      throw new BottleneckError(`Invalid datastore type: ${this.datastore}`, "INVALID_DATASTORE");
     }
 
     this._queues.on("leftzero", () => this._store.heartbeat?.ref?.());
     this._queues.on("zero", () => this._store.heartbeat?.unref?.());
   }
 
-  _validateOptions(options, invalid) {
+  /** @internal */
+  _validateOptions(options: object | null | undefined, invalid: unknown[]): void {
     if (options == null || typeof options !== "object" || invalid.length !== 0) {
       throw new BottleneckError(
         "Bottleneck v2 takes a single object argument. Refer to https://github.com/SGrondin/bottleneck#upgrading-to-v2 if you're upgrading from Bottleneck v1.",
+        "INVALID_ARGUMENTS",
       );
     }
   }
 
-  ready() {
+  ready(): Promise<unknown> {
     return this._store.ready;
   }
 
-  clients() {
-    return this._store.clients;
+  clients(): ClientsList {
+    return this._store.clients as ClientsList;
   }
 
-  channel() {
+  channel(): string {
     return `b_${this.id}`;
   }
 
-  channel_client() {
+  /** @internal */
+  channel_client(): string {
     return `b_${this.id}_${this._store.clientId}`;
   }
 
-  publish(message) {
+  publish(message: string): Promise<unknown> {
     return this._store.__publish__(message);
   }
 
-  async disconnect(flush = true) {
+  async disconnect(flush = true): Promise<void> {
     await this._store.__disconnect__(flush);
   }
 
-  chain(_limiter) {
-    this._limiter = _limiter;
+  chain(limiter?: Bottleneck): this {
+    this._limiter = limiter ?? null;
     return this;
   }
 
-  queued(priority) {
+  queued(priority?: number): number {
     return this._queues.queued(priority);
   }
 
-  clusterQueued() {
-    return this._store.__queued__();
+  clusterQueued(): Promise<number> {
+    return this._store.__queued__() as Promise<number>;
   }
 
-  empty() {
+  empty(): boolean {
     return this.queued() === 0 && this._submitLock.isEmpty();
   }
 
-  running() {
-    return this._store.__running__();
+  running(): Promise<number> {
+    return this._store.__running__() as Promise<number>;
   }
 
-  done() {
-    return this._store.__done__();
+  done(): Promise<number> {
+    return this._store.__done__() as Promise<number>;
   }
 
-  jobStatus(id) {
-    return this._states.jobStatus(id);
+  jobStatus(id: string): Status | null {
+    return this._states.jobStatus(id) as Status | null;
   }
 
-  jobs(status) {
+  jobs(status?: Status): string[] {
     return this._states.statusJobs(status);
   }
 
-  counts() {
-    return this._states.statusCounts();
+  counts(): Counts {
+    return this._states.statusCounts() as Counts;
   }
 
-  _randomIndex() {
+  /** @internal */
+  _randomIndex(): string {
     return randomIndex();
   }
 
-  check(weight = 1) {
+  check(weight = 1): Promise<boolean> {
     return this._store.__check__(weight);
   }
 
-  _clearGlobalState(index) {
-    if (this._scheduled[index] != null) {
-      clearTimeout(this._scheduled[index].expiration);
+  /** @internal */
+  _clearGlobalState(index: string): boolean {
+    const scheduled = this._scheduled[index];
+    if (scheduled != null) {
+      clearTimeout(scheduled.expiration);
       delete this._scheduled[index];
       return true;
     } else {
@@ -197,7 +293,13 @@ class Bottleneck {
     }
   }
 
-  async _free(index, job, options, eventInfo) {
+  /** @internal */
+  async _free(
+    index: string,
+    _job: Job,
+    options: ResolvedJobOptions,
+    eventInfo: EventInfo,
+  ): Promise<unknown> {
     try {
       const { running } = await this._store.__free__(index, options.weight);
       this.Events.trigger("debug", `Freed ${options.id}`, eventInfo);
@@ -205,13 +307,17 @@ class Bottleneck {
         return this.Events.trigger("idle");
       }
     } catch (e) {
-      if (!this._store._disconnecting || e?.constructor?.name !== "DisconnectsClientError") {
+      if (
+        !this._store._disconnecting ||
+        (e as Error)?.constructor?.name !== "DisconnectsClientError"
+      ) {
         return this.Events.trigger("error", e);
       }
     }
   }
 
-  _run(index, job, wait) {
+  /** @internal */
+  _run(index: string, job: Job, wait: number): unknown {
     job.doRun();
     const clearGlobalState = this._clearGlobalState.bind(this, index);
     const run = this._run.bind(this, index, job);
@@ -232,14 +338,15 @@ class Bottleneck {
     });
   }
 
-  async _drainOne(capacity) {
-    return this._registerLock.schedule(async () => {
-      let next;
+  /** @internal */
+  async _drainOne(capacity: number | null | undefined): Promise<number | null> {
+    return this._registerLock.schedule(async (): Promise<number | null> => {
       if (this.queued() === 0) {
         return null;
       }
       const queue = this._queues.getFirst();
-      const { options, args } = (next = queue.first());
+      const next = queue.first() as Job;
+      const { options, args } = next;
       if (capacity != null && options.weight > capacity) {
         return null;
       }
@@ -263,7 +370,7 @@ class Bottleneck {
         if (reservoir === 0) {
           this.Events.trigger("depleted", empty);
         }
-        this._run(index, next, wait);
+        this._run(index, next, wait as number);
         return options.weight;
       } else {
         return null;
@@ -271,34 +378,39 @@ class Bottleneck {
     });
   }
 
-  async _drainAll(capacity, total = 0) {
+  /** @internal */
+  async _drainAll(capacity?: number | null, total = 0): Promise<number | undefined> {
     try {
       const drained = await this._drainOne(capacity);
       if (drained != null) {
-        const newCapacity = capacity != null ? capacity - drained : capacity;
+        const newCapacity = capacity != null ? capacity - drained : undefined;
         return this._drainAll(newCapacity, total + drained);
       } else {
         return total;
       }
     } catch (e) {
-      if (!this._store._disconnecting || e?.constructor?.name !== "DisconnectsClientError") {
+      if (
+        !this._store._disconnecting ||
+        (e as Error)?.constructor?.name !== "DisconnectsClientError"
+      ) {
         this.Events.trigger("error", e);
       }
     }
   }
 
-  _dropAllQueued(message) {
-    return this._queues.shiftAll((job) => job.doDrop({ message }));
+  /** @internal */
+  _dropAllQueued(message?: string): void {
+    this._queues.shiftAll((job) => job.doDrop({ message }));
   }
 
-  stop(options) {
-    options ??= {};
-    options = parser.load(options, this.stopDefaults);
+  stop(options: StopOptions = {}): Promise<void> {
+    options = load(options ?? {}, this.stopDefaults);
 
-    const waitForExecuting = (at) => {
-      const finished = () => {
+    const waitForExecuting = (at: number): Promise<void> => {
+      const finished = (): boolean => {
         const { counts } = this._states;
-        return counts[0] + counts[1] + counts[2] + counts[3] === at;
+        const total = counts[0]! + counts[1]! + counts[2]! + counts[3]!;
+        return total === at;
       };
       return new Promise((resolve) => {
         if (finished()) {
@@ -314,35 +426,45 @@ class Bottleneck {
       });
     };
 
-    let done;
-    if (options.dropWaitingJobs) {
-      this._run = (index, next) => next.doDrop({ message: options.dropErrorMessage });
-      this._drainOne = () => this.Promise.resolve(null);
+    let done: Promise<unknown>;
+    const opts = options as {
+      dropWaitingJobs: boolean;
+      dropErrorMessage: string;
+      enqueueErrorMessage: string;
+    };
+    if (opts.dropWaitingJobs) {
+      this._run = (_index: string, next: Job) => next.doDrop({ message: opts.dropErrorMessage });
+      this._drainOne = (): Promise<null> => this.Promise.resolve(null);
       done = this._registerLock.schedule(() =>
         this._submitLock.schedule(() => {
           for (const v of Object.values(this._scheduled)) {
             if (this.jobStatus(v.job.options.id) === "RUNNING") {
               clearTimeout(v.timeout);
               clearTimeout(v.expiration);
-              v.job.doDrop({ message: options.dropErrorMessage });
+              v.job.doDrop({ message: opts.dropErrorMessage });
             }
           }
-          this._dropAllQueued(options.dropErrorMessage);
+          this._dropAllQueued(opts.dropErrorMessage);
           return waitForExecuting(0);
         }),
       );
     } else {
-      done = this.schedule({ priority: NUM_PRIORITIES - 1, weight: 0 }, () => waitForExecuting(1));
+      done = this.schedule({ priority: NUM_PRIORITIES - 1, weight: 0 } as never, () =>
+        waitForExecuting(1),
+      );
     }
 
-    this._receive = (job) => job._reject(new BottleneckError(options.enqueueErrorMessage));
-    this.stop = () => this.Promise.reject(new BottleneckError("stop() has already been called"));
+    this._receive = (job: Job) =>
+      job._reject(new BottleneckError(opts.enqueueErrorMessage, "STOPPED"));
+    this.stop = (): Promise<never> =>
+      this.Promise.reject(new BottleneckError("stop() has already been called", "STOPPED"));
 
-    return done;
+    return done as Promise<void>;
   }
 
-  async _addToQueue(job) {
-    let blocked, reachedHWM, strategy;
+  /** @internal */
+  async _addToQueueImpl(job: Job): Promise<boolean> {
+    let blocked: boolean, reachedHWM: boolean, strategy: unknown;
     const { args, options } = job;
     try {
       ({ reachedHWM, blocked, strategy } = await this._store.__submit__(
@@ -359,7 +481,7 @@ class Bottleneck {
       job.doDrop();
       return true;
     } else if (reachedHWM) {
-      let shifted;
+      let shifted: Job | undefined;
       if (strategy === Bottleneck.strategy.LEAK) {
         shifted = this._queues.shiftLastFrom(options.priority);
       } else if (strategy === Bottleneck.strategy.OVERFLOW_PRIORITY) {
@@ -384,29 +506,45 @@ class Bottleneck {
     return reachedHWM;
   }
 
-  _receive(job) {
+  /** @internal */
+  _receive: (job: Job) => unknown = (job: Job): unknown => {
     if (this._states.jobStatus(job.options.id) != null) {
       job._reject(
-        new BottleneckError(`A job with the same id already exists (id=${job.options.id})`),
+        new BottleneckError(
+          `A job with the same id already exists (id=${job.options.id})`,
+          "DUPLICATE_JOB_ID",
+        ),
       );
       return false;
     } else {
       job.doReceive();
       return this._submitLock.schedule(this._addToQueue, job);
     }
-  }
+  };
 
-  schedule(...args) {
-    let options, task;
+  schedule<R>(task: () => R): Promise<Awaited<R>>;
+  schedule<R, A extends unknown[]>(task: (...args: A) => R, ...args: A): Promise<Awaited<R>>;
+  schedule<R>(options: JobOptions, task: () => R): Promise<Awaited<R>>;
+  schedule<R, A extends unknown[]>(
+    options: JobOptions,
+    task: (...args: A) => R,
+    ...args: A
+  ): Promise<Awaited<R>>;
+  schedule(...args: unknown[]): Promise<unknown> {
+    let options: object | undefined;
+    let task: unknown;
     if (typeof args[0] === "function") {
-      [task, ...args] = args;
+      task = args[0];
+      args = args.slice(1);
       options = {};
     } else {
-      [options, task, ...args] = args;
+      options = args[0] as object;
+      task = args[1];
+      args = args.slice(2);
     }
     const job = new Job(
-      task,
-      args,
+      task as (...args: never[]) => unknown,
+      args as never[],
       options,
       this.jobDefaults,
       this.rejectOnDrop,
@@ -417,30 +555,43 @@ class Bottleneck {
     return job.promise;
   }
 
-  wrap(fn) {
-    const schedule = this.schedule.bind(this);
-    const wrapped = function (...args) {
-      return schedule(fn.bind(this), ...args);
+  wrap<R, A extends unknown[]>(
+    fn: (...args: A) => R,
+  ): ((...args: A) => Promise<Awaited<R>>) & {
+    withOptions: (options: JobOptions, ...args: A) => Promise<Awaited<R>>;
+  } {
+    const run = (opts: JobOptions | null, thisArg: unknown, args: A): Promise<Awaited<R>> =>
+      opts != null
+        ? (this.schedule(opts, fn.bind(thisArg) as (...args: A) => R, ...args) as Promise<
+            Awaited<R>
+          >)
+        : (this.schedule(fn.bind(thisArg) as (...args: A) => R, ...args) as Promise<Awaited<R>>);
+    const wrapped = function (this: unknown, ...args: A): Promise<Awaited<R>> {
+      return run(null, this, args);
+    } as ((...args: A) => Promise<Awaited<R>>) & {
+      withOptions: (options: JobOptions, ...args: A) => Promise<Awaited<R>>;
     };
-    wrapped.withOptions = (options, ...args) => schedule(options, fn, ...args);
+    wrapped.withOptions = (options: JobOptions, ...args: A): Promise<Awaited<R>> =>
+      run(options, undefined, args);
     return wrapped;
   }
 
-  async updateSettings(options) {
+  async updateSettings(options?: BottleneckOptions): Promise<this> {
     options ??= {};
-    await this._store.__updateSettings__(parser.overwrite(options, this.storeDefaults));
-    parser.overwrite(options, this.instanceDefaults, this);
+    await this._store.__updateSettings__(overwrite(options, this.storeDefaults));
+    overwrite(options, this.instanceDefaults, this);
     return this;
   }
 
-  currentReservoir() {
-    return this._store.__currentReservoir__();
+  currentReservoir(): Promise<number | null> {
+    return this._store.__currentReservoir__() as Promise<number | null>;
   }
 
-  incrementReservoir(incr = 0) {
-    return this._store.__incrementReservoir__(incr);
+  incrementReservoir(incr = 0): Promise<number | null> {
+    return this._store.__incrementReservoir__(incr) as Promise<number | null>;
   }
 }
 
-module.exports = Bottleneck;
-module.exports.default = Bottleneck;
+Bottleneck.default = Bottleneck;
+
+export default Bottleneck;

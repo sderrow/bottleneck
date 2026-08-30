@@ -32,4 +32,4 @@ async function iterateAsync(fn, { iterations = 25, warmup = 3 } = {}) {
   }
 }
 
-module.exports = { iterateAsync };
+export { iterateAsync };

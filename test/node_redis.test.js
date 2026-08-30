@@ -1,7 +1,7 @@
 import { describe, expect } from "vitest";
 import { test } from "./helpers/test-api.js";
 const Redis = require("redis");
-const buildClientOptions = require("./redis-client-options");
+import buildClientOptions from "./redis-client-options";
 
 describe("node_redis-only", () => {
   test("Should accept node_redis lib override", ({ makeLimiter }) => {

@@ -1,6 +1,8 @@
-const Bottleneck = require("../bottleneck");
-const buildClientOptions = require("../redis-client-options");
-const { ConnectionTimeoutError, SocketClosedUnexpectedlyError } = require("redis");
+import IORedis from "ioredis";
+import { ConnectionTimeoutError, SocketClosedUnexpectedlyError } from "redis";
+import RedisClient from "redis";
+import Bottleneck from "../bottleneck.mjs";
+import buildClientOptions from "../redis-client-options";
 
 function setRedisClientOptions(options) {
   if (options.clientOptions == null) {
@@ -22,10 +24,10 @@ function makeLimiter(options, meta) {
   if (options.datastore == null) {
     if (process.env.DATASTORE === "redis") {
       options.datastore = "redis";
-      options.Redis ??= require("redis");
+      options.Redis ??= RedisClient;
     } else if (process.env.DATASTORE === "ioredis") {
       options.datastore = "ioredis";
-      options.Redis ??= require("ioredis");
+      options.Redis ??= IORedis;
     } else {
       options.datastore = "local";
     }
@@ -56,6 +58,5 @@ function makeLimiter(options, meta) {
   return limiter;
 }
 
-module.exports = makeLimiter;
-module.exports.makeLimiter = makeLimiter;
-module.exports.buildClientOptions = buildClientOptions;
+export default makeLimiter;
+export { makeLimiter, buildClientOptions };

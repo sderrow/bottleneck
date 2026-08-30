@@ -1,4 +1,4 @@
-import sleep from "../../src/sleep.js";
+import sleep from "../../src/sleep";
 
 /**
  * Manually-released signal for {@link createTaskFns}'s deferredPromise.

@@ -1,7 +1,7 @@
 import { describe, expect } from "vitest";
+import Bottleneck from "./bottleneck.mjs";
 import { useFakeClock } from "./helpers/clock.js";
 import { test, waitForState, deferred } from "./helpers/test-api.js";
-const Bottleneck = require("./bottleneck");
 
 useFakeClock();
 

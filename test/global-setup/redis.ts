@@ -6,15 +6,15 @@
 // (ConnectionTimeoutError, unexpected 5-second test durations, etc.).
 //
 // Key isolation between concurrent forks is handled by the per-fork id-prefix
-// in test/bottleneck.js plus prefix-scoped SCAN+UNLINK in test/setup.ts, so
+// in test/bottleneck.mjs plus prefix-scoped SCAN+UNLINK in test/setup.ts, so
 // sharing one instance is safe.
 //
 // Host/port are forwarded via process.env; worker forks inherit them
 // automatically because they are spawned after this setup function runs.
 
 import type { StartedRedisContainer } from "@testcontainers/redis";
-// Untyped CJS module shared with src and the test helpers (see src/sleep.js).
-import sleep from "../../src/sleep.js";
+// Untyped CJS module shared with src and the test helpers (see src/sleep).
+import sleep from "../../src/sleep";
 
 let stop: (() => Promise<unknown>) | undefined;
 

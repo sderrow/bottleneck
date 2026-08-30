@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-const { normalizeReply } = require("../src/cluster/normalizeReply");
+import { normalizeReply } from "../src/cluster/normalizeReply";
 
 describe("normalizeReply", () => {
   test("hgetall: RESP2 flat array becomes an object", () => {

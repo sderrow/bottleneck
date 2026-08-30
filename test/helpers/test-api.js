@@ -1,9 +1,8 @@
 import { test as baseTest, expect as vitestExpect, vi } from "vitest";
+import Bottleneck from "../bottleneck.mjs";
 import { isFakeClock } from "./clock.js";
 import { createTaskFns } from "./job-tasks.js";
 import makeLimiterHelper from "./limiter.js";
-
-const Bottleneck = require("../bottleneck");
 
 export { waitForState } from "./wait-for-state.js";
 export { deferred } from "./job-tasks.js";
