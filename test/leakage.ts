@@ -11,7 +11,10 @@ function forceGc() {
   global.gc();
 }
 
-async function iterateAsync(fn, { iterations = 25, warmup = 3 } = {}) {
+async function iterateAsync(
+  fn: () => unknown | Promise<unknown>,
+  { iterations = 25, warmup = 3 }: { iterations?: number; warmup?: number } = {},
+) {
   for (let i = 0; i < warmup; i++) await fn();
 
   const heapDiffs = [];

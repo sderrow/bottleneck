@@ -1,7 +1,8 @@
 import { describe, expect } from "vitest";
+import type { JobOptions } from "../src/types";
 import sleep from "../src/sleep";
-import { useFakeClock, useRealClockForThisTest } from "./helpers/clock.js";
-import { test, waitForState, deferred } from "./helpers/test-api.js";
+import { useFakeClock, useRealClockForThisTest } from "./helpers/clock";
+import { test, waitForState, deferred } from "./helpers/test-api";
 
 const path = require("path");
 const util = require("util");
@@ -139,16 +140,40 @@ describe("General traffic", () => {
       });
 
       let calledDepleted = 0;
-      const emptyArguments = [];
+      const emptyArguments: boolean[] = [];
       limiter.on("depleted", (empty) => {
         emptyArguments.push(empty);
         calledDepleted++;
       });
 
-      const p1 = limiter.schedule({ weight: 1, id: 1 }, h.slowPromise, 100, null, 1);
-      const p2 = limiter.schedule({ weight: 2, id: 2 }, h.slowPromise, 150, null, 2);
-      const p3 = limiter.schedule({ weight: 1, id: 3 }, h.slowPromise, 100, null, 3);
-      const p4 = limiter.schedule({ weight: 1, id: 4 }, h.slowPromise, 100, null, 4);
+      const p1 = limiter.schedule(
+        { weight: 1, id: 1 } as unknown as JobOptions,
+        h.slowPromise,
+        100,
+        null,
+        1,
+      );
+      const p2 = limiter.schedule(
+        { weight: 2, id: 2 } as unknown as JobOptions,
+        h.slowPromise,
+        150,
+        null,
+        2,
+      );
+      const p3 = limiter.schedule(
+        { weight: 1, id: 3 } as unknown as JobOptions,
+        h.slowPromise,
+        100,
+        null,
+        3,
+      );
+      const p4 = limiter.schedule(
+        { weight: 1, id: 4 } as unknown as JobOptions,
+        h.slowPromise,
+        100,
+        null,
+        4,
+      );
 
       await expect(Promise.all([p1, p2])).resolves.toEqual([[1], [2]]);
 
@@ -264,7 +289,7 @@ describe("General traffic", () => {
       };
 
       // Register the listener before publishing so the message can't be missed.
-      const received = new Promise((resolve) => {
+      const received = new Promise<string>((resolve) => {
         limiter.on("message", resolve);
       });
 
@@ -366,7 +391,7 @@ describe("General traffic", () => {
       const matches = stdout.match(/\[(\d+)\]/g);
       expect(matches).toBeTruthy();
       expect(matches.length).toEqual(4);
-      const nums = matches.map((m) => Number(m.slice(1, -1)));
+      const nums = matches.map((m: string) => Number(m.slice(1, -1)));
       expect(nums[2]).toBeGreaterThan(nums[0]);
       expect(stderr).toEqual("");
     });
@@ -486,7 +511,7 @@ describe("General traffic", () => {
       const matches = stdout.match(/\[(\d+)\]/g);
       expect(matches).toBeTruthy();
       expect(matches.length).toEqual(4);
-      const nums = matches.map((m) => Number(m.slice(1, -1)));
+      const nums = matches.map((m: string) => Number(m.slice(1, -1)));
       expect(nums[2]).toBeGreaterThan(nums[0]);
       expect(stderr).toEqual("");
     });

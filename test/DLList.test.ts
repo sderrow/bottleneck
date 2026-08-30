@@ -1,12 +1,12 @@
 import { describe, it, expect } from "vitest";
 import DLList from "../src/DLList";
 
-const fakeQueues = function () {
-  this._length = 0;
-  this.incr = () => this._length++;
-  this.decr = () => this._length--;
-  this.fns = [this.incr, this.decr];
-};
+class FakeQueues {
+  _length = 0;
+  incr = () => this._length++;
+  decr = () => this._length--;
+  fns = [this.incr, this.decr] as [() => void, () => void];
+}
 
 describe("DLList", () => {
   it("Should be created and be empty", () => {
@@ -15,7 +15,7 @@ describe("DLList", () => {
   });
 
   it("Should be possible to append once", () => {
-    const queues = new fakeQueues();
+    const queues = new FakeQueues();
     const list = new DLList(...queues.fns);
     list.push(5);
     const arr = list.getArray();
@@ -26,7 +26,7 @@ describe("DLList", () => {
   });
 
   it("Should be possible to append multiple times", () => {
-    const queues = new fakeQueues();
+    const queues = new FakeQueues();
     const list = new DLList(...queues.fns);
     list.push(5);
     list.push(6);
@@ -48,14 +48,14 @@ describe("DLList", () => {
   });
 
   it("Should be possible to shift an empty list", () => {
-    const queues = new fakeQueues();
+    const queues = new FakeQueues();
     const list = new DLList(...queues.fns);
     expect(list.length).toStrictEqual(0);
-    expect(list.shift()).toStrictEqual();
+    expect(list.shift()).toStrictEqual(undefined);
     let arr = list.getArray();
     expect(arr.length).toStrictEqual(0);
     expect(list.length).toStrictEqual(0);
-    expect(list.shift()).toStrictEqual();
+    expect(list.shift()).toStrictEqual(undefined);
     arr = list.getArray();
     expect(arr.length).toStrictEqual(0);
     expect(list.length).toStrictEqual(0);
@@ -63,7 +63,7 @@ describe("DLList", () => {
   });
 
   it("Should be possible to append then shift once", () => {
-    const queues = new fakeQueues();
+    const queues = new FakeQueues();
     const list = new DLList(...queues.fns);
     list.push(5);
     expect(list.length).toStrictEqual(1);
@@ -75,7 +75,7 @@ describe("DLList", () => {
   });
 
   it("Should be possible to append then shift multiple times", () => {
-    const queues = new fakeQueues();
+    const queues = new FakeQueues();
     const list = new DLList(...queues.fns);
     list.push(5);
     expect(list.length).toStrictEqual(1);
@@ -90,7 +90,7 @@ describe("DLList", () => {
   });
 
   it("Should expose debug information for each node", () => {
-    const queues = new fakeQueues();
+    const queues = new FakeQueues();
     const list = new DLList(...queues.fns);
     list.push(1);
     list.push(2);
@@ -101,7 +101,7 @@ describe("DLList", () => {
   });
 
   it("Should pass a full test", () => {
-    const queues = new fakeQueues();
+    const queues = new FakeQueues();
     const list = new DLList(...queues.fns);
     list.push(10);
     expect(list.length).toStrictEqual(1);
@@ -127,10 +127,10 @@ describe("DLList", () => {
   });
 
   it("Should return the first value without shifting", () => {
-    const queues = new fakeQueues();
+    const queues = new FakeQueues();
     const list = new DLList(...queues.fns);
-    expect(list.first()).toStrictEqual();
-    expect(list.first()).toStrictEqual();
+    expect(list.first()).toStrictEqual(undefined);
+    expect(list.first()).toStrictEqual(undefined);
 
     list.push(1);
     expect(list.first()).toStrictEqual(1);
@@ -145,11 +145,11 @@ describe("DLList", () => {
     expect(list.first()).toStrictEqual(2);
 
     expect(list.shift()).toStrictEqual(2);
-    expect(list.first()).toStrictEqual();
-    expect(list.first()).toStrictEqual();
+    expect(list.first()).toStrictEqual(undefined);
+    expect(list.first()).toStrictEqual(undefined);
 
-    expect(list.first()).toStrictEqual();
-    expect(list.shift()).toStrictEqual();
-    expect(list.first()).toStrictEqual();
+    expect(list.first()).toStrictEqual(undefined);
+    expect(list.shift()).toStrictEqual(undefined);
+    expect(list.first()).toStrictEqual(undefined);
   });
 });

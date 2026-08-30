@@ -7,7 +7,6 @@
     "module": "Preserve",
     "moduleDetection": "force",
     "jsx": "react-jsx",
-    "allowJs": true,
     "types": ["node"],
 
     // Bundler mode
@@ -15,17 +14,13 @@
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true,
     "noEmit": true,
+    "stripInternal": true,
 
     // Best practices
     "strict": true,
     "skipLibCheck": true,
     "noFallthroughCasesInSwitch": true,
     "noUncheckedIndexedAccess": true,
-    "noImplicitOverride": true,
-
-    // Some stricter flags (disabled by default)
-    "noUnusedLocals": false,
-    "noUnusedParameters": false,
-    "noPropertyAccessFromIndexSignature": false
+    "noImplicitOverride": true
   }
 }
