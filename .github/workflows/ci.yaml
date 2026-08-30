@@ -34,7 +34,7 @@ jobs:
       - name: Run build
         run: pnpm run build
 
-  # Matrix data for both matrix jobs below. scripts/ci-matrix.mjs is the
+  # Matrix data for both matrix jobs below. scripts/ci-matrix.mts is the
   # single source of truth (also imported by the local runner: `pnpm run
   # test:ci`), so the workflow and local legs cannot drift apart.
   matrix-data:
@@ -49,7 +49,7 @@ jobs:
 
       - name: Emit matrix JSON
         id: emit
-        run: node scripts/ci-matrix.mjs --emit >> "$GITHUB_OUTPUT"
+        run: node scripts/ci-matrix.mts --emit >> "$GITHUB_OUTPUT"
 
   test-no-cluster:
     name: Test (no cluster)
@@ -73,7 +73,7 @@ jobs:
     needs: [checks, matrix-data]
     strategy:
       fail-fast: false
-      # Entries come from scripts/ci-matrix.mjs via the matrix-data job.
+      # Entries come from scripts/ci-matrix.mts via the matrix-data job.
       matrix:
         image: ${{ fromJSON(needs.matrix-data.outputs.cluster-images) }}
     env:
@@ -99,7 +99,7 @@ jobs:
     strategy:
       fail-fast: false
       # Include entries ({client, version, project, image}) come from
-      # scripts/ci-matrix.mjs via the matrix-data job.
+      # scripts/ci-matrix.mts via the matrix-data job.
       matrix: ${{ fromJSON(needs.matrix-data.outputs.client-matrix) }}
     env:
       REDIS_IMAGE: ${{ matrix.image }}

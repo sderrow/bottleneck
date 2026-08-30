@@ -14,7 +14,7 @@
 // runs, results are summarized, and the exit code is non-zero if any failed.
 //
 // Assumes the same environment as any test run here: pnpm and a running Docker
-// daemon. Matrix inputs come from ./ci-matrix.mjs — the same single source of
+// daemon. Matrix inputs come from ./ci-matrix.mts — the same single source of
 // truth .github/workflows/ci.yaml consumes.
 
 import { spawnSync } from "node:child_process";
@@ -22,9 +22,26 @@ import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
-import { CLIENT_MATRIX_IMAGE, CLIENT_PINS, CLUSTER_IMAGES } from "./ci-matrix.mjs";
+import { CLIENT_MATRIX_IMAGE, CLIENT_PINS, CLUSTER_IMAGES } from "./ci-matrix.mts";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+type Pin = (typeof CLIENT_PINS)[number];
+type Step = {
+  title: string;
+  cmd: string[];
+  env?: Record<string, string>;
+  pin?: Pin;
+};
+type Leg = {
+  name: string;
+  steps: Step[];
+};
+type LegResult = {
+  leg: Leg;
+  ok: boolean;
+  ms: number;
+};
 
 const USAGE = `Locally recreates the CI test matrices from .github/workflows/ci.yaml.
 
@@ -47,18 +64,18 @@ Notes:
   \`pnpm install\` re-syncs node_modules, so nothing is left mutated.`;
 
 const tty = process.stdout.isTTY;
-const color = (code, text) => (tty ? `\x1b[${code}m${text}\x1b[0m` : text);
-const dim = (text) => color(2, text);
-const green = (text) => color(32, text);
-const red = (text) => color(31, text);
-const bold = (text) => color(1, text);
+const color = (code: number, text: string) => (tty ? `\x1b[${code}m${text}\x1b[0m` : text);
+const dim = (text: string) => color(2, text);
+const green = (text: string) => color(32, text);
+const red = (text: string) => color(31, text);
+const bold = (text: string) => color(1, text);
 
-function fatal(message) {
+function fatal(message: string): never {
   console.error(red(`error: ${message}`));
   process.exit(2);
 }
 
-function formatDuration(ms) {
+function formatDuration(ms: number) {
   if (ms < 1000) return `${ms}ms`;
   const seconds = ms / 1000;
   if (seconds < 60) return `${seconds.toFixed(1)}s`;
@@ -66,7 +83,7 @@ function formatDuration(ms) {
   return `${minutes}m ${String(Math.round(seconds % 60)).padStart(2, "0")}s`;
 }
 
-function formatCmd(cmd, env = {}) {
+function formatCmd(cmd: string[], env: Record<string, string> = {}) {
   const prefix = Object.entries(env)
     .map(([key, value]) => `${key}=${value}`)
     .join(" ");
@@ -77,13 +94,14 @@ function formatCmd(cmd, env = {}) {
 
 const LEG_NAMES = ["cluster", "clients"];
 const args = process.argv.slice(2);
-const imageFilter = [];
-const clientFilter = [];
-const explicitLegs = [];
+const imageFilter: string[] = [];
+const clientFilter: string[] = [];
+const explicitLegs: string[] = [];
 let dryRun = false;
 
 for (let i = 0; i < args.length; i++) {
   const arg = args[i];
+  if (arg === undefined) continue;
   if (arg === "-h" || arg === "--help") {
     console.log(USAGE);
     process.exit(0);
@@ -126,7 +144,7 @@ if (clientFilter.length) selectedLegs.add("clients");
 
 // -------------------------------------------------------------------- plan
 
-const plan = [];
+const plan: Leg[] = [];
 if (selectedLegs.has("cluster")) {
   for (const image of imageFilter.length ? imageFilter : CLUSTER_IMAGES) {
     plan.push({
@@ -175,9 +193,9 @@ if (dryRun) {
 
 // ------------------------------------------------------------------ runner
 
-function exec(cmd, env = {}) {
+function exec(cmd: string[], env: Record<string, string> = {}) {
   console.log(dim(`  $ ${formatCmd(cmd, env)}`));
-  const result = spawnSync(cmd[0], cmd.slice(1), {
+  const result = spawnSync(cmd[0] as string, cmd.slice(1), {
     cwd: ROOT,
     env: { ...process.env, ...env },
     stdio: "inherit",
@@ -198,7 +216,7 @@ function exec(cmd, env = {}) {
 // pnpm-lock.yaml are mutated then restored. spawnSync blocks the event loop,
 // so the restore is wired into SIGINT/SIGTERM instead of relying on finally;
 // a hard SIGKILL is recoverable with `git checkout package.json pnpm-lock.yaml`.
-let savedManifests;
+let savedManifests: Map<string, Buffer> | undefined;
 let pinnedThisRun = false;
 
 function saveManifests() {
@@ -214,7 +232,7 @@ function restoreManifests() {
 }
 
 let finishing = false;
-function finish(code) {
+function finish(code: number) {
   if (finishing) return;
   finishing = true;
   restoreManifests();
@@ -224,17 +242,18 @@ function finish(code) {
 process.on("SIGINT", () => finish(130));
 process.on("SIGTERM", () => finish(143));
 
-function runClientLeg(leg) {
+function runClientLeg(leg: Leg) {
   saveManifests();
   pinnedThisRun = true;
   const [pinStep, testStep] = leg.steps;
+  if (!pinStep || !testStep) throw new Error(`Client leg ${leg.name} needs exactly two steps`);
   let ok = exec(pinStep.cmd);
   if (ok) ok = exec(testStep.cmd, testStep.env);
   restoreManifests();
   return ok;
 }
 
-const results = [];
+const results: LegResult[] = [];
 for (const [index, leg] of plan.entries()) {
   console.log(`\n${bold(`▶ ${leg.name}`)} ${dim(`(${index + 1}/${plan.length})`)}`);
   const startedAt = Date.now();
