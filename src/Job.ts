@@ -1,7 +1,7 @@
 import type Bottleneck from "./Bottleneck";
 import type Events from "./Events";
 import type States from "./States";
-import type { EventInfo, JobDefaults, JobOptions } from "./types";
+import type { EventInfo, EventInfoRetryable, JobDefaults, ResolvedJobOptions } from "./types";
 import BottleneckError from "./BottleneckError";
 import { load } from "./parser";
 import randomIndex from "./random-index";
@@ -15,7 +15,7 @@ class Job {
   rejectOnDrop: boolean;
   Events: Events;
   _states: States;
-  options: JobOptions;
+  options: ResolvedJobOptions;
   promise: Promise<unknown>;
   retryCount = 0;
   _resolve: (value: unknown) => void = null as never;
@@ -35,7 +35,7 @@ class Job {
     this.rejectOnDrop = rejectOnDrop;
     this.Events = Events;
     this._states = _states;
-    this.options = load(options ?? {}, jobDefaults) as JobOptions;
+    this.options = load(options ?? {}, jobDefaults) as ResolvedJobOptions;
     this.options.priority = this._sanitizePriority(this.options.priority);
     if (this.options.id === jobDefaults.id) {
       this.options.id = `${this.options.id}-${randomIndex()}`;
@@ -115,7 +115,7 @@ class Job {
     chained: Bottleneck | null,
     clearGlobalState: () => boolean,
     run: (retryAfter: number) => unknown,
-    free: (options: JobOptions, eventInfo: EventInfo) => Promise<unknown>,
+    free: (options: ResolvedJobOptions, eventInfo: EventInfo) => Promise<unknown>,
   ): Promise<unknown> {
     if (this.retryCount === 0) {
       this._assertStatus("RUNNING");
@@ -123,9 +123,9 @@ class Job {
     } else {
       this._assertStatus("EXECUTING");
     }
-    const eventInfo: EventInfo = {
-      args: this.args,
-      options: this.options,
+    const eventInfo: EventInfoRetryable = {
+      args: this.args ?? [],
+      options: this.options as unknown as EventInfo["options"],
       retryCount: this.retryCount,
     };
     this.Events.trigger("executing", eventInfo);
@@ -149,15 +149,15 @@ class Job {
   doExpire(
     clearGlobalState: () => boolean,
     run: (retryAfter: number) => unknown,
-    free: (options: JobOptions, eventInfo: EventInfo) => Promise<unknown>,
+    free: (options: ResolvedJobOptions, eventInfo: EventInfo) => Promise<unknown>,
   ): Promise<unknown> | undefined {
     if (this._states.jobStatus(this.options.id) === "RUNNING") {
       this._states.next(this.options.id);
     }
     this._assertStatus("EXECUTING");
-    const eventInfo: EventInfo = {
-      args: this.args,
-      options: this.options,
+    const eventInfo: EventInfoRetryable = {
+      args: this.args ?? [],
+      options: this.options as unknown as EventInfo["options"],
       retryCount: this.retryCount,
     };
     const error = new BottleneckError(`This job timed out after ${this.options.expiration} ms.`);
@@ -169,7 +169,7 @@ class Job {
     eventInfo: EventInfo,
     clearGlobalState: () => boolean,
     run: (retryAfter: number) => unknown,
-    free: (options: JobOptions, eventInfo: EventInfo) => Promise<unknown>,
+    free: (options: ResolvedJobOptions, eventInfo: EventInfo) => Promise<unknown>,
   ): Promise<unknown> {
     if (clearGlobalState()) {
       const retry = await this.Events.trigger("failed", error, eventInfo);

@@ -5,7 +5,7 @@ const redisGlobalSetup = "test/global-setup/redis.ts";
 const lightGlobalSetup = "test/global-setup/light.ts";
 const libGlobalSetup = "test/global-setup/lib.ts";
 
-const sourceInclude = ["test/**/*.test.js"];
+const sourceInclude = ["test/**/*.test.js", "test/**/*.test.ts"];
 const sourceExclude = ["test/smoke/**", "test/memory/**"];
 // Batcher is datastore-independent (its tests never touch Redis), so running it
 // under the redis projects is pure duplication — and worse, it uses fake timers,

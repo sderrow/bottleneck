@@ -1151,7 +1151,7 @@ pnpm install                # install dependencies
 pnpm run build              # build dist/index.mjs + dist/index.cjs (dual ESM/CJS) and dist/light.js (ESM)
 pnpm run lint               # oxlint
 pnpm run format:check       # oxfmt --check (use `pnpm run format` to auto-fix)
-pnpm tsc                    # type-check src, test tree, and bottleneck.d.ts (via test.ts)
+pnpm tsc                    # type-check src, test tree, and scripts
 pnpm test                   # build + all non-memory Vitest projects in parallel
 pnpm run test:memory        # heap / iterateAsync checks (`--expose-gc`; slower)
 pnpm run test:all           # `pnpm test` + memory project (matches CI)

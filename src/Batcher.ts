@@ -1,3 +1,4 @@
+import type { BatcherEvents, BatcherOptions } from "./types";
 import Events from "./Events";
 import { load } from "./parser";
 
@@ -6,19 +7,30 @@ type BatcherDefaults = {
   maxSize: number | null;
 };
 
-class Batcher {
+class Batcher<T = any> {
   defaults: BatcherDefaults = { maxTime: null, maxSize: null };
   maxTime: number | null = null;
   maxSize: number | null = null;
-  options: object;
+  options: BatcherOptions;
   Events: Events;
-  _arr: unknown[];
+  _arr: T[];
   _timeout: ReturnType<typeof setTimeout> | undefined;
   _lastFlush: number;
-  _promise: Promise<unknown> = null as never;
-  _resolve: (value: unknown) => void = null as never;
+  _promise: Promise<void> = null as never;
+  _resolve: (value: void) => void = null as never;
 
-  constructor(options?: object) {
+  // Installed on the instance by Events (see Events constructor).
+  declare on: {
+    <E extends keyof BatcherEvents<T>>(event: E, listener: BatcherEvents<T>[E]): unknown;
+    (event: string, listener: (...args: any[]) => unknown): unknown;
+  };
+  declare once: {
+    <E extends keyof BatcherEvents<T>>(event: E, listener: BatcherEvents<T>[E]): unknown;
+    (event: string, listener: (...args: any[]) => unknown): unknown;
+  };
+  declare removeAllListeners: (name?: string | null) => void;
+
+  constructor(options?: BatcherOptions) {
     this.options = options ?? {};
     load(this.options, this.defaults, this);
     this.Events = new Events(this);
@@ -42,7 +54,7 @@ class Batcher {
     this._resetPromise();
   }
 
-  add(data: unknown): Promise<unknown> {
+  add(data: T): Promise<void> {
     this._arr.push(data);
     const existingPromise = this._promise;
     if (this.maxSize != null && this._arr.length === this.maxSize) {

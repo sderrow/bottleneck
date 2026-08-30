@@ -1,4 +1,17 @@
-import type { EventInfo, JobDefaults, JobOptions, StoreOptions } from "./types";
+import type {
+  BottleneckEvents,
+  ClientsList,
+  ConstructorOptions,
+  Counts,
+  EventInfo,
+  JobDefaults,
+  JobOptions,
+  ResolvedJobOptions,
+  Status,
+  StopOptions,
+  StoreOptions,
+  StrategyConstants,
+} from "./types";
 import pkg from "../package.json" with { type: "json" };
 import Batcher from "./Batcher";
 import BottleneckError from "./BottleneckError";
@@ -46,7 +59,7 @@ class Bottleneck {
   static IORedisConnection = IORedisConnection;
   static Batcher = Batcher;
   static Events = Events;
-  static strategy = {
+  static readonly strategy: StrategyConstants = {
     LEAK: 1,
     OVERFLOW: 2,
     OVERFLOW_PRIORITY: 4,
@@ -122,12 +135,19 @@ class Bottleneck {
   _store: LocalDatastore | RedisDatastore;
 
   // Installed on the instance by Events (see Events constructor); declared so
-  // this class typechecks against its own runtime behavior.
-  declare on: (name: string, cb: (...args: any[]) => void) => unknown;
-  declare once: (name: string, cb: (...args: any[]) => void) => unknown;
+  // this class typechecks against its own runtime behavior. The listener map
+  // is the public event contract.
+  declare on: {
+    <E extends keyof BottleneckEvents>(event: E, listener: BottleneckEvents[E]): unknown;
+    (event: string, listener: (...args: any[]) => unknown): unknown;
+  };
+  declare once: {
+    <E extends keyof BottleneckEvents>(event: E, listener: BottleneckEvents[E]): unknown;
+    (event: string, listener: (...args: any[]) => unknown): unknown;
+  };
   declare removeAllListeners: (name?: string | null) => void;
 
-  constructor(options: object | null | undefined, ...invalid: unknown[]) {
+  constructor(options?: ConstructorOptions, ...invalid: unknown[]) {
     this._addToQueue = this._addToQueueImpl.bind(this);
     options ??= {};
     this._validateOptions(options, invalid);
@@ -169,8 +189,8 @@ class Bottleneck {
     return this._store.ready;
   }
 
-  clients(): Record<string, unknown> {
-    return this._store.clients;
+  clients(): ClientsList {
+    return this._store.clients as ClientsList;
   }
 
   channel(): string {
@@ -189,8 +209,8 @@ class Bottleneck {
     await this._store.__disconnect__(flush);
   }
 
-  chain(_limiter: Bottleneck): this {
-    this._limiter = _limiter;
+  chain(limiter?: Bottleneck): this {
+    this._limiter = limiter ?? null;
     return this;
   }
 
@@ -198,32 +218,32 @@ class Bottleneck {
     return this._queues.queued(priority);
   }
 
-  clusterQueued(): Promise<unknown> {
-    return this._store.__queued__();
+  clusterQueued(): Promise<number> {
+    return this._store.__queued__() as Promise<number>;
   }
 
   empty(): boolean {
     return this.queued() === 0 && this._submitLock.isEmpty();
   }
 
-  running(): Promise<unknown> {
-    return this._store.__running__();
+  running(): Promise<number> {
+    return this._store.__running__() as Promise<number>;
   }
 
-  done(): Promise<unknown> {
-    return this._store.__done__();
+  done(): Promise<number> {
+    return this._store.__done__() as Promise<number>;
   }
 
-  jobStatus(id: string): string | null {
-    return this._states.jobStatus(id);
+  jobStatus(id: string): Status | null {
+    return this._states.jobStatus(id) as Status | null;
   }
 
-  jobs(status?: string): string[] {
+  jobs(status?: Status): string[] {
     return this._states.statusJobs(status);
   }
 
-  counts(): Record<string, number> {
-    return this._states.statusCounts();
+  counts(): Counts {
+    return this._states.statusCounts() as Counts;
   }
 
   _randomIndex(): string {
@@ -248,7 +268,7 @@ class Bottleneck {
   async _free(
     index: string,
     _job: Job,
-    options: JobOptions,
+    options: ResolvedJobOptions,
     eventInfo: EventInfo,
   ): Promise<unknown> {
     try {
@@ -350,7 +370,7 @@ class Bottleneck {
     this._queues.shiftAll((job) => job.doDrop({ message }));
   }
 
-  stop(options: object | null | undefined = {}): Promise<unknown> {
+  stop(options: StopOptions = {}): Promise<void> {
     options = load(options ?? {}, this.stopDefaults);
 
     const waitForExecuting = (at: number): Promise<void> => {
@@ -405,7 +425,7 @@ class Bottleneck {
     this.stop = (): Promise<never> =>
       this.Promise.reject(new BottleneckError("stop() has already been called"));
 
-    return done;
+    return done as Promise<void>;
   }
 
   async _addToQueueImpl(job: Job): Promise<boolean> {
@@ -463,6 +483,14 @@ class Bottleneck {
     }
   };
 
+  schedule<R>(task: () => R): Promise<Awaited<R>>;
+  schedule<R, A extends unknown[]>(task: (...args: A) => R, ...args: A): Promise<Awaited<R>>;
+  schedule<R>(options: JobOptions, task: () => R): Promise<Awaited<R>>;
+  schedule<R, A extends unknown[]>(
+    options: JobOptions,
+    task: (...args: A) => R,
+    ...args: A
+  ): Promise<Awaited<R>>;
   schedule(...args: unknown[]): Promise<unknown> {
     let options: object | undefined;
     let task: unknown;
@@ -488,33 +516,40 @@ class Bottleneck {
     return job.promise;
   }
 
-  wrap(fn: (...args: never[]) => unknown): ((...args: never[]) => Promise<unknown>) & {
-    withOptions: (options: object, ...args: never[]) => Promise<unknown>;
+  wrap<R, A extends unknown[]>(
+    fn: (...args: A) => R,
+  ): ((...args: A) => Promise<Awaited<R>>) & {
+    withOptions: (options: JobOptions, ...args: A) => Promise<Awaited<R>>;
   } {
-    const schedule = this.schedule.bind(this);
-    const wrapped = function (this: unknown, ...args: never[]) {
-      return schedule(fn.bind(this) as (...args: never[]) => unknown as never, ...args);
-    } as ((...args: never[]) => Promise<unknown>) & {
-      withOptions: (options: object, ...args: never[]) => Promise<unknown>;
+    const run = (opts: JobOptions | null, thisArg: unknown, args: A): Promise<Awaited<R>> =>
+      opts != null
+        ? (this.schedule(opts, fn.bind(thisArg) as (...args: A) => R, ...args) as Promise<
+            Awaited<R>
+          >)
+        : (this.schedule(fn.bind(thisArg) as (...args: A) => R, ...args) as Promise<Awaited<R>>);
+    const wrapped = function (this: unknown, ...args: A): Promise<Awaited<R>> {
+      return run(null, this, args);
+    } as ((...args: A) => Promise<Awaited<R>>) & {
+      withOptions: (options: JobOptions, ...args: A) => Promise<Awaited<R>>;
     };
-    wrapped.withOptions = (options: object, ...args: never[]) =>
-      schedule(options as never, fn as never, ...args);
+    wrapped.withOptions = (options: JobOptions, ...args: A): Promise<Awaited<R>> =>
+      run(options, undefined, args);
     return wrapped;
   }
 
-  async updateSettings(options: object | null | undefined): Promise<this> {
+  async updateSettings(options?: ConstructorOptions): Promise<this> {
     options ??= {};
     await this._store.__updateSettings__(overwrite(options, this.storeDefaults));
     overwrite(options, this.instanceDefaults, this);
     return this;
   }
 
-  currentReservoir(): Promise<unknown> {
-    return this._store.__currentReservoir__();
+  currentReservoir(): Promise<number | null> {
+    return this._store.__currentReservoir__() as Promise<number | null>;
   }
 
-  incrementReservoir(incr = 0): Promise<unknown> {
-    return this._store.__incrementReservoir__(incr);
+  incrementReservoir(incr = 0): Promise<number | null> {
+    return this._store.__incrementReservoir__(incr) as Promise<number | null>;
   }
 }
 

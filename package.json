@@ -33,7 +33,6 @@
     "url": "git+https://github.com/sderrow/bottleneck.git"
   },
   "files": [
-    "bottleneck.d.ts",
     "dist/",
     "README.md",
     "LICENSE"
@@ -41,12 +40,17 @@
   "type": "module",
   "exports": {
     ".": {
-      "types": "./bottleneck.d.ts",
-      "import": "./dist/index.mjs",
-      "require": "./dist/index.cjs"
+      "import": {
+        "types": "./dist/index.d.mts",
+        "default": "./dist/index.mjs"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
     },
     "./light": {
-      "types": "./bottleneck.d.ts",
+      "types": "./dist/light.d.ts",
       "default": "./dist/light.js"
     },
     "./package.json": "./package.json"

@@ -1,3 +1,4 @@
+import type { ConstructorOptions, GroupEvents, GroupLimiterPair } from "./types";
 import Bottleneck from "./Bottleneck";
 import IORedisConnection from "./cluster/IORedisConnection";
 import RedisConnection from "./cluster/RedisConnection";
@@ -15,8 +16,14 @@ class Group {
   };
 
   // Installed on the instance by Events (see Events constructor).
-  declare on: (name: string, cb: (...args: any[]) => void) => unknown;
-  declare once: (name: string, cb: (...args: any[]) => void) => unknown;
+  declare on: {
+    <E extends keyof GroupEvents>(event: E, listener: GroupEvents[E]): unknown;
+    (event: string, listener: (...args: any[]) => unknown): unknown;
+  };
+  declare once: {
+    <E extends keyof GroupEvents>(event: E, listener: GroupEvents[E]): unknown;
+    (event: string, listener: (...args: any[]) => unknown): unknown;
+  };
   declare removeAllListeners: (name?: string | null) => void;
 
   timeout: number = this.defaults.timeout;
@@ -29,9 +36,9 @@ class Group {
   sharedConnection: boolean;
   Bottleneck: typeof Bottleneck;
 
-  constructor(limiterOptions: Record<string, unknown> = {}) {
+  constructor(limiterOptions: ConstructorOptions = {}) {
     this.deleteKey = this.deleteKey.bind(this);
-    this.limiterOptions = limiterOptions ?? {};
+    this.limiterOptions = { ...limiterOptions } as Record<string, unknown>;
     load(this.limiterOptions, this.defaults, this);
     this.Events = new Events(this);
     this.instances = {};
@@ -60,7 +67,7 @@ class Group {
           id: `${this.id}-${key}`,
           timeout: this.timeout,
           connection: this.connection,
-        }),
+        }) as ConstructorOptions,
       );
       this.Events.trigger("created", limiter, key);
       this.instances[key] = limiter;
@@ -84,7 +91,7 @@ class Group {
     return instance != null || (deleted as number) > 0;
   }
 
-  limiters(): { key: string; limiter: Bottleneck }[] {
+  limiters(): GroupLimiterPair[] {
     return Object.entries(this.instances).map(([key, limiter]) => ({ key, limiter }));
   }
 
@@ -138,7 +145,7 @@ class Group {
     }, this.timeout / 2).unref?.();
   }
 
-  updateSettings(options: Record<string, unknown> = {}): void {
+  updateSettings(options: ConstructorOptions = {}): void {
     options ??= {};
     overwrite(options, this.defaults, this);
     overwrite(options, options, this.limiterOptions);
@@ -147,7 +154,7 @@ class Group {
     }
   }
 
-  disconnect(flush = true): unknown {
+  disconnect(flush = true): Promise<void> | undefined {
     clearInterval(this.interval);
     if (!this.sharedConnection) {
       return this.connection?.disconnect(flush);
