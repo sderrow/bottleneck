@@ -1,5 +1,5 @@
 name: Setup
-description: Enable corepack, set up Node.js with pnpm cache, install dependencies.
+description: Set up Node.js with pnpm & install dependencies with cache.
 
 # Note: actions/checkout is NOT in this composite — local composite actions
 # can't run before the repo is checked out, so callers must check out first
@@ -8,16 +8,6 @@ description: Enable corepack, set up Node.js with pnpm cache, install dependenci
 runs:
   using: composite
   steps:
-    - name: Enable corepack
-      run: corepack enable
-      shell: bash
-
-    - name: Set up Node.js
-      uses: actions/setup-node@v6
+    - uses: pnpm/setup@v2
       with:
-        node-version-file: ".nvmrc"
-        cache: "pnpm"
-
-    - name: Install dependencies
-      run: pnpm install
-      shell: bash
+        cache: true
