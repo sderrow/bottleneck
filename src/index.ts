@@ -1,1 +1,1 @@
-module.exports = require("./Bottleneck");
+export { default } from "./Bottleneck";

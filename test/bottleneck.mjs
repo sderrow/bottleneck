@@ -1,14 +1,14 @@
-const resolveEntry = () => {
+const resolveEntry = async () => {
   switch (process.env.BOTTLENECK_ENTRY ?? "source") {
     case "light":
-      return require("../dist/light.js");
+      return (await import("../dist/light.js")).default;
     case "lib":
-      return require("../dist/index.js");
+      return (await import("../dist/index.cjs")).default;
     default:
-      return require("../src/index.js");
+      return (await import("../src/index.ts")).default;
   }
 };
-const Bottleneck = resolveEntry();
+const Bottleneck = await resolveEntry();
 
 // A limiter (or group) is Redis-backed if its options either name a Redis
 // datastore explicitly OR provide a pre-built `connection` (in which case
@@ -24,10 +24,15 @@ const isRedisBacked = (options) =>
 
 const usingRedis = process.env.DATASTORE === "redis" || process.env.DATASTORE === "ioredis";
 
+let ExportedBottleneck;
+
 if (!usingRedis) {
-  module.exports = Bottleneck;
+  ExportedBottleneck = Bottleneck;
 } else {
-  const Redis = process.env.DATASTORE === "redis" ? require("redis") : require("ioredis");
+  const Redis =
+    process.env.DATASTORE === "redis"
+      ? (await import("redis")).default
+      : (await import("ioredis")).default;
 
   // One prefix per fork. Every test limiter's `id` is namespaced with this so
   // workers running in parallel against the single shared Redis (started by
@@ -52,7 +57,7 @@ if (!usingRedis) {
   // The shape is datastore-specific: ioredis accepts flat { host, port }, but
   // node-redis v4/v5 requires { socket: { host, port } } and silently ignores
   // top-level host/port (defaulting to localhost:6379).
-  const buildClientOptions = require("./redis-client-options");
+  const buildClientOptions = (await import("./redis-client-options.js")).default;
 
   const withRedis = (options) => {
     if (!isRedisBacked(options)) return options;
@@ -124,5 +129,7 @@ if (!usingRedis) {
     }
   };
 
-  module.exports = TestBottleneck;
+  ExportedBottleneck = TestBottleneck;
 }
+
+export default ExportedBottleneck;

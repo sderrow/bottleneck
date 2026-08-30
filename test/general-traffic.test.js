@@ -1,5 +1,5 @@
 import { describe, expect } from "vitest";
-import sleep from "../src/sleep.js";
+import sleep from "../src/sleep";
 import { useFakeClock, useRealClockForThisTest } from "./helpers/clock.js";
 import { test, waitForState, deferred } from "./helpers/test-api.js";
 
@@ -341,9 +341,13 @@ describe("General traffic", () => {
     test("Should keep process alive until queue is empty", async () => {
       useRealClockForThisTest();
       const fixturePath = path.resolve(__dirname, "fixtures/keep-alive/refreshKeepAlive.mjs");
-      const { stdout, stderr } = await execFile(process.execPath, [fixturePath], {
-        timeout: 10000,
-      });
+      const { stdout, stderr } = await execFile(
+        process.execPath,
+        ["--import", "tsx", fixturePath],
+        {
+          timeout: 10000,
+        },
+      );
       // The contract this test covers is "the process stays alive long
       // enough to run all 4 jobs across a reservoir refresh". That's
       // verified by `matches.length === 4` and `stderr === ""`: if the
@@ -465,9 +469,13 @@ describe("General traffic", () => {
     test("Should keep process alive until queue is empty", async () => {
       useRealClockForThisTest();
       const fixturePath = path.resolve(__dirname, "fixtures/keep-alive/increaseKeepAlive.mjs");
-      const { stdout, stderr } = await execFile(process.execPath, [fixturePath], {
-        timeout: 10000,
-      });
+      const { stdout, stderr } = await execFile(
+        process.execPath,
+        ["--import", "tsx", fixturePath],
+        {
+          timeout: 10000,
+        },
+      );
       // Same contract / loosening rationale as the Reservoir Refresh
       // sibling above: matches.length + empty stderr proves the keep-alive
       // timer kept the event loop running across the increase, and

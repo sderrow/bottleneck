@@ -1,6 +1,6 @@
 // Project-level Vitest globalSetup for the `lib-smoke` project.
 //
-// The lib smoke test loads `dist/index.js` via `test/bottleneck.js`
+// The lib smoke test loads `dist/index.js` via `test/bottleneck.mjs`
 // (BOTTLENECK_ENTRY=lib), so the full bundle must exist on disk before any
 // test file is collected. We invoke tsdown programmatically and filter to
 // the `lib` config in tsdown.config.mts so the light bundle isn't rebuilt

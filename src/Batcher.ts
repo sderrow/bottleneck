@@ -1,37 +1,51 @@
-const parser = require("./parser");
-const Events = require("./Events");
+import Events from "./Events";
+import { load } from "./parser";
+
+type BatcherDefaults = {
+  maxTime: number | null;
+  maxSize: number | null;
+};
 
 class Batcher {
-  defaults = { maxTime: null, maxSize: null };
+  defaults: BatcherDefaults = { maxTime: null, maxSize: null };
+  maxTime: number | null = null;
+  maxSize: number | null = null;
+  options: object;
+  Events: Events;
+  _arr: unknown[];
+  _timeout: ReturnType<typeof setTimeout> | undefined;
+  _lastFlush: number;
+  _promise: Promise<unknown> = null as never;
+  _resolve: (value: unknown) => void = null as never;
 
-  constructor(options) {
+  constructor(options?: object) {
     this.options = options ?? {};
-    parser.load(this.options, this.defaults, this);
+    load(this.options, this.defaults, this);
     this.Events = new Events(this);
     this._arr = [];
     this._resetPromise();
     this._lastFlush = Date.now();
   }
 
-  _resetPromise() {
+  _resetPromise(): void {
     this._promise = new Promise((res) => {
       this._resolve = res;
     });
   }
 
-  _flush() {
+  _flush(): void {
     clearTimeout(this._timeout);
     this._lastFlush = Date.now();
-    this._resolve();
+    this._resolve(undefined);
     this.Events.trigger("batch", this._arr);
     this._arr = [];
     this._resetPromise();
   }
 
-  add(data) {
+  add(data: unknown): Promise<unknown> {
     this._arr.push(data);
     const existingPromise = this._promise;
-    if (this._arr.length === this.maxSize) {
+    if (this.maxSize != null && this._arr.length === this.maxSize) {
       this._flush();
     } else if (this.maxTime != null && this._arr.length === 1) {
       this._timeout = setTimeout(() => {
@@ -42,4 +56,4 @@ class Batcher {
   }
 }
 
-module.exports = Batcher;
+export default Batcher;

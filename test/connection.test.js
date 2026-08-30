@@ -1,7 +1,7 @@
 import { describe, test, expect, vi } from "vitest";
-const Scripts = require("../src/cluster/Scripts.js");
-const RedisConnection = require("../src/cluster/RedisConnection.js");
-const IORedisConnection = require("../src/cluster/IORedisConnection.js");
+import IORedisConnection from "../src/cluster/IORedisConnection";
+import RedisConnection from "../src/cluster/RedisConnection";
+import * as Scripts from "../src/cluster/Scripts";
 
 // These are datastore-independent unit tests: both connection classes are
 // driven with fake clients, so the file is deterministic in every test

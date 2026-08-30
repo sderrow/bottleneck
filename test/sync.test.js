@@ -1,5 +1,5 @@
 import { describe, test, expect } from "vitest";
-const Sync = require("../src/Sync.js");
+import Sync from "../src/Sync";
 
 describe("Sync", () => {
   test("A rejected task rejects its caller and does not block the queue", async () => {

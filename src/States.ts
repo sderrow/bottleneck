@@ -1,44 +1,50 @@
-const BottleneckError = require("./BottleneckError");
+import BottleneckError from "./BottleneckError";
+
 class States {
-  constructor(status) {
+  status: string[];
+  _jobs: Record<string, number> = {};
+  counts: number[];
+
+  constructor(status: string[]) {
     this.status = status;
-    this._jobs = {};
     this.counts = this.status.map(() => 0);
   }
 
-  next(id) {
+  next(id: string): void {
     const current = this._jobs[id];
+    if (current == null) return;
     const next = current + 1;
-    if (current != null && next < this.status.length) {
-      this.counts[current]--;
-      this.counts[next]++;
-      this._jobs[id]++;
-    } else if (current != null) {
-      this.counts[current]--;
+    if (next < this.status.length) {
+      this.counts[current]!--;
+      this.counts[next]!++;
+      this._jobs[id] = next;
+    } else {
+      this.counts[current]!--;
       delete this._jobs[id];
     }
   }
 
-  start(id) {
+  start(id: string): number {
     const initial = 0;
     this._jobs[id] = initial;
-    return this.counts[initial]++;
+    return this.counts[initial]!++;
   }
 
-  remove(id) {
+  remove(id: string): boolean {
     const current = this._jobs[id];
     if (current != null) {
-      this.counts[current]--;
+      this.counts[current]!--;
       delete this._jobs[id];
     }
     return current != null;
   }
 
-  jobStatus(id) {
-    return this.status[this._jobs[id]] ?? null;
+  jobStatus(id: string): string | null {
+    const pos = this._jobs[id];
+    return pos != null ? (this.status[pos] ?? null) : null;
   }
 
-  statusJobs(status) {
+  statusJobs(status?: string): string[] {
     if (status != null) {
       const pos = this.status.indexOf(status);
       if (pos < 0) {
@@ -56,12 +62,12 @@ class States {
     }
   }
 
-  statusCounts() {
-    return this.counts.reduce((acc, v, i) => {
-      acc[this.status[i]] = v;
+  statusCounts(): Record<string, number> {
+    return this.counts.reduce<Record<string, number>>((acc, v, i) => {
+      acc[this.status[i] as string] = v;
       return acc;
     }, {});
   }
 }
 
-module.exports = States;
+export default States;

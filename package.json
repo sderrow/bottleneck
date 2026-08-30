@@ -38,10 +38,12 @@
     "README.md",
     "LICENSE"
   ],
+  "type": "module",
   "exports": {
     ".": {
       "types": "./bottleneck.d.ts",
-      "default": "./dist/index.js"
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.cjs"
     },
     "./light": {
       "types": "./bottleneck.d.ts",

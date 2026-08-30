@@ -1,8 +1,8 @@
 import { describe, expect } from "vitest";
-import sleep from "../src/sleep.js";
+import * as Scripts from "../src/cluster/Scripts";
+import sleep from "../src/sleep";
+import Bottleneck from "./bottleneck.mjs";
 import { test, waitForState, deferred, enqueued } from "./helpers/test-api.js";
-const Bottleneck = require("./bottleneck");
-const Scripts = require("../src/cluster/Scripts.js");
 
 // Causality policy (Workstream B): observe product-timer effects via waitForState
 // and state counts — never assert wall-clock bounds around real network time.

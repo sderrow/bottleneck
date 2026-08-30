@@ -1,10 +1,12 @@
-const arrayToObject = (arr) => {
-  const obj = {};
+const arrayToObject = (arr: unknown[]): Record<string, unknown> => {
+  const obj: Record<string, unknown> = {};
   for (let i = 0; i < arr.length; i += 2) {
-    obj[arr[i]] = arr[i + 1];
+    obj[arr[i] as string] = arr[i + 1];
   }
   return obj;
 };
+
+export { arrayToObject };
 
 /**
  * node-redis negotiates RESP2 by default in v4/v5 but RESP3 by default in v6;
@@ -16,7 +18,7 @@ const arrayToObject = (arr) => {
  * Normalize back to the RESP2 canonical shape so the library behaves identically
  * across redis v4/v5/v6 and ioredis v5/v6 regardless of the negotiated protocol.
  */
-const normalizeReply = (cmd, reply) => {
+export const normalizeReply = (cmd: unknown[], reply: unknown): unknown => {
   const name = String(cmd[0]).toLowerCase();
   if (name === "hgetall") {
     // RESP2: flat array -> object. RESP3: already an object; pass through.
@@ -28,14 +30,14 @@ const normalizeReply = (cmd, reply) => {
   // form.
   if (cmd.some((a) => typeof a === "string" && a.toLowerCase() === "withscores")) {
     if (Array.isArray(reply) && reply.length > 0 && Array.isArray(reply[0])) {
-      const flat = [];
-      for (const [member, score] of reply) {
+      const flat: unknown[] = [];
+      for (const [member, score] of reply as [unknown, unknown][]) {
         flat.push(member, String(score));
       }
       return flat;
     }
     if (reply !== null && typeof reply === "object" && !Array.isArray(reply)) {
-      const flat = [];
+      const flat: unknown[] = [];
       for (const [member, score] of Object.entries(reply)) {
         flat.push(member, String(score));
       }
@@ -44,5 +46,3 @@ const normalizeReply = (cmd, reply) => {
   }
   return reply;
 };
-
-module.exports = { arrayToObject, normalizeReply };

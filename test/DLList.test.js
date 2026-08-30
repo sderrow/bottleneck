@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-const DLList = require("../src/DLList");
+import DLList from "../src/DLList";
 
 const fakeQueues = function () {
   this._length = 0;

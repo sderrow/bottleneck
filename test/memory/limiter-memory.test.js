@@ -1,7 +1,7 @@
 import { describe, it } from "vitest";
 const assert = require("assert");
-const Bottleneck = require("../bottleneck");
-const { iterateAsync } = require("../leakage");
+import Bottleneck from "../bottleneck.mjs";
+import { iterateAsync } from "../leakage";
 
 describe("Limiter memory", () => {
   it("Should not leak memory on instantiation", { timeout: 8000 }, async () => {

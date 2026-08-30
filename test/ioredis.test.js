@@ -1,7 +1,7 @@
 import { describe, expect } from "vitest";
 import { test } from "./helpers/test-api.js";
 const Redis = require("ioredis");
-const buildClientOptions = require("./redis-client-options");
+import buildClientOptions from "./redis-client-options";
 
 describe("ioredis-only", () => {
   test("Should accept ioredis lib override", ({ makeLimiter }) => {
@@ -153,16 +153,17 @@ describe("ioredis-only", () => {
 const ioredisMajor = parseInt(Redis.version ?? require("ioredis/package.json").version, 10);
 const describeResp3 = ioredisMajor >= 6 ? describe : describe.skip;
 
+const resp3ClientOptions = () => ({
+  ...buildClientOptions("ioredis"),
+  protocol: 3,
+  replyMapping: "resp3",
+});
+
 describeResp3("ioredis RESP3", () => {
   // ioredis 6 negotiates RESP3 by default but keeps RESP2-compatible reply
   // shapes via the default `replyMapping: "legacy"`. Opting into
   // `replyMapping: "resp3"` changes reply shapes (maps as objects, doubles as
   // numbers), which is what Bottleneck must normalize back to RESP2 form.
-  const resp3ClientOptions = () => ({
-    ...buildClientOptions("ioredis"),
-    protocol: 3,
-    replyMapping: "resp3",
-  });
 
   test("Should run jobs over RESP3 with resp3 reply mapping", async ({
     harness: h,

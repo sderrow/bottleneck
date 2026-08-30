@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-const Bottleneck = require("../bottleneck.js");
+import Bottleneck from "../bottleneck.mjs";
 
 describe("dist/light smoke", () => {
   it("loads", () => {

@@ -19,7 +19,7 @@ More importantly, this library has been rewritten with modern-day JS (courtesy o
 ### Breaking changes in v4
 
 - The callback-style `submit()` method has been removed — Bottleneck is now Promise-only. Use `schedule()`, wrapping callback-style functions with [`util.promisify`](https://nodejs.org/api/util.html#utilpromisifyoriginal). The `Bottleneck.Callback` type is gone from the typings.
-- The ES5 build has been removed (`require("bottleneck/es5")` no longer exists). If you need broad-browser support, use the UMD `@sderrow/bottleneck/light` build instead.
+- The ES5 build has been removed (`require("bottleneck/es5")` no longer exists). If you need broad-browser support, use the ESM `@sderrow/bottleneck/light` build instead.
 - Cluster mode now requires `redis` v4+ (drops v2/v3) or `ioredis` v5+. The unsupported `redis` v2/v3 client API has been removed.
 - `ioredis` and `redis` are now optional **peer dependencies**. Your application must install whichever client it uses.
 - The `Redis` constructor option is now required when `datastore` is `"redis"` or `"ioredis"` (unless you pass a pre-built `client` or `connection`). Bottleneck no longer implicitly does `require("ioredis")` for you.
@@ -206,7 +206,7 @@ limiter.schedule(object.doSomething.bind(object));
 limiter.schedule(() => object.doSomething());
 ```
 
-- Bottleneck targets modern Node.js. For browser usage, a UMD build without cluster support ships under the `@sderrow/bottleneck/light` subpath import.
+- Bottleneck targets modern Node.js. For browser usage, an ESM build without cluster support ships under the `@sderrow/bottleneck/light` subpath import.
 
 - Make sure you're catching `"error"` events emitted by your limiters!
 
@@ -1121,7 +1121,7 @@ The minimum supported `redis` package version is now v4. The v2/v3 callback-styl
 
 ### ES5 users
 
-The `bottleneck/es5` import path has been removed. If you still need a build that runs in older browsers, use the UMD `@sderrow/bottleneck/light` build (which excludes cluster mode) and transpile in your own toolchain.
+The `bottleneck/es5` import path has been removed. If you still need a build that runs in older browsers, use the ESM `@sderrow/bottleneck/light` build (which excludes cluster mode) and transpile in your own toolchain.
 
 ## Contributing
 
@@ -1142,13 +1142,13 @@ Suggestions and bug reports are also welcome.
 Make changes only inside `src/`:
 
 - `src/` — the local-mode core (browser-safe, no Redis dependencies).
-- `src/cluster/` — Redis-only modules (RedisDatastore, RedisConnection, IORedisConnection, Scripts, and `lua/*.lua`). Anything in this folder is excluded from the `dist/light.js` UMD build by the `excludeClustering` plugin in [tsdown.config.mts](tsdown.config.mts).
+- `src/cluster/` — Redis-only modules (RedisDatastore, RedisConnection, IORedisConnection, Scripts, and `lua/*.lua`). Anything in this folder is excluded from the `dist/light.js` ESM build by the `excludeClustering` plugin in [tsdown.config.mts](tsdown.config.mts).
 
 ### Common commands
 
 ```bash
 pnpm install                # install dependencies
-pnpm run build              # build dist/index.js (CJS) and dist/light.js (UMD)
+pnpm run build              # build dist/index.mjs + dist/index.cjs (dual ESM/CJS) and dist/light.js (ESM)
 pnpm run lint               # oxlint
 pnpm run format:check       # oxfmt --check (use `pnpm run format` to auto-fix)
 pnpm tsc                    # type-check src, test tree, and bottleneck.d.ts (via test.ts)
@@ -1165,7 +1165,7 @@ Vitest projects:
 | ------------------------ | --------------------------------------------------------------------------------------------------------------------- |
 | `local`                  | Full suite, local datastore (cluster tests excluded).                                                                 |
 | `ioredis` / `node-redis` | Same suite against Redis via Testcontainers (per-file container isolation, `maxWorkers: 3`, `FLUSHDB` between tests). |
-| `light-smoke`            | Loads `dist/light.js`, basic schedule, clustering stub error.                                                         |
+| `light-smoke`            | Loads `dist/light.js` (ESM), basic schedule, clustering stub error.                                                   |
 | `memory`                 | Heap stability tests only (`pnpm run test:memory` or `pnpm run test`).                                                |
 
 You need a container runtime (Docker Desktop, Colima, OrbStack, …) for the Redis-backed projects.

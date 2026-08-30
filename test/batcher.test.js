@@ -1,8 +1,8 @@
 import { describe, expect } from "vitest";
-import sleep from "../src/sleep.js";
+import sleep from "../src/sleep";
+import Bottleneck from "./bottleneck.mjs";
 import { useFakeClock } from "./helpers/clock.js";
 import { test } from "./helpers/test-api.js";
-const Bottleneck = require("./bottleneck");
 
 // Batcher is datastore-independent, so this file only runs in the `local`
 // project (excluded from the redis projects in vitest.config.mts) and always

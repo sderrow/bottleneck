@@ -1,8 +1,11 @@
-const parser = require("./parser");
-const Events = require("./Events");
-const RedisConnection = require("./cluster/RedisConnection");
-const IORedisConnection = require("./cluster/IORedisConnection");
-const Scripts = require("./cluster/Scripts");
+import Bottleneck from "./Bottleneck";
+import IORedisConnection from "./cluster/IORedisConnection";
+import RedisConnection from "./cluster/RedisConnection";
+import * as Scripts from "./cluster/Scripts";
+import Events from "./Events";
+import { load, overwrite } from "./parser";
+
+type Connection = RedisConnection | IORedisConnection;
 
 class Group {
   defaults = {
@@ -11,15 +14,30 @@ class Group {
     id: "group-key",
   };
 
-  constructor(limiterOptions) {
+  // Installed on the instance by Events (see Events constructor).
+  declare on: (name: string, cb: (...args: any[]) => void) => unknown;
+  declare once: (name: string, cb: (...args: any[]) => void) => unknown;
+  declare removeAllListeners: (name?: string | null) => void;
+
+  timeout: number = this.defaults.timeout;
+  connection: Connection | null = null;
+  id: string = this.defaults.id;
+  limiterOptions: Record<string, unknown>;
+  Events: Events;
+  instances: Record<string, Bottleneck>;
+  interval: ReturnType<typeof setInterval> | undefined;
+  sharedConnection: boolean;
+  Bottleneck: typeof Bottleneck;
+
+  constructor(limiterOptions: Record<string, unknown> = {}) {
     this.deleteKey = this.deleteKey.bind(this);
     this.limiterOptions = limiterOptions ?? {};
-    parser.load(this.limiterOptions, this.defaults, this);
+    load(this.limiterOptions, this.defaults, this);
     this.Events = new Events(this);
     this.instances = {};
     this._startAutoCleanup();
     this.sharedConnection = this.connection != null;
-    this.Bottleneck = require("./Bottleneck");
+    this.Bottleneck = Bottleneck;
 
     if (this.connection == null) {
       if (this.limiterOptions.datastore === "redis") {
@@ -34,7 +52,7 @@ class Group {
     }
   }
 
-  key(key = "") {
+  key(key = ""): Bottleneck {
     let limiter = this.instances[key];
     if (!limiter) {
       limiter = new this.Bottleneck(
@@ -50,8 +68,8 @@ class Group {
     return limiter;
   }
 
-  async deleteKey(key = "") {
-    let deleted;
+  async deleteKey(key = ""): Promise<boolean> {
+    let deleted: unknown;
     const instance = this.instances[key];
     if (this.connection) {
       deleted = await this.connection.__runCommand__([
@@ -63,35 +81,35 @@ class Group {
       delete this.instances[key];
       await instance.disconnect();
     }
-    return instance != null || deleted > 0;
+    return instance != null || (deleted as number) > 0;
   }
 
-  limiters() {
+  limiters(): { key: string; limiter: Bottleneck }[] {
     return Object.entries(this.instances).map(([key, limiter]) => ({ key, limiter }));
   }
 
-  keys() {
+  keys(): string[] {
     return Object.keys(this.instances);
   }
 
-  async clusterKeys() {
+  async clusterKeys(): Promise<string[]> {
     if (this.connection == null) {
       return Promise.resolve(this.keys());
     }
-    const keys = [];
-    let cursor = null;
+    const keys: string[] = [];
+    let cursor: number | null = null;
     const start = `b_${this.id}-`.length;
     const end = "_settings".length;
     while (cursor !== 0) {
-      const [next, found] = await this.connection.__runCommand__([
+      const [next, found] = (await this.connection.__runCommand__([
         "scan",
         cursor ?? 0,
         "match",
         `b_${this.id}-*_settings`,
         "count",
         10000,
-      ]);
-      cursor = ~~next;
+      ])) as [string | number | null, string[]];
+      cursor = ~~next!;
       for (const k of found) {
         keys.push(k.slice(start, -end));
       }
@@ -99,14 +117,18 @@ class Group {
     return keys;
   }
 
-  _startAutoCleanup() {
+  _startAutoCleanup(): void {
     clearInterval(this.interval);
 
     this.interval = setInterval(async () => {
       const time = Date.now();
       for (const [k, v] of Object.entries(this.instances)) {
         try {
-          if (await v._store.__groupCheck__(time)) {
+          if (
+            await (
+              v._store as unknown as { __groupCheck__: (t: number) => Promise<boolean> }
+            ).__groupCheck__(time)
+          ) {
             await this.deleteKey(k);
           }
         } catch (e) {
@@ -116,16 +138,16 @@ class Group {
     }, this.timeout / 2).unref?.();
   }
 
-  updateSettings(options) {
+  updateSettings(options: Record<string, unknown> = {}): void {
     options ??= {};
-    parser.overwrite(options, this.defaults, this);
-    parser.overwrite(options, options, this.limiterOptions);
+    overwrite(options, this.defaults, this);
+    overwrite(options, options, this.limiterOptions);
     if (options.timeout != null) {
-      return this._startAutoCleanup();
+      this._startAutoCleanup();
     }
   }
 
-  disconnect(flush = true) {
+  disconnect(flush = true): unknown {
     clearInterval(this.interval);
     if (!this.sharedConnection) {
       return this.connection?.disconnect(flush);
@@ -133,4 +155,4 @@ class Group {
   }
 }
 
-module.exports = Group;
+export default Group;

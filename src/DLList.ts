@@ -1,12 +1,21 @@
-class DLList {
-  constructor(incr, decr) {
+type Node<T> = {
+  value: T;
+  prev: Node<T> | null;
+  next: Node<T> | null;
+};
+
+class DLList<T = unknown> {
+  incr?: () => void;
+  decr?: () => void;
+  _first: Node<T> | null = null;
+  _last: Node<T> | null = null;
+  length = 0;
+
+  constructor(incr?: () => void, decr?: () => void) {
     this.incr = incr;
     this.decr = decr;
-    this._first = null;
-    this._last = null;
-    this.length = 0;
   }
-  push(value) {
+  push(value: T): void {
     this.length++;
     this.incr?.();
     const node = { value, prev: this._last, next: null };
@@ -17,7 +26,7 @@ class DLList {
       this._first = this._last = node;
     }
   }
-  shift() {
+  shift(): T | undefined {
     if (this._first == null) {
       return;
     } else {
@@ -32,26 +41,26 @@ class DLList {
     }
     return value;
   }
-  first() {
+  first(): T | undefined {
     return this._first?.value;
   }
-  getArray() {
+  getArray(): T[] {
     let node = this._first;
-    const result = [];
+    const result: T[] = [];
     while (node != null) {
       let ref;
       result.push(((ref = node), (node = node.next), ref.value));
     }
     return result;
   }
-  forEachShift(cb) {
+  forEachShift(cb: (value: T) => void): void {
     let node = this.shift();
     while (node != null) {
       cb(node);
       node = this.shift();
     }
   }
-  debug() {
+  debug(): unknown[] {
     let node = this._first;
     const result = [];
     while (node != null) {
@@ -70,4 +79,4 @@ class DLList {
   }
 }
 
-module.exports = DLList;
+export default DLList;

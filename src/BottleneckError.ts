@@ -1,8 +1,8 @@
 class BottleneckError extends Error {
-  constructor(message) {
+  constructor(message?: string) {
     super(message);
     this.name = "BottleneckError";
   }
 }
 
-module.exports = BottleneckError;
+export default BottleneckError;

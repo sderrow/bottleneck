@@ -1,8 +1,8 @@
 import { describe, expect } from "vitest";
-import sleep from "../src/sleep.js";
+import sleep from "../src/sleep";
+import Bottleneck from "./bottleneck.mjs";
 import { useFakeClock } from "./helpers/clock.js";
 import { test, waitForState } from "./helpers/test-api.js";
-const Bottleneck = require("./bottleneck");
 
 useFakeClock();
 

@@ -1,8 +1,8 @@
 import { describe, expect } from "vitest";
+import Events from "../src/Events";
+import Job from "../src/Job";
+import States from "../src/States";
 import { test } from "./helpers/test-api.js";
-const Job = require("../src/Job.js");
-const States = require("../src/States.js");
-const Events = require("../src/Events.js");
 
 const jobDefaults = { priority: 5, weight: 1, expiration: null, id: "<no-id>" };
 

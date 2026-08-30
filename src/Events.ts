@@ -1,17 +1,26 @@
+type ListenerCb = (...args: unknown[]) => unknown;
+type Listener = {
+  cb: ListenerCb;
+  status: "many" | "once" | "none";
+};
+
+/**
+ * Installs `on`/`once`/`removeAllListeners` onto an instance that does not
+ * have an emitter of its own.
+ */
 class Events {
-  constructor(instance) {
+  instance: object;
+  _events: Record<string, Listener[]> = {};
+
+  constructor(instance: object) {
     this.instance = instance;
-    this._events = {};
-    if (
-      this.instance.on != null ||
-      this.instance.once != null ||
-      this.instance.removeAllListeners != null
-    ) {
+    const target = this.instance as Record<string, unknown>;
+    if (target.on != null || target.once != null || target.removeAllListeners != null) {
       throw new Error("An Emitter already exists for this object");
     }
-    this.instance.on = (name, cb) => this._addListener(name, "many", cb);
-    this.instance.once = (name, cb) => this._addListener(name, "once", cb);
-    this.instance.removeAllListeners = (name = null) => {
+    target.on = (name: string, cb: ListenerCb) => this._addListener(name, "many", cb);
+    target.once = (name: string, cb: ListenerCb) => this._addListener(name, "once", cb);
+    target.removeAllListeners = (name: string | null = null) => {
       if (name != null) {
         delete this._events[name];
       } else {
@@ -19,15 +28,15 @@ class Events {
       }
     };
   }
-  _addListener(name, status, cb) {
+  _addListener(name: string, status: Listener["status"], cb: ListenerCb): object {
     this._events[name] ??= [];
     this._events[name].push({ cb, status });
     return this.instance;
   }
-  listenerCount(name) {
+  listenerCount(name: string): number {
     return this._events[name]?.length ?? 0;
   }
-  async trigger(name, ...args) {
+  async trigger(name: string, ...args: unknown[]): Promise<unknown | undefined> {
     try {
       if (name !== "debug") {
         this.trigger("debug", `Event triggered: ${name}`, args);
@@ -59,4 +68,4 @@ class Events {
   }
 }
 
-module.exports = Events;
+export default Events;
