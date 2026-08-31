@@ -130,14 +130,12 @@ class RedisConnection {
   }
 
   /** @internal */
-  /** @internal */
   async __runCommand__(cmd: unknown[]): Promise<unknown> {
     await this.ready;
     const reply = await this.client!.sendCommand!(stringifyArgs(cmd));
     return normalizeReply(cmd, reply);
   }
 
-  /** @internal */
   /** @internal */
   async __runScript__(name: string, id: string, args: unknown[]): Promise<unknown> {
     const keys = Scripts.keys(name, id);
@@ -157,11 +155,10 @@ class RedisConnection {
   }
 
   /** @internal */
-  /** @internal */
   async __addLimiter__(instance: Bottleneck): Promise<void> {
     await Promise.all(
       [instance.channel(), instance.channel_client()].map(async (channel) => {
-        this.subscriber.subscribe!(channel, (message: string) => {
+        await this.subscriber.subscribe!(channel, (message: string) => {
           (
             this.limiters[channel]?._store as unknown as {
               onMessage?: (channel: string, message: string) => Promise<unknown>;

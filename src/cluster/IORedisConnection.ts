@@ -118,7 +118,6 @@ class IORedisConnection {
   }
 
   /** @internal */
-  /** @internal */
   async __runCommand__(cmd: unknown[]): Promise<unknown> {
     await this.ready;
     const [[, value]] = (await this.client!.pipeline!([cmd]).exec()) as [[unknown, unknown]];
@@ -136,7 +135,6 @@ class IORedisConnection {
   }
 
   /** @internal */
-  /** @internal */
   async __addLimiter__(instance: Bottleneck): Promise<void> {
     await Promise.all(
       [instance.channel(), instance.channel_client()].map(async (channel) => {
@@ -147,7 +145,6 @@ class IORedisConnection {
     );
   }
 
-  /** @internal */
   /** @internal */
   async __removeLimiter__(instance: Bottleneck): Promise<void> {
     await Promise.all(

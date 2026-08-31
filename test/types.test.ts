@@ -17,6 +17,13 @@ import Bottleneck from "../src/index";
  * types, so asserting on them here guards the published type contract.
  */
 
+const makeFakeRedisClient = () => ({
+  setMaxListeners() {},
+  on() {},
+  once() {},
+  duplicate: () => makeFakeRedisClient(),
+});
+
 describe("Bottleneck type contract", () => {
   it("exposes the strategy constants as literal types", () => {
     expectTypeOf(Bottleneck.strategy.LEAK).toEqualTypeOf<1>();
@@ -117,16 +124,19 @@ describe("Bottleneck type contract", () => {
   });
 
   it("rejects connection options with both Redis and client", () => {
-    // Minimal stand-ins: the constructor runs for real (ready() rejection is
-    // suppressed internally), the assertions here are compile-time.
+    // Minimal stand-ins: the constructor runs for real (ready() stays pending
+    // because these fakes never emit "ready"), the assertions here are
+    // compile-time. They must satisfy _setup's synchronous calls.
     const nodeRedisFake = {
-      createClient: () => ({ on() {}, duplicate: () => ({ on() {} }) }),
+      createClient: makeFakeRedisClient,
     };
-    const clientFake = { on() {}, duplicate: () => ({ on() {} }) };
+    const clientFake = makeFakeRedisClient();
     class IORedisFake {
+      setMaxListeners() {}
       on() {}
+      once() {}
       duplicate() {
-        return { on() {} };
+        return makeFakeRedisClient();
       }
     }
 

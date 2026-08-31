@@ -88,7 +88,6 @@ class RedisDatastore {
   }
 
   /** @internal */
-  /** @internal */
   async __publish__(message: string): Promise<unknown> {
     const client = (await this.ready).client!;
     return client.publish!(this.instance.channel(), `message:${message.toString()}`);
@@ -141,7 +140,6 @@ class RedisDatastore {
     }
   }
 
-  /** @internal */
   /** @internal */
   async __disconnect__(flush?: boolean): Promise<unknown> {
     this._disconnecting = true;
@@ -213,7 +211,6 @@ class RedisDatastore {
   }
 
   /** @internal */
-  /** @internal */
   async __updateSettings__(options: StoreOptions): Promise<StoreOptions> {
     await this.runScript("update_settings", this.prepareObject(options));
     return overwrite(options, options, this.storeOptions);
@@ -238,7 +235,6 @@ class RedisDatastore {
   }
 
   /** @internal */
-  /** @internal */
   async __groupCheck__(): Promise<boolean> {
     return this.convertBool(await this.runScript("group_check", []));
   }
@@ -256,12 +252,10 @@ class RedisDatastore {
   }
 
   /** @internal */
-  /** @internal */
   async __check__(weight: number): Promise<boolean> {
     return this.convertBool(await this.runScript("check", this.prepareArray([weight])));
   }
 
-  /** @internal */
   /** @internal */
   async __register__(
     index: string,
@@ -284,7 +278,6 @@ class RedisDatastore {
     };
   }
 
-  /** @internal */
   /** @internal */
   async __submit__(
     queueLength: number,
@@ -315,7 +308,6 @@ class RedisDatastore {
     }
   }
 
-  /** @internal */
   /** @internal */
   async __free__(index: string, _weight: number): Promise<{ running: unknown }> {
     const running = await this.runScript("free", this.prepareArray([index]));
