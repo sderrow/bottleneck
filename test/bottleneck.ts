@@ -21,7 +21,7 @@ const Bottleneck = await resolveEntry();
 // the Bottleneck constructor infers the datastore from the connection).
 // Both paths must get the test heartbeat override applied, otherwise
 // child limiters created from a "connection-only" Group inherit the 5000ms
-// production default and produce 5-second flakes (see cluster.test.js:75
+// production default and produce 5-second flakes (see cluster.test.ts:75
 // and similar).
 const isRedisBacked = (options: Record<string, any> | undefined): options is Record<string, any> =>
   options != null &&
@@ -30,11 +30,7 @@ const isRedisBacked = (options: Record<string, any> | undefined): options is Rec
 
 const usingRedis = process.env.DATASTORE === "redis" || process.env.DATASTORE === "ioredis";
 
-let ExportedBottleneck!: BottleneckClass;
-
-if (!usingRedis) {
-  ExportedBottleneck = Bottleneck;
-} else {
+async function makeTestBottleneck(Base: BottleneckClass): Promise<BottleneckClass> {
   const Redis =
     process.env.DATASTORE === "redis"
       ? (await import("redis")).default
@@ -87,7 +83,7 @@ if (!usingRedis) {
     // 250ms heartbeat closes the worst-case recovery window without
     // affecting tests that don't depend on heartbeat timing. Tests that
     // DO depend on heartbeat timing already set their own value explicitly
-    // (e.g. heartbeatInterval: 75 in general.test.js auto-refresh tests).
+    // (e.g. heartbeatInterval: 75 in general.test.ts auto-refresh tests).
     if (next.heartbeatInterval == null) next.heartbeatInterval = 250;
     // Namespace every limiter id with the fork-local FILE_PREFIX so this fork's
     // Redis keys don't collide with keys from any other parallel fork on the
@@ -110,18 +106,18 @@ if (!usingRedis) {
 
   // `Group.limiters()` returns instances of the real `Bottleneck`, so we override
   // `Symbol.hasInstance` to keep `instanceof` checks in tests behaving as expected.
-  class TestBottleneck extends Bottleneck {
+  class TestBottleneck extends Base {
     static override [Symbol.hasInstance](instance: unknown) {
-      return instance instanceof Bottleneck;
+      return instance instanceof Base;
     }
     constructor(options?: Record<string, any>) {
       super(withRedis(options));
     }
   }
 
-  TestBottleneck.Group = class TestGroup extends Bottleneck.Group {
+  TestBottleneck.Group = class TestGroup extends Base.Group {
     static override [Symbol.hasInstance](instance: unknown) {
-      return instance instanceof Bottleneck.Group;
+      return instance instanceof Base.Group;
     }
     constructor(options?: Record<string, any>) {
       super(withRedis(options));
@@ -135,7 +131,7 @@ if (!usingRedis) {
     }
   };
 
-  ExportedBottleneck = TestBottleneck;
+  return TestBottleneck;
 }
 
-export default ExportedBottleneck;
+export default usingRedis ? await makeTestBottleneck(Bottleneck) : Bottleneck;
