@@ -44,7 +44,6 @@ class RedisDatastore {
         this.connection = new RedisConnection({
           Redis: this.Redis,
           clientOptions: this.clientOptions,
-          Promise: Promise,
           Events: this.instance.Events,
         });
       } else if (this.instance.datastore === "ioredis") {
@@ -52,7 +51,6 @@ class RedisDatastore {
           Redis: this.Redis,
           clientOptions: this.clientOptions,
           clusterNodes: this.clusterNodes,
-          Promise: Promise,
           Events: this.instance.Events,
         });
       } else {

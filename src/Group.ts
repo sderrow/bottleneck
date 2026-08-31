@@ -1,4 +1,10 @@
-import type { ConstructorOptions, GroupEvents, GroupLimiterPair } from "./types";
+import type {
+  ConstructorOptions,
+  GroupEvents,
+  GroupLimiterPair,
+  IORedisConnectionOptions,
+  RedisConnectionOptions,
+} from "./types";
 import Bottleneck from "./Bottleneck";
 import IORedisConnection from "./cluster/IORedisConnection";
 import RedisConnection from "./cluster/RedisConnection";
@@ -9,6 +15,7 @@ import { load, overwrite } from "./parser";
 type Connection = RedisConnection | IORedisConnection;
 
 class Group {
+  /** @internal */
   defaults = {
     timeout: 1000 * 60 * 5,
     connection: null,
@@ -26,14 +33,21 @@ class Group {
   };
   declare removeAllListeners: (name?: string | null) => void;
 
+  /** @internal */
   timeout: number = this.defaults.timeout;
   connection: Connection | null = null;
   id: string = this.defaults.id;
+  /** @internal */
   limiterOptions: Record<string, unknown>;
+  /** @internal */
   Events: Events;
+  /** @internal */
   instances: Record<string, Bottleneck>;
+  /** @internal */
   interval: ReturnType<typeof setInterval> | undefined;
+  /** @internal */
   sharedConnection: boolean;
+  /** @internal */
   Bottleneck: typeof Bottleneck;
 
   constructor(limiterOptions: ConstructorOptions = {}) {
@@ -48,12 +62,18 @@ class Group {
 
     if (this.connection == null) {
       if (this.limiterOptions.datastore === "redis") {
+        // Options come from user limiterOptions; the constructor validates that
+        // Redis or client is present at runtime.
         this.connection = new RedisConnection(
-          Object.assign({}, this.limiterOptions, { Events: this.Events }),
+          Object.assign({}, this.limiterOptions, {
+            Events: this.Events,
+          }) as unknown as RedisConnectionOptions,
         );
       } else if (this.limiterOptions.datastore === "ioredis") {
         this.connection = new IORedisConnection(
-          Object.assign({}, this.limiterOptions, { Events: this.Events }),
+          Object.assign({}, this.limiterOptions, {
+            Events: this.Events,
+          }) as unknown as IORedisConnectionOptions,
         );
       }
     }

@@ -1,4 +1,4 @@
-import { describe, expectTypeOf, it } from "vitest";
+import { describe, expect, expectTypeOf, it } from "vitest";
 import type {
   BatcherOptions,
   ClientsList,
@@ -114,6 +114,34 @@ describe("Bottleneck type contract", () => {
     const limiter = new Bottleneck();
     expectTypeOf(limiter.clients()).toEqualTypeOf<ClientsList>();
     expectTypeOf(limiter.channel()).toEqualTypeOf<string>();
+  });
+
+  it("rejects connection options with both Redis and client", () => {
+    // Minimal stand-ins: the constructor runs for real (ready() rejection is
+    // suppressed internally), the assertions here are compile-time.
+    const nodeRedisFake = {
+      createClient: () => ({ on() {}, duplicate: () => ({ on() {} }) }),
+    };
+    const clientFake = { on() {}, duplicate: () => ({ on() {} }) };
+    class IORedisFake {
+      on() {}
+      duplicate() {
+        return { on() {} };
+      }
+    }
+
+    // Valid: either branch alone constructs.
+    void new Bottleneck.RedisConnection({ Redis: nodeRedisFake });
+    void new Bottleneck.RedisConnection({ client: clientFake });
+    void new Bottleneck.IORedisConnection({ Redis: IORedisFake });
+
+    // @ts-expect-error Redis and client are mutually exclusive
+    void new Bottleneck.RedisConnection({ Redis: nodeRedisFake, client: clientFake });
+    // @ts-expect-error ditto for ioredis
+    void new Bottleneck.IORedisConnection({ Redis: IORedisFake, client: clientFake });
+
+    expect(typeof Bottleneck.RedisConnection).toBe("function");
+    expect(typeof Bottleneck.IORedisConnection).toBe("function");
   });
 
   it("keeps option types structural", () => {

@@ -1,4 +1,5 @@
 import type Bottleneck from "../Bottleneck";
+import type { RedisConnectionOptions } from "../types";
 import type { RedisLib, RedisLikeClient } from "./redis-types";
 import BottleneckError from "../BottleneckError";
 import Events from "../Events";
@@ -28,14 +29,23 @@ const stringifyArgs = (args: unknown[]): string[] =>
   args.map((a) => (a == null ? "" : typeof a === "string" ? a : String(a)));
 
 class RedisConnection {
+  /** @internal */
   Redis: RedisLib | null = null;
+  /** @internal */
   clientOptions: object = {};
+  /** @internal */
   client: RedisLikeClient | null = null;
+  /** @internal */
   Events: Events | null = null;
+  /** @internal */
   datastore = "redis";
+  /** @internal */
   terminated = false;
+  /** @internal */
   shas: Record<string, string> = {};
+  /** @internal */
   subscriber: RedisLikeClient;
+  /** @internal */
   limiters: Record<string, Bottleneck> = {};
   ready: Promise<{ client: RedisLikeClient; subscriber: RedisLikeClient }>;
 
@@ -50,9 +60,8 @@ class RedisConnection {
   };
   declare removeAllListeners: (name?: string | null) => void;
 
-  constructor(options: object = {}) {
-    options ??= {};
-    load(options, this.defaults, this);
+  constructor(options?: RedisConnectionOptions) {
+    load(options ?? {}, this.defaults, this);
 
     if (this.Redis == null && this.client == null) {
       throw new BottleneckError(
@@ -74,6 +83,7 @@ class RedisConnection {
     this.ready.catch(() => {});
   }
 
+  /** @internal */
   defaults = {
     Redis: null,
     clientOptions: {},

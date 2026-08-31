@@ -3,15 +3,22 @@ import Events from "./Events";
 import { load } from "./parser";
 
 type BatcherDefaults = {
+  /** @internal */
   maxTime: number | null;
+  /** @internal */
   maxSize: number | null;
 };
 
 class Batcher<T = any> {
+  /** @internal */
   defaults: BatcherDefaults = { maxTime: null, maxSize: null };
+  /** @internal */
   maxTime: number | null = null;
+  /** @internal */
   maxSize: number | null = null;
+  /** @internal */
   options: BatcherOptions;
+  /** @internal */
   Events: Events;
   /** @internal */
   /** @internal */

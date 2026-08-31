@@ -66,13 +66,16 @@ class Bottleneck {
     BLOCK: 3,
   };
 
+  /** @internal */
   version = version;
+  /** @internal */
   jobDefaults: JobDefaults = {
     priority: DEFAULT_PRIORITY,
     weight: 1,
     expiration: null,
     id: "<no-id>",
   };
+  /** @internal */
   storeDefaults: StoreOptions = {
     maxConcurrent: null,
     minTime: 0,
@@ -86,11 +89,13 @@ class Bottleneck {
     reservoirIncreaseAmount: null,
     reservoirIncreaseMaximum: null,
   };
+  /** @internal */
   localStoreDefaults = {
     Promise,
     timeout: null as number | null,
     heartbeatInterval: 250,
   };
+  /** @internal */
   redisStoreDefaults = {
     Promise,
     timeout: null as number | null,
@@ -102,6 +107,7 @@ class Bottleneck {
     clearDatastore: false,
     connection: null,
   };
+  /** @internal */
   instanceDefaults = {
     datastore: "local",
     connection: null,
@@ -110,6 +116,7 @@ class Bottleneck {
     trackDoneStatus: false,
     Promise,
   };
+  /** @internal */
   stopDefaults = {
     enqueueErrorMessage: "This limiter has been stopped and cannot accept new jobs.",
     dropWaitingJobs: true,
@@ -120,8 +127,11 @@ class Bottleneck {
   datastore: string = "local";
   connection: RedisConnection | IORedisConnection | null = null;
   id: string = "<no-id>";
+  /** @internal */
   rejectOnDrop: boolean = true;
+  /** @internal */
   trackDoneStatus: boolean = false;
+  /** @internal */
   Promise: PromiseConstructor = Promise;
 
   /** @internal */
@@ -215,6 +225,7 @@ class Bottleneck {
     return `b_${this.id}`;
   }
 
+  /** @internal */
   channel_client(): string {
     return `b_${this.id}_${this._store.clientId}`;
   }

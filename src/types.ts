@@ -103,6 +103,57 @@ export type BatcherOptions = {
   readonly maxSize?: number | null;
 };
 
+/**
+ * Options for `new Bottleneck.RedisConnection(...)`. Either `Redis` (the
+ * imported `redis` library) or `client` (a pre-built NodeRedis client) is
+ * required; passing both is rejected by the union.
+ */
+export type RedisConnectionOptions =
+  | {
+      /** The `redis` library, e.g. `Redis from "redis"`. Required unless `client` is provided. */
+      readonly Redis: unknown;
+      /** Passed directly to NodeRedis' `createClient()` method. */
+      readonly clientOptions?: unknown;
+      readonly client?: never;
+      /** Internal: pubsub event sink wired up by RedisDatastore. */
+      readonly Events?: unknown;
+    }
+  | {
+      /** An existing NodeRedis client to use. When provided, `clientOptions` is ignored. */
+      readonly client: unknown;
+      readonly Redis?: never;
+      readonly clientOptions?: unknown;
+      /** Internal: pubsub event sink wired up by RedisDatastore. */
+      readonly Events?: unknown;
+    };
+
+/**
+ * Options for `new Bottleneck.IORedisConnection(...)`. Either `Redis` (the
+ * imported `ioredis` library) or `client` (a pre-built ioredis client) is
+ * required; passing both is rejected by the union.
+ */
+export type IORedisConnectionOptions =
+  | {
+      /** The `ioredis` library, e.g. `Redis from "ioredis"`. Required unless `client` is provided. */
+      readonly Redis: unknown;
+      /** Passed directly to ioredis' constructor. */
+      readonly clientOptions?: unknown;
+      /** When set, clients are created via `new Redis.Cluster(clusterNodes, clientOptions)`. */
+      readonly clusterNodes?: unknown;
+      readonly client?: never;
+      /** Internal: pubsub event sink wired up by RedisDatastore. */
+      readonly Events?: unknown;
+    }
+  | {
+      /** An existing ioredis client to use. When provided, `clientOptions` and `clusterNodes` are ignored. */
+      readonly client: unknown;
+      readonly Redis?: never;
+      readonly clientOptions?: unknown;
+      readonly clusterNodes?: unknown;
+      /** Internal: pubsub event sink wired up by RedisDatastore. */
+      readonly Events?: unknown;
+    };
+
 /** Datastore-specific map of raw redis clients. */
 export type ClientsList = { client?: any; subscriber?: any };
 

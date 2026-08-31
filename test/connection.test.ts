@@ -1,4 +1,5 @@
 import { describe, test, expect, vi } from "vitest";
+import type { IORedisConnectionOptions, RedisConnectionOptions } from "../src/types";
 import IORedisConnection from "../src/cluster/IORedisConnection";
 import RedisConnection from "../src/cluster/RedisConnection";
 import * as Scripts from "../src/cluster/Scripts";
@@ -93,7 +94,8 @@ const makeLimiterInstance = () => ({
 
 describe("RedisConnection (node-redis)", () => {
   test("Should refuse to build without a Redis reference or a pre-built client", () => {
-    expect(() => new RedisConnection({})).toThrow(
+    // {} is not a valid RedisConnectionOptions; the runtime rejection is the contract
+    expect(() => new RedisConnection({} as unknown as RedisConnectionOptions)).toThrow(
       /requires a `Redis` library reference or a pre-built `client`/,
     );
   });
@@ -206,7 +208,7 @@ describe("RedisConnection (node-redis)", () => {
 
 describe("IORedisConnection", () => {
   test("Should refuse to build without a Redis reference or a pre-built client", () => {
-    expect(() => new IORedisConnection({})).toThrow(
+    expect(() => new IORedisConnection({} as unknown as IORedisConnectionOptions)).toThrow(
       /requires a `Redis` library reference or a pre-built `client`/,
     );
   });

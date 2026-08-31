@@ -9,6 +9,7 @@ type Listener = {
  * have an emitter of its own.
  */
 class Events {
+  /** @internal */
   instance: object;
   /** @internal */
   /** @internal */

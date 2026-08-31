@@ -1,4 +1,5 @@
 import type Bottleneck from "../Bottleneck";
+import type { IORedisConnectionOptions } from "../types";
 import type { RedisLib, RedisLikeClient } from "./redis-types";
 import BottleneckError from "../BottleneckError";
 import Events from "../Events";
@@ -7,14 +8,23 @@ import { normalizeReply } from "./normalizeReply";
 import * as Scripts from "./Scripts";
 
 class IORedisConnection {
+  /** @internal */
   Redis: RedisLib | null = null;
+  /** @internal */
   clientOptions: object = {};
+  /** @internal */
   clusterNodes: unknown = null;
+  /** @internal */
   client: RedisLikeClient | null = null;
+  /** @internal */
   Events: Events | null = null;
+  /** @internal */
   datastore = "ioredis";
+  /** @internal */
   terminated = false;
+  /** @internal */
   subscriber: RedisLikeClient;
+  /** @internal */
   limiters: Record<string, Bottleneck> = {};
   ready: Promise<{ client: RedisLikeClient; subscriber: RedisLikeClient }>;
 
@@ -29,6 +39,7 @@ class IORedisConnection {
   };
   declare removeAllListeners: (name?: string | null) => void;
 
+  /** @internal */
   defaults = {
     Redis: null,
     clientOptions: {},
@@ -37,9 +48,8 @@ class IORedisConnection {
     Events: null,
   };
 
-  constructor(options: object = {}) {
-    options ??= {};
-    load(options, this.defaults, this);
+  constructor(options?: IORedisConnectionOptions) {
+    load(options ?? {}, this.defaults, this);
 
     if (this.Redis == null && this.client == null) {
       throw new BottleneckError(

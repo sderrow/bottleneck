@@ -240,7 +240,7 @@ export const test = baseTest.extend<{
         process.env.DATASTORE === "ioredis"
           ? Bottleneck.IORedisConnection
           : Bottleneck.RedisConnection;
-      return track(new Connection(opts as ConstructorOptions) as unknown as Connection);
+      return track(new Connection(opts as any) as unknown as Connection);
     });
   },
   async limiter({ makeLimiter, limiterOptions, limiterMeta }, use) {
