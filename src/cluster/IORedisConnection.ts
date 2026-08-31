@@ -153,7 +153,7 @@ class IORedisConnection {
     await Promise.all(
       [instance.channel(), instance.channel_client()].map(async (channel) => {
         if (!this.terminated) {
-          this.subscriber.unsubscribe!(channel);
+          await this.subscriber.unsubscribe!(channel);
         }
         delete this.limiters[channel];
       }),
