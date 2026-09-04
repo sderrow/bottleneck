@@ -5,14 +5,14 @@ const redisGlobalSetup = "test/global-setup/redis.ts";
 const lightGlobalSetup = "test/global-setup/light.ts";
 const libGlobalSetup = "test/global-setup/lib.ts";
 
-const sourceInclude = ["test/**/*.test.js"];
+const sourceInclude = ["test/**/*.test.js", "test/**/*.test.ts"];
 const sourceExclude = ["test/smoke/**", "test/memory/**"];
 // Batcher is datastore-independent (its tests never touch Redis), so running it
 // under the redis projects is pure duplication — and worse, it uses fake timers,
 // which must never be installed in a fork holding the long-lived redis flush
 // client (a reconnect timer scheduled on the fake clock is discarded unfired by
 // useRealTimers(), stranding the client).
-const redisExclude = [...sourceExclude, "test/batcher.test.js"];
+const redisExclude = [...sourceExclude, "test/batcher.test.ts"];
 
 export default defineConfig({
   test: {
@@ -26,7 +26,7 @@ export default defineConfig({
           name: "local",
           root: ".",
           include: sourceInclude,
-          exclude: [...sourceExclude, "test/cluster*.test.js", "test/*redis.test.js"],
+          exclude: [...sourceExclude, "test/cluster*.test.ts", "test/*redis.test.ts"],
           setupFiles: [setupFile],
         },
       },
@@ -36,7 +36,7 @@ export default defineConfig({
           root: ".",
           env: { DATASTORE: "ioredis" },
           include: sourceInclude,
-          exclude: [...redisExclude, "test/node_redis.test.js"],
+          exclude: [...redisExclude, "test/node_redis.test.ts"],
           setupFiles: [setupFile],
           testTimeout: 15_000,
           hookTimeout: 30_000,
@@ -48,7 +48,7 @@ export default defineConfig({
           root: ".",
           env: { DATASTORE: "redis" },
           include: sourceInclude,
-          exclude: [...redisExclude, "test/ioredis.test.js"],
+          exclude: [...redisExclude, "test/ioredis.test.ts"],
           setupFiles: [setupFile],
           testTimeout: 15_000,
           hookTimeout: 30_000,
@@ -59,7 +59,7 @@ export default defineConfig({
           name: "light-smoke",
           root: ".",
           env: { BOTTLENECK_ENTRY: "light" },
-          include: ["test/smoke/light.test.js"],
+          include: ["test/smoke/light.test.ts"],
           setupFiles: [setupFile],
           // Build dist/light.js before the smoke test reads it.
           globalSetup: [lightGlobalSetup],
@@ -75,7 +75,7 @@ export default defineConfig({
           name: "lib-smoke",
           root: ".",
           env: { BOTTLENECK_ENTRY: "lib", DATASTORE: "redis" },
-          include: ["test/smoke/lib.test.js"],
+          include: ["test/smoke/lib.test.ts"],
           setupFiles: [setupFile],
           // Build dist/index.js before the smoke test reads it. The shared
           // Redis container is started by the root globalSetup above.
@@ -88,7 +88,7 @@ export default defineConfig({
         test: {
           name: "memory",
           root: ".",
-          include: ["test/memory/**/*.test.js"],
+          include: ["test/memory/**/*.test.ts"],
           execArgv: ["--expose-gc"],
           setupFiles: [setupFile],
         },

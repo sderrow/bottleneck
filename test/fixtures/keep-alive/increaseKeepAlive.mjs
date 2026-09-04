@@ -1,7 +1,4 @@
-import { createRequire } from "node:module";
-
-const require = createRequire(import.meta.url);
-const Bottleneck = require("../../bottleneck.js");
+import Bottleneck from "../../bottleneck.ts";
 
 const now = Date.now();
 const limiter = new Bottleneck({
