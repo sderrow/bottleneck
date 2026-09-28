@@ -72,13 +72,13 @@
   },
   "devDependencies": {
     "@testcontainers/redis": "^12.1.0",
-    "@types/node": "^24.13.3",
+    "@types/node": "^24.19.0",
     "@vitest/coverage-v8": "^4.1.11",
     "husky": "^9.1.7",
     "ioredis": "^6.0.0",
-    "lint-staged": "^17.3.0",
+    "lint-staged": "^17.6.0",
     "oxfmt": "^0.65.0",
-    "oxlint": "^1.79.0",
+    "oxlint": "^1.85.0",
     "redis": "^6.2.1",
     "testcontainers": "^12.1.0",
     "tsdown": "^0.22.14",
@@ -100,7 +100,7 @@
   "devEngines": {
     "packageManager": {
       "name": "pnpm",
-      "version": ">=12.7.0",
+      "version": "12.7.0",
       "onFail": "download"
     },
     "runtime": {
