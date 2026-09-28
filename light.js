@@ -202,7 +202,7 @@
 	          }
 	        } catch (error) {
 	          e = error;
-	          {
+	          if (name !== "error") {
 	            this.trigger("error", e);
 	          }
 	          return null;
@@ -213,7 +213,7 @@
 	      });
 	    } catch (error) {
 	      e = error;
-	      {
+	      if (name !== "error") {
 	        this.trigger("error", e);
 	      }
 	      return null;
@@ -804,7 +804,7 @@
 
 	var Sync_1 = Sync;
 
-	var version = "3.0.7";
+	var version = "3.0.8";
 	var version$1 = {
 		version: version
 	};

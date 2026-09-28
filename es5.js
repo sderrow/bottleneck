@@ -1294,7 +1294,7 @@
 	                            _context.t0 = _context["catch"](3);
 	                            e = _context.t0;
 
-	                            {
+	                            if (name !== "error") {
 	                              _this2.trigger("error", e);
 	                            }
 
@@ -1327,7 +1327,7 @@
 	                _context2.t1 = _context2["catch"](1);
 	                e = _context2.t1;
 
-	                {
+	                if (name !== "error") {
 	                  this.trigger("error", e);
 	                }
 
@@ -3902,7 +3902,7 @@
 
 	var Sync_1 = Sync;
 
-	var version = "3.0.7";
+	var version = "3.0.8";
 	var version$1 = {
 		version: version
 	};

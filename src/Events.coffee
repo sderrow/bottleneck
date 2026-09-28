@@ -28,11 +28,11 @@ class Events
           else
             returned
         catch e
-          if "name" != "error" then @trigger "error", e
+          if name != "error" then @trigger "error", e
           null
       (await Promise.all promises).find (x) -> x?
     catch e
-      if "name" != "error" then @trigger "error", e
+      if name != "error" then @trigger "error", e
       null
 
 module.exports = Events
