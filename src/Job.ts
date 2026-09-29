@@ -1,8 +1,15 @@
+import type { AsyncResource } from "node:async_hooks";
 import type Bottleneck from "./Bottleneck";
 import type Events from "./Events";
 import type States from "./States";
 import type { EventInfo, EventInfoRetryable, JobDefaults, ResolvedJobOptions } from "./types";
-import { attachScheduleStack, bindTask, cleanScheduleStack } from "./async-context";
+import {
+  attachScheduleStack,
+  bindTask,
+  captureAsyncResource,
+  cleanScheduleStack,
+  runWithAsyncResource,
+} from "./async-context";
 import BottleneckError from "./BottleneckError";
 import { load } from "./parser";
 import randomIndex from "./random-index";
@@ -43,6 +50,13 @@ class Job {
    * @internal
    */
   scheduledStack: string | undefined;
+  /**
+   * Async context active when schedule() was called, re-entered for the
+   * chained limiter's schedule() path in doExecute (which otherwise runs
+   * from this job's timer context). Undefined outside Node.
+   * @internal
+   */
+  asyncResource: AsyncResource | undefined;
   /** @internal */
   _resolve: (value: unknown) => void = null as never;
   /** @internal */
@@ -62,6 +76,7 @@ class Job {
     this.rejectOnDrop = rejectOnDrop;
     this.Events = Events;
     this._states = _states;
+    this.asyncResource = captureAsyncResource();
     this.scheduledStack = captureScheduleStack();
     this.options = load(options ?? {}, jobDefaults) as ResolvedJobOptions;
     this.options.priority = this._sanitizePriority(this.options.priority);
@@ -162,7 +177,9 @@ class Job {
 
     try {
       const passed = await (chained != null
-        ? chained.schedule(this.options as never, this.task as never, ...(this.args ?? []))
+        ? runWithAsyncResource(this.asyncResource, () =>
+            chained.schedule(this.options as never, this.task as never, ...(this.args ?? [])),
+          )
         : (this.task as (...args: never[]) => unknown)(...(this.args ?? [])));
 
       if (clearGlobalState()) {

@@ -49,6 +49,36 @@ describe("Async context", () => {
     await first;
   });
 
+  test("preserves AsyncLocalStorage on the chained limiter's schedule path", async ({
+    makeLimiter,
+  }) => {
+    const als = new AsyncLocalStorage<string>();
+    // Local inner datastore, as in the test above: two Redis-backed limiters
+    // sharing one maxConcurrent slot would deadlock by design.
+    const inner = makeLimiter({ id: "chain-received-inner", maxConcurrent: 1, datastore: "local" });
+    const outer = makeLimiter({ maxConcurrent: 1 });
+    outer.chain(inner);
+
+    const received: (string | undefined)[] = [];
+    inner.on("received", () => {
+      received.push(als.getStore());
+    });
+
+    const hold = deferred();
+    const first = outer.schedule(() => hold.signal);
+    await enqueued(outer);
+
+    const second = als.run("expected-store", () => outer.schedule(() => als.getStore()));
+    await enqueued(outer);
+
+    hold.release();
+    await expect(second).resolves.toBe("expected-store");
+    await first;
+    // Each outer execution schedules exactly one inner job: the first outside
+    // any ALS context, the second inside "expected-store".
+    expect(received).toEqual([undefined, "expected-store"]);
+  });
+
   test("rejection stack includes both the task and the schedule call site", async ({
     makeLimiter,
   }) => {

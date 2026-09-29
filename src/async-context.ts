@@ -17,6 +17,34 @@ export function bindTask<T extends (...args: any[]) => unknown>(task: T): T {
 }
 
 /**
+ * Capture the async context (e.g. AsyncLocalStorage state) active right now
+ * as a resource that can be re-entered later from a foreign async context.
+ * Used for the chained limiter's schedule() path in `Job.doExecute`, which
+ * runs from this job's timer context instead of the schedule-time context.
+ *
+ * Returns undefined outside Node (the light/browser build shims
+ * `node:async_hooks` without an AsyncResource constructor).
+ */
+export function captureAsyncResource(): AsyncResource | undefined {
+  try {
+    return new AsyncResource("Bottleneck.Job");
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Run `fn` inside a resource captured with `captureAsyncResource`.
+ * Falls back to a direct call when there is no resource.
+ */
+export function runWithAsyncResource<T>(resource: AsyncResource | undefined, fn: () => T): T {
+  if (resource != null) {
+    return resource.runInAsyncScope(fn);
+  }
+  return fn();
+}
+
+/**
  * Strip the "Error" headline from a captured stack, leaving only the frames.
  */
 export function cleanScheduleStack(raw: string | undefined): string | undefined {
