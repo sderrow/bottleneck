@@ -614,13 +614,3 @@ declare module "bottleneck/light" {
   import Bottleneck from "bottleneck";
   export default Bottleneck;
 }
-
-declare module "@sderrow/bottleneck" {
-  import Bottleneck from "bottleneck";
-  export default Bottleneck;
-}
-
-declare module "@sderrow/bottleneck/light" {
-  import Bottleneck from "bottleneck/light";
-  export default Bottleneck;
-}
