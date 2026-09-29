@@ -12,6 +12,7 @@ export type {
   Counts,
   EventInfo,
   EventInfoDropped,
+  EventInfoOrphanedJobs,
   EventInfoQueued,
   EventInfoRetryable,
   GroupEvents,

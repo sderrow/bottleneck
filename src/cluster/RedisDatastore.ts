@@ -9,6 +9,7 @@ import RedisConnection from "./RedisConnection";
 class RedisDatastore {
   /** @internal */
   _disconnecting = false;
+  _orphaned = 0;
   instance: Bottleneck;
   storeOptions: StoreOptions;
   Redis: RedisLib | null = null;
@@ -78,7 +79,11 @@ class RedisDatastore {
     if (!this._disconnecting) {
       this.heartbeat = setInterval(async () => {
         try {
-          await this.runScript("heartbeat", []);
+          const running = Number((await this.runScript("heartbeat", [])) ?? 0);
+          if (running > 0 || this._orphaned > 0) {
+            this._orphaned = running;
+            this.instance.Events.trigger("orphaned-jobs", { running });
+          }
         } catch (e) {
           if (!this._disconnecting) {
             this.instance.Events.trigger("error", e);

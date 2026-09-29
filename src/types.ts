@@ -71,6 +71,8 @@ export type BottleneckOptions = {
   readonly timeout?: number | null;
   /** Every `heartbeatInterval` ms, the `reservoir` is assessed. */
   readonly heartbeatInterval?: number | null;
+  /** How long in ms a client can go without contacting Redis before the cluster treats it as unresponsive. Its running jobs stay counted until it responds again or they expire, and the `"orphaned-jobs"` event reports them. Shared by every client of the limiter: the client that creates the limiter's state in Redis sets it. Keep it well above every client's `heartbeatInterval`, or clients look unresponsive between heartbeats. Defaults to 10000. */
+  readonly clientTimeout?: number | null;
 };
 
 /** Per-job options accepted by `schedule()`, `wrap().withOptions` and `submit`-style calls. */
@@ -177,6 +179,10 @@ export type EventInfoQueued = EventInfo & {
   readonly blocked: boolean;
 };
 export type EventInfoRetryable = EventInfo & { readonly retryCount: number };
+export type EventInfoOrphanedJobs = {
+  /** The weight of running jobs held by clients the cluster treats as unresponsive. 0 once it has been freed. */
+  readonly running: number;
+};
 
 export type Status = "RECEIVED" | "QUEUED" | "RUNNING" | "EXECUTING" | "DONE";
 export type Counts = {
@@ -195,6 +201,7 @@ export type BottleneckEvents = {
   empty: () => void;
   idle: () => void;
   depleted: (empty: boolean) => void;
+  ["orphaned-jobs"]: (info: EventInfoOrphanedJobs) => void;
   dropped: (info: EventInfoDropped) => void;
   received: (info: EventInfo) => void;
   queued: (info: EventInfoQueued) => void;

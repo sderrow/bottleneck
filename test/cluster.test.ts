@@ -19,6 +19,28 @@ const runCommand = (limiter: Limiter, command: string, args: string[]) =>
 const sumWeights = (weights: Record<string, any>) =>
   Object.keys(weights).reduce((acc: number, x: string) => acc + ~~weights[x], 0);
 
+const pauseHeartbeats = (limiter: Limiter) => {
+  const connection = (limiter._store as any).connection;
+  const original = connection.__runScript__;
+  connection.__runScript__ = (name: string, id: string, args: unknown[]) =>
+    name === "heartbeat" ? Promise.resolve(0) : original.call(connection, name, id, args);
+  return () => {
+    connection.__runScript__ = original;
+  };
+};
+
+const countHeartbeats = (limiter: Limiter) => {
+  const connection = (limiter._store as any).connection;
+  const original = connection.__runScript__.bind(connection);
+  const heartbeats = { count: 0 };
+  connection.__runScript__ = async (name: string, id: string, args: unknown[]) => {
+    const result = await original(name, id, args);
+    if (name === "heartbeat") heartbeats.count++;
+    return result;
+  };
+  return heartbeats;
+};
+
 describe("Cluster-only", () => {
   if (process.env.DATASTORE !== "redis" && process.env.DATASTORE !== "ioredis") {
     throw new Error("DATASTORE must be redis or ioredis");
@@ -790,6 +812,174 @@ describe("Cluster-only", () => {
 
     expect(await limiter2.running()).toEqual(0);
     expect(await numClients()).toEqual([1, 1, 1, 1]);
+  });
+
+  test("Should emit 'orphaned-jobs' while an unresponsive client holds running jobs", async ({
+    harness: h,
+    makeLimiter,
+  }) => {
+    const rootLimiter = makeLimiter({
+      id: "orphaned",
+      maxConcurrent: 3,
+      clientTimeout: 500,
+      heartbeatInterval: 50,
+    });
+    // Sequence init so rootLimiter's clientTimeout wins over limiter2's defaults.
+    await rootLimiter.ready();
+    const limiter2 = makeLimiter({ id: "orphaned" });
+    await limiter2.ready();
+
+    const never = new Promise(() => {});
+    void rootLimiter.schedule({ weight: 2 }, h.deferredPromise, never, null, 1);
+    await waitForState(async () => {
+      expect(await limiter2.running()).toEqual(2);
+    });
+
+    const orphaned = new Promise((resolve) => limiter2.once("orphaned-jobs", resolve));
+    // Crash rootLimiter: it stops heartbeating and can never free its running job.
+    await rootLimiter.disconnect(false);
+
+    expect(await orphaned).toEqual({ running: 2 });
+  });
+
+  test("Should sum orphaned weight across unresponsive clients", async ({
+    harness: h,
+    makeLimiter,
+  }) => {
+    const limiter1 = makeLimiter({
+      id: "orphaned-many",
+      maxConcurrent: 3,
+      clientTimeout: 500,
+      heartbeatInterval: 50,
+    });
+    await limiter1.ready();
+    const limiter2 = makeLimiter({ id: "orphaned-many", heartbeatInterval: 50 });
+    const survivor = makeLimiter({ id: "orphaned-many" });
+    await Promise.all([limiter2.ready(), survivor.ready()]);
+
+    const never = new Promise(() => {});
+    void limiter1.schedule(h.deferredPromise, never, null, 1);
+    void limiter2.schedule({ weight: 2 }, h.deferredPromise, never, null, 2);
+    await waitForState(async () => {
+      expect(await survivor.running()).toEqual(3);
+    });
+
+    const events: { running: number }[] = [];
+    survivor.on("orphaned-jobs", (info: { running: number }) => events.push(info));
+    await Promise.all([limiter1.disconnect(false), limiter2.disconnect(false)]);
+
+    await waitForState(() => {
+      expect(events.at(-1)).toEqual({ running: 3 });
+    });
+  });
+
+  test("Should not emit 'orphaned-jobs' while the client holding running jobs is responsive", async ({
+    harness: h,
+    makeLimiter,
+  }) => {
+    const rootLimiter = makeLimiter({ id: "orphaned-responsive", maxConcurrent: 1 });
+    await rootLimiter.ready();
+    const limiter2 = makeLimiter({ id: "orphaned-responsive" });
+    await limiter2.ready();
+
+    const events: { running: number }[] = [];
+    limiter2.on("orphaned-jobs", (info: { running: number }) => events.push(info));
+
+    const held = deferred();
+    const job = rootLimiter.schedule(h.deferredPromise, held.signal, null, 1);
+    await waitForState(async () => {
+      expect(await limiter2.running()).toEqual(1);
+    });
+
+    const heartbeats = countHeartbeats(limiter2);
+    await waitForState(() => {
+      expect(heartbeats.count).toBeGreaterThanOrEqual(3);
+    });
+    expect(events).toEqual([]);
+
+    held.release();
+    expect(await job).toEqual([1]);
+  });
+
+  test("Should emit 'orphaned-jobs' once with running 0 when the orphaned jobs expire", async ({
+    harness: h,
+    makeLimiter,
+  }) => {
+    const rootLimiter = makeLimiter({
+      id: "orphaned-expired",
+      maxConcurrent: 1,
+      clientTimeout: 500,
+      heartbeatInterval: 50,
+    });
+    await rootLimiter.ready();
+    const limiter2 = makeLimiter({ id: "orphaned-expired" });
+    await limiter2.ready();
+
+    const events: { running: number }[] = [];
+    limiter2.on("orphaned-jobs", (info: { running: number }) => events.push(info));
+
+    const never = new Promise(() => {});
+    void rootLimiter.schedule(h.deferredPromise, never, null, 1);
+    await waitForState(async () => {
+      expect(await limiter2.running()).toEqual(1);
+    });
+    await rootLimiter.disconnect(false);
+    await waitForState(() => {
+      expect(events).toContainEqual({ running: 1 });
+    });
+
+    // Expire the orphaned job the way free.lua releases one: its expiration score drops to 0.
+    const [job_weights_key, job_expirations_key] = limiterKeys(limiter2).slice(1, 3);
+    const [index] = await runCommand(limiter2, "hkeys", [job_weights_key]);
+    await runCommand(limiter2, "zadd", [job_expirations_key, "0", index]);
+
+    await waitForState(() => {
+      expect(events.at(-1)).toEqual({ running: 0 });
+    });
+    const eventsWhenFreed = events.length;
+    const heartbeats = countHeartbeats(limiter2);
+    await waitForState(() => {
+      expect(heartbeats.count).toBeGreaterThanOrEqual(3);
+    });
+    expect(events.length).toEqual(eventsWhenFreed);
+    expect(events.filter(({ running }) => running === 0)).toHaveLength(1);
+  });
+
+  test("Should emit 'orphaned-jobs' with running 0 when the unresponsive client responds again", async ({
+    harness: h,
+    makeLimiter,
+  }) => {
+    const rootLimiter = makeLimiter({
+      id: "orphaned-returns",
+      maxConcurrent: 1,
+      clientTimeout: 500,
+      heartbeatInterval: 50,
+    });
+    await rootLimiter.ready();
+    const limiter2 = makeLimiter({ id: "orphaned-returns" });
+    await limiter2.ready();
+
+    const events: { running: number }[] = [];
+    limiter2.on("orphaned-jobs", (info: { running: number }) => events.push(info));
+
+    const held = deferred();
+    const job = rootLimiter.schedule(h.deferredPromise, held.signal, null, 1);
+    await waitForState(async () => {
+      expect(await limiter2.running()).toEqual(1);
+    });
+
+    const resumeHeartbeats = pauseHeartbeats(rootLimiter);
+    await waitForState(() => {
+      expect(events).toContainEqual({ running: 1 });
+    });
+
+    resumeHeartbeats();
+    await waitForState(() => {
+      expect(events.at(-1)).toEqual({ running: 0 });
+    });
+
+    held.release();
+    expect(await job).toEqual([1]);
   });
 
   test("Should use shared settings", async ({ harness: h, makeLimiter }) => {
