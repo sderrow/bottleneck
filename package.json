@@ -1,6 +1,6 @@
 {
   "name": "@sderrow/bottleneck",
-  "version": "4.0.0-rc.1",
+  "version": "4.0.0-rc.2",
   "description": "Distributed task scheduler and rate limiter",
   "keywords": [
     "async",
