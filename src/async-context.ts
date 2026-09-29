@@ -44,6 +44,22 @@ export function runWithAsyncResource<T>(resource: AsyncResource | undefined, fn:
   return fn();
 }
 
+// Captured at module load, which in practice precedes any caller context.
+const detachedResource = captureAsyncResource();
+
+/**
+ * `setInterval`, started outside the caller's async context. Timers owned by a
+ * limiter or group (heartbeats, group cleanup) outlive whichever caller
+ * happened to construct them (e.g. a Group key first created inside a traced
+ * request), so they must neither observe nor retain that caller's context.
+ */
+export function setDetachedInterval(
+  callback: () => unknown,
+  ms: number,
+): ReturnType<typeof setInterval> {
+  return runWithAsyncResource(detachedResource, () => setInterval(callback, ms));
+}
+
 /**
  * Strip the "Error" headline from a captured stack, leaving only the frames.
  */

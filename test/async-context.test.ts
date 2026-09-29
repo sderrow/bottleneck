@@ -79,6 +79,24 @@ describe("Async context", () => {
     expect(received).toEqual([undefined, "expected-store"]);
   });
 
+  test.runIf(process.env.DATASTORE != null)(
+    "runs the heartbeat outside the async context that constructed the limiter",
+    async ({ makeLimiter }) => {
+      const als = new AsyncLocalStorage<string>();
+      // A heartbeat that inherited this store would keep reporting into the
+      // constructing caller (e.g. its trace) for the limiter's whole lifetime.
+      const limiter = als.run("constructor-store", () => makeLimiter({ heartbeatInterval: 20 }));
+
+      const heartbeatStore = new Promise((resolve) => {
+        limiter.on("debug", (message: string) => {
+          if (message.includes("heartbeat.lua")) resolve(als.getStore());
+        });
+      });
+
+      await expect(heartbeatStore).resolves.toBeUndefined();
+    },
+  );
+
   test("rejection stack includes both the task and the schedule call site", async ({
     makeLimiter,
   }) => {

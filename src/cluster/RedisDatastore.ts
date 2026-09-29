@@ -1,6 +1,7 @@
 import type Bottleneck from "../Bottleneck";
 import type { StoreOptions } from "../types";
 import type { RedisLib, RedisLikeClient } from "./redis-types";
+import { setDetachedInterval } from "../async-context";
 import BottleneckError from "../BottleneckError";
 import { load, overwrite } from "../parser";
 import IORedisConnection from "./IORedisConnection";
@@ -77,7 +78,7 @@ class RedisDatastore {
     await this.connection.__addLimiter__(this.instance);
     await this.runScript("register_client", [this.instance.queued()]);
     if (!this._disconnecting) {
-      this.heartbeat = setInterval(async () => {
+      this.heartbeat = setDetachedInterval(async () => {
         try {
           const running = Number((await this.runScript("heartbeat", [])) ?? 0);
           if (running > 0 || this._orphaned > 0) {

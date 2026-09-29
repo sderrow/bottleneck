@@ -5,6 +5,7 @@ import type {
   IORedisConnectionOptions,
   RedisConnectionOptions,
 } from "./types";
+import { setDetachedInterval } from "./async-context";
 import Bottleneck from "./Bottleneck";
 import IORedisConnection from "./cluster/IORedisConnection";
 import RedisConnection from "./cluster/RedisConnection";
@@ -148,7 +149,7 @@ class Group {
   _startAutoCleanup(): void {
     clearInterval(this.interval);
 
-    this.interval = setInterval(async () => {
+    this.interval = setDetachedInterval(async () => {
       const time = Date.now();
       for (const [k, v] of Object.entries(this.instances)) {
         try {
