@@ -11,6 +11,7 @@ import type {
 } from "../src/types";
 import Bottleneck, {
   Batcher,
+  Bottleneck as BottleneckNamed,
   BottleneckError,
   Group,
   IORedisConnection,
@@ -19,8 +20,8 @@ import Bottleneck, {
 
 /*
  * Type-level contract test for the published surface. The generated dts
- * (dist/index.d.mts / dist/index.d.cts) is produced from these same source
- * types, so asserting on them here guards the published type contract.
+ * (dist/index.d.mts) is produced from these same source types, so asserting
+ * on them here guards the published type contract.
  */
 
 const makeFakeRedisClient = () => ({
@@ -46,10 +47,17 @@ describe("Bottleneck type contract", () => {
     expect(IORedisConnection).toBe(Bottleneck.IORedisConnection);
   });
 
-  it("exposes itself as .default for CJS interop", () => {
-    // The CJS build sets `module.exports = Bottleneck`, so `require()` callers
-    // without esModuleInterop read the class via `.default`.
-    expect(Bottleneck.default).toBe(Bottleneck);
+  it("exposes Bottleneck as both a named and a default export", () => {
+    // IDE auto-import for `new Bottleneck` resolves the named export; the
+    // default export preserves `import Bottleneck from`.
+    expect(BottleneckNamed).toBe(Bottleneck);
+  });
+
+  it("keeps CJS interop out of source (applied by the build footer instead)", () => {
+    // `.default` / `.Bottleneck` self-references live in the tsdown footer,
+    // not on the class. Dist-level assertions: test/smoke/lib.test.ts.
+    expect("default" in Bottleneck).toBe(false);
+    expect("Bottleneck" in Bottleneck).toBe(false);
   });
 
   it("accepts BottleneckOptions", () => {

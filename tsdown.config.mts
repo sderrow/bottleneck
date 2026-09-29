@@ -78,15 +78,16 @@ const inlinePkgVersion: TsdownPlugin = {
   },
 };
 
-// The lib entry has both a default export and named class exports. Rolldown
-// therefore emits CJS as `exports.default = ...; exports.Group = ...`, which
-// would change `require("bottleneck")` from the Bottleneck class (v2 shape)
-// to a namespace object. The named values are the same references as
-// Bottleneck's statics, so reassigning module.exports restores the v2 shape
-// while ESM keeps real named exports. A `footer` (not a renderChunk plugin)
-// keeps sourcemaps intact; it only applies to the CJS output.
+// Keeps the v2 CJS shape (`require() === Bottleneck class`): rolldown emits
+// a namespace, so reassign `module.exports` and reattach `.default` (no
+// esModuleInterop) and `.Bottleneck` (named-export destructuring). Group /
+// Batcher / ... resolve via Bottleneck's own statics (real API, not interop).
+// A footer (not a plugin) keeps sourcemaps intact. Must stay JS-only:
+// statements are illegal in .d.ts (TS1036).
 const cjsFooter = (ctx: { format: string }): string | undefined =>
-  ctx.format === "cjs" ? "\nmodule.exports = exports.default;\n" : undefined;
+  ctx.format === "cjs"
+    ? "\nmodule.exports = exports.default;\nmodule.exports.default = exports.default;\nmodule.exports.Bottleneck = exports.default;\n"
+    : undefined;
 
 const lightBanner = [
   "/**",
@@ -99,12 +100,31 @@ const libBanner = `/** Bottleneck v${pkg.version} (MIT). https://github.com/sder
 
 export default defineConfig([
   {
-    // Dual-format Node build: ESM (dist/index.mjs) + CJS (dist/index.cjs).
-    // No `fixedExtension`: under "type": "module" the ESM output gets .mjs and
-    // the CJS output .cjs, which is exactly what Node infers from.
-    name: "lib",
+    // ESM build + the single published typings (index.d.mts). One types file
+    // for both conditions keeps resolution and auto-import on the same file;
+    // dual typings break IDE hints under `module: commonjs` + `bundler`.
+    // Accepted casualty: `module: node16` CJS (TS1479); nodenext/bundler fine.
+    // No `fixedExtension`: under "type": "module" the ESM output gets .mjs,
+    // which is exactly what Node infers from.
+    name: "lib-esm",
     entry: ["src/index.ts"],
-    format: ["esm", "cjs"],
+    format: "esm",
+    outDir: "dist",
+    platform: "node",
+    target: "es2023",
+    plugins: [inlineLua, inlinePkgVersion],
+    clean: cleanFor("index.mjs", "index.d.mts"),
+    sourcemap: true,
+    dts: true,
+    report: false,
+    hash: false,
+    banner: { js: libBanner },
+  },
+  {
+    // CJS runtime only, no declarations. The footer above restores the v2 shape.
+    name: "lib-cjs",
+    entry: ["src/index.ts"],
+    format: "cjs",
     outDir: "dist",
     platform: "node",
     target: "es2023",
@@ -113,9 +133,9 @@ export default defineConfig([
     // below then restores `module.exports` for v2 compatibility).
     outputOptions: { exports: "named" },
     footer: cjsFooter,
-    clean: cleanFor("index.mjs", "index.cjs"),
+    clean: cleanFor("index.cjs"),
     sourcemap: true,
-    dts: true,
+    dts: false,
     report: false,
     hash: false,
     banner: { js: libBanner },

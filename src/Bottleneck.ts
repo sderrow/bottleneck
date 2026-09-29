@@ -45,11 +45,6 @@ type ScheduledJob = {
 
 class Bottleneck {
   static BottleneckError = BottleneckError;
-  // CJS interop: the CJS build sets `module.exports = Bottleneck`, so without
-  // this `require("bottleneck").default` is undefined and TypeScript consumers
-  // compiled to CommonJS without `esModuleInterop` get undefined from
-  // `import Bottleneck from "bottleneck"` (it compiles to `.default` access).
-  static default: typeof Bottleneck;
   // Lazy accessors: Group <-> Bottleneck form an ESM module cycle (Group
   // instantiates Bottleneck at runtime). A static field initializer would
   // evaluate during the cycle and hit the TDZ when Group.mts is imported
@@ -591,7 +586,5 @@ class Bottleneck {
     return this._store.__incrementReservoir__(incr) as Promise<number | null>;
   }
 }
-
-Bottleneck.default = Bottleneck;
 
 export default Bottleneck;

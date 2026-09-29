@@ -1,4 +1,4 @@
-export { default } from "./Bottleneck";
+export { default as Bottleneck, default } from "./Bottleneck";
 export { default as Batcher } from "./Batcher";
 export { default as BottleneckError } from "./BottleneckError";
 export { default as Group } from "./Group";

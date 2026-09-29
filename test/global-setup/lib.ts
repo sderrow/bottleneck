@@ -3,8 +3,8 @@
 // The lib smoke test loads `dist/index.js` via `test/bottleneck.mjs`
 // (BOTTLENECK_ENTRY=lib), so the full bundle must exist on disk before any
 // test file is collected. We invoke tsdown programmatically and filter to
-// the `lib` config in tsdown.config.mts so the light bundle isn't rebuilt
-// unnecessarily.
+// the `lib-esm`/`lib-cjs` configs in tsdown.config.mts so the light bundle
+// isn't rebuilt unnecessarily.
 //
 // The lib bundle is the one that actually exercises the `inline-lua` plugin
 // at runtime (the light bundle stubs out the cluster modules), so this smoke
@@ -16,5 +16,5 @@
 
 export async function setup(): Promise<void> {
   const { build } = await import("tsdown");
-  await build({ filter: "lib" });
+  await build({ filter: ["lib-esm", "lib-cjs"] });
 }

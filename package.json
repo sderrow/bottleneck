@@ -40,14 +40,9 @@
   "type": "module",
   "exports": {
     ".": {
-      "import": {
-        "types": "./dist/index.d.mts",
-        "default": "./dist/index.mjs"
-      },
-      "require": {
-        "types": "./dist/index.d.cts",
-        "default": "./dist/index.cjs"
-      }
+      "types": "./dist/index.d.mts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.cjs"
     },
     "./light": {
       "types": "./dist/light.d.ts",
@@ -57,7 +52,7 @@
   },
   "scripts": {
     "build": "tsdown",
-    "build:lib": "tsdown --filter lib",
+    "build:lib": "tsdown --filter lib-esm --filter lib-cjs",
     "build:light": "tsdown --filter light",
     "format": "oxfmt",
     "format:check": "oxfmt --check",

@@ -23,14 +23,17 @@ import { describe, it, expect } from "vitest";
 import Bottleneck from "../bottleneck";
 
 describe("dist/index full smoke", () => {
-  it("exposes .default on the CJS build for non-interop consumers", () => {
-    // The CJS build sets `module.exports = Bottleneck`; TypeScript compiled
-    // to CommonJS without `esModuleInterop` reads the default import via
-    // `.default`, so the class must reference itself there.
+  it("exposes .default/.Bottleneck on the CJS build for non-interop consumers", () => {
+    // `.default` (no esModuleInterop) and `.Bottleneck` (named destructuring)
+    // come from the tsdown footer, not source statics.
     const require = createRequire(import.meta.url);
-    const Cjs = require("../../dist/index.cjs") as typeof Bottleneck;
+    const Cjs = require("../../dist/index.cjs") as typeof Bottleneck & {
+      default: unknown;
+      Bottleneck: unknown;
+    };
     expect(typeof Cjs).toBe("function");
     expect(Cjs.default).toBe(Cjs);
+    expect(Cjs.Bottleneck).toBe(Cjs);
   });
   it("loads", () => {
     expect(Bottleneck).toBeDefined();
