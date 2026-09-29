@@ -545,6 +545,19 @@ limiter.on("depleted", function (empty) {
 });
 ```
 
+**'orphaned-jobs'**
+
+```js
+limiter.on("orphaned-jobs", function ({ running }) {
+  // Clustering only. Called on each heartbeat while there are orphaned jobs: running jobs held by
+  // clients that haven't contacted Redis for longer than `clientTimeout`, usually because they crashed.
+  // `running` is the total weight of those jobs, which stays unavailable until those clients respond
+  // again or the jobs reach their `expiration`. Called once more with `running: 0` when it has been freed.
+});
+```
+
+Every client of the limiter receives this event on its own heartbeats, and the jobs it reports always belong to other clients. A live client can briefly count as unresponsive, for example when its event loop is blocked or it misses a capacity handoff, so short bursts are expected. A crashed client keeps being reported until its jobs expire, and forever if they have no `expiration`.
+
 **'debug'**
 
 ```js
@@ -873,7 +886,7 @@ The current design guarantees reliability, is highly performant and lets limiter
 
 It is **strongly recommended** that you give an `id` to every limiter and Group since it is used to build the name of your limiter's Redis keys! Limiters with the same `id` inside the same Redis db will be sharing the same datastore.
 
-It is **strongly recommended** that you set an `expiration` (See [Job Options](#job-options)) _on every job_, since that lets the cluster recover from crashed or disconnected clients. Otherwise, a client crashing while executing a job would not be able to tell the cluster to decrease its number of "running" jobs. By using expirations, those lost jobs are automatically cleared after the specified time has passed. Using expirations is essential to keeping a cluster reliable in the face of unpredictable application bugs, network hiccups, and so on.
+It is **strongly recommended** that you set an `expiration` (See [Job Options](#job-options)) _on every job_, since that lets the cluster recover from crashed or disconnected clients. Otherwise, a client crashing while executing a job would not be able to tell the cluster to decrease its number of "running" jobs. By using expirations, those orphaned jobs are automatically cleared after the specified time has passed. Using expirations is essential to keeping a cluster reliable in the face of unpredictable application bugs, network hiccups, and so on. Listen to the [`"orphaned-jobs"` event](#events) to find out when crashed clients are holding capacity.
 
 Network latency between Node.js and Redis is not taken into account when calculating timings (such as `minTime`). To minimize the impact of latency, Bottleneck only performs a single Redis call per [lifecycle transition](#jobs-lifecycle). Keeping the Redis server close to your limiters will help you get a more consistent experience. Keeping the system time consistent across all clients will also help.
 

@@ -133,10 +133,15 @@ local process_tick = function (now, always_publish)
   local unresponsive = redis.call('zrangebyscore', client_last_seen_key, '-inf', (now - clientTimeout))
   local unresponsive_lookup = {}
   local terminated_clients = {}
+  local orphaned = 0
   for i = 1, #unresponsive do
     unresponsive_lookup[unresponsive[i]] = true
-    if tonumber(redis.call('zscore', client_running_key, unresponsive[i])) == 0 then
+    local client_running = tonumber(redis.call('zscore', client_running_key, unresponsive[i]))
+    if client_running == 0 then
       table.insert(terminated_clients, unresponsive[i])
+    elseif client_running ~= nil and client_running > 0 then
+      -- Held until the client responds again or those jobs reach their expiration
+      orphaned = orphaned + client_running
     end
   end
   if #terminated_clients > 0 then
@@ -209,6 +214,7 @@ local process_tick = function (now, always_publish)
   return {
     ['capacity'] = final_capacity,
     ['running'] = running,
-    ['reservoir'] = reservoir
+    ['reservoir'] = reservoir,
+    ['orphaned'] = orphaned
   }
 end
