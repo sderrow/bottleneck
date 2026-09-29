@@ -73,7 +73,7 @@
   "devDependencies": {
     "@testcontainers/redis": "^12.1.0",
     "@types/node": "^24.19.0",
-    "@vitest/coverage-v8": "^4.1.11",
+    "@vitest/coverage-v8": "^5.0.2",
     "husky": "^9.1.7",
     "ioredis": "^6.0.0",
     "lint-staged": "^17.6.0",
@@ -83,7 +83,7 @@
     "testcontainers": "^12.1.0",
     "tsdown": "^0.23.0",
     "typescript": "^6.0.0",
-    "vitest": "^4.1.11"
+    "vitest": "^5.0.2"
   },
   "peerDependencies": {
     "ioredis": "^5 || ^6",
