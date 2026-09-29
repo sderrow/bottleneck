@@ -1,13 +1,37 @@
+import type { AsyncResource } from "node:async_hooks";
 import type Bottleneck from "./Bottleneck";
 import type Events from "./Events";
 import type States from "./States";
 import type { EventInfo, EventInfoRetryable, JobDefaults, ResolvedJobOptions } from "./types";
+import {
+  attachScheduleStack,
+  bindTask,
+  captureAsyncResource,
+  cleanScheduleStack,
+  runWithAsyncResource,
+} from "./async-context";
 import BottleneckError from "./BottleneckError";
 import { load } from "./parser";
 import randomIndex from "./random-index";
 
 const NUM_PRIORITIES = 10;
 const DEFAULT_PRIORITY = 5;
+
+function captureScheduleStack(): string | undefined {
+  try {
+    const holder: { stack?: string } = {};
+    if (typeof Error.captureStackTrace === "function") {
+      // Cut off at the Job constructor, so the first kept frame is the
+      // schedule() call site that created this job.
+      Error.captureStackTrace(holder, Job);
+    } else {
+      holder.stack = new Error().stack;
+    }
+    return cleanScheduleStack(holder.stack);
+  } catch {
+    return undefined;
+  }
+}
 
 class Job {
   task: (...args: never[]) => unknown;
@@ -19,6 +43,20 @@ class Job {
   options: ResolvedJobOptions;
   promise: Promise<unknown>;
   retryCount = 0;
+  /**
+   * Stack captured at schedule() time (first frame is the schedule call
+   * site). Appended to task failures so rejections show both where the task
+   * threw and where the job was scheduled.
+   * @internal
+   */
+  scheduledStack: string | undefined;
+  /**
+   * Async context active when schedule() was called, re-entered for the
+   * chained limiter's schedule() path in doExecute (which otherwise runs
+   * from this job's timer context). Undefined outside Node.
+   * @internal
+   */
+  asyncResource: AsyncResource | undefined;
   /** @internal */
   _resolve: (value: unknown) => void = null as never;
   /** @internal */
@@ -33,11 +71,13 @@ class Job {
     Events: Events,
     _states: States,
   ) {
-    this.task = task;
+    this.task = bindTask(task);
     this.args = args;
     this.rejectOnDrop = rejectOnDrop;
     this.Events = Events;
     this._states = _states;
+    this.asyncResource = captureAsyncResource();
+    this.scheduledStack = captureScheduleStack();
     this.options = load(options ?? {}, jobDefaults) as ResolvedJobOptions;
     this.options.priority = this._sanitizePriority(this.options.priority);
     if (this.options.id === jobDefaults.id) {
@@ -137,7 +177,9 @@ class Job {
 
     try {
       const passed = await (chained != null
-        ? chained.schedule(this.options as never, this.task as never, ...(this.args ?? []))
+        ? runWithAsyncResource(this.asyncResource, () =>
+            chained.schedule(this.options as never, this.task as never, ...(this.args ?? [])),
+          )
         : (this.task as (...args: never[]) => unknown)(...(this.args ?? [])));
 
       if (clearGlobalState()) {
@@ -180,6 +222,7 @@ class Job {
     run: (retryAfter: number) => unknown,
     free: (options: ResolvedJobOptions, eventInfo: EventInfo) => Promise<unknown>,
   ): Promise<unknown> {
+    error = attachScheduleStack(error, this.scheduledStack);
     if (clearGlobalState()) {
       const retry = await this.Events.trigger("failed", error, eventInfo);
       if (retry != null) {
