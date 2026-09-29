@@ -46,6 +46,25 @@ const excludeClustering: TsdownPlugin = {
   },
 };
 
+// `src/async-context.ts` statically imports `node:async_hooks`, which has no
+// browser equivalent. The light build redirects that import to a shim whose
+// `bind` is the identity function, so tasks simply run unbound. Stack
+// capture/attach (pure `Error` logic) keeps working untouched.
+const shimAsyncHooks: TsdownPlugin = {
+  name: "shim-async-hooks",
+  resolveId(id) {
+    if (id === "node:async_hooks") return "virtual:async-hooks-shim";
+  },
+  load(id) {
+    if (id === "virtual:async-hooks-shim") {
+      return {
+        code: "export const AsyncResource = { bind: (fn) => fn };",
+        moduleType: "js",
+      };
+    }
+  },
+};
+
 const inlinePkgVersion: TsdownPlugin = {
   name: "inline-pkg-version",
   load(id) {
@@ -110,7 +129,7 @@ export default defineConfig([
     outDir: "dist",
     platform: "browser",
     target: "es2023",
-    plugins: [excludeClustering, inlinePkgVersion],
+    plugins: [excludeClustering, shimAsyncHooks, inlinePkgVersion],
     clean: cleanFor("light.js"),
     sourcemap: true,
     dts: true,
