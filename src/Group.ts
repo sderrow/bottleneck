@@ -5,7 +5,7 @@ import type {
   IORedisConnectionOptions,
   RedisConnectionOptions,
 } from "./types";
-import { setDetachedInterval } from "./async-context";
+import { runDetached, setDetachedInterval } from "./async-context";
 import Bottleneck from "./Bottleneck";
 import IORedisConnection from "./cluster/IORedisConnection";
 import RedisConnection from "./cluster/RedisConnection";
@@ -63,18 +63,24 @@ class Group {
 
     if (this.connection == null) {
       if (this.limiterOptions.datastore === "redis") {
-        // Options come from user limiterOptions; the constructor validates that
-        // Redis or client is present at runtime.
-        this.connection = new RedisConnection(
-          Object.assign({}, this.limiterOptions, {
-            Events: this.Events,
-          }) as unknown as RedisConnectionOptions,
+        // Same detachment rationale as RedisDatastore: socket setup must not
+        // capture the constructing caller's async context.
+        this.connection = runDetached(
+          () =>
+            new RedisConnection(
+              Object.assign({}, this.limiterOptions, {
+                Events: this.Events,
+              }) as unknown as RedisConnectionOptions,
+            ),
         );
       } else if (this.limiterOptions.datastore === "ioredis") {
-        this.connection = new IORedisConnection(
-          Object.assign({}, this.limiterOptions, {
-            Events: this.Events,
-          }) as unknown as IORedisConnectionOptions,
+        this.connection = runDetached(
+          () =>
+            new IORedisConnection(
+              Object.assign({}, this.limiterOptions, {
+                Events: this.Events,
+              }) as unknown as IORedisConnectionOptions,
+            ),
         );
       }
     }

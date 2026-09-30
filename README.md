@@ -25,6 +25,7 @@ More importantly, this library has been rewritten with modern-day JS (courtesy o
 - `ioredis` and `redis` are now optional **peer dependencies**. Your application must install whichever client it uses.
 - The `Redis` constructor option is now required when `datastore` is `"redis"` or `"ioredis"` (unless you pass a pre-built `client` or `connection`). Bottleneck no longer implicitly does `require("ioredis")` for you.
 - Internal Redis-only modules now live under `src/cluster/`. Only relevant if you imported from internal paths; the public API is unchanged.
+- Background work (limiter heartbeats, Group auto-cleanup, Redis connection/socket setup, capacity-priority timers) now runs detached from the `AsyncLocalStorage` context that constructed the limiter. Event listeners fired from that work (`orphaned-jobs`, `error`, `debug`, reservoir refills) no longer observe the constructing caller's context. Import bottleneck at process startup: the detached context is captured at module load, so a first load from inside a request would pin that request's context instead. With tracers such as Datadog, each detached heartbeat Redis call becomes its own single-span trace rather than polluting a request trace; drop the noise with a sampling rule on the root `redis.command` span.
 
 See [Upgrading to v4](#upgrading-to-v4) for migration steps.
 

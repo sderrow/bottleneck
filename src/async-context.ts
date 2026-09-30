@@ -45,7 +45,24 @@ export function runWithAsyncResource<T>(resource: AsyncResource | undefined, fn:
 }
 
 // Captured at module load, which in practice precedes any caller context.
+//
+// Load-order caveat: the "detached" context is whatever is active when this
+// module is first loaded. Import bottleneck at process startup, before
+// entering any request/trace context. A first load from inside a request
+// (e.g. a lazy `import()` in a request handler) would pin that request's
+// context as "detached" for every limiter in the process. Node offers no
+// public API for a truly empty context, so this cannot be fixed in-library.
 const detachedResource = captureAsyncResource();
+
+/**
+ * Run `fn` outside the caller's async context (see load-order caveat above).
+ * Used for work whose lifetime outlives its constructing caller: Redis
+ * connection/socket setup, whose pub/sub callbacks would otherwise keep
+ * draining jobs into the constructing request's trace.
+ */
+export function runDetached<T>(fn: () => T): T {
+  return runWithAsyncResource(detachedResource, fn);
+}
 
 /**
  * `setInterval`, started outside the caller's async context. Timers owned by a
@@ -58,6 +75,18 @@ export function setDetachedInterval(
   ms: number,
 ): ReturnType<typeof setInterval> {
   return runWithAsyncResource(detachedResource, () => setInterval(callback, ms));
+}
+
+/**
+ * `setTimeout`, started outside the caller's async context. Same rationale
+ * as `setDetachedInterval`; covers one-shot background timers such as the
+ * capacity-priority blacklist delay.
+ */
+export function setDetachedTimeout(
+  callback: () => unknown,
+  ms: number,
+): ReturnType<typeof setTimeout> {
+  return runWithAsyncResource(detachedResource, () => setTimeout(callback, ms));
 }
 
 /**

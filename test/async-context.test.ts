@@ -1,5 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import { describe, expect } from "vitest";
+import { describe, expect, vi } from "vitest";
+import { runDetached, setDetachedTimeout } from "../src/async-context";
 import { useFakeClock } from "./helpers/clock";
 import { deferred, enqueued, test } from "./helpers/test-api";
 
@@ -96,6 +97,29 @@ describe("Async context", () => {
       await expect(heartbeatStore).resolves.toBeUndefined();
     },
   );
+
+  test("runDetached and setDetachedTimeout run outside the caller's context", async () => {
+    const als = new AsyncLocalStorage<string>();
+
+    const direct = als.run("caller-store", () => runDetached(() => als.getStore()));
+    expect(direct).toBeUndefined();
+
+    let pending: Promise<unknown>;
+    als.run("caller-store", () => {
+      pending = new Promise((resolve) => {
+        setDetachedTimeout(() => resolve(als.getStore()), 10);
+      });
+    });
+    // Fake timers (local project) or real timers (redis projects): both work
+    // because setTimeout is looked up when setDetachedTimeout is called.
+    // Advance outside the ALS scope: fake-timer callbacks execute in the
+    // advancing context, so advancing inside `als.run` would leak the store
+    // back in regardless of the timer's creation context.
+    if (vi.isFakeTimers()) {
+      await vi.advanceTimersByTime(10);
+    }
+    expect(await pending!).toBeUndefined();
+  });
 
   test("rejection stack includes both the task and the schedule call site", async ({
     makeLimiter,
