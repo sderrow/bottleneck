@@ -1,5 +1,6 @@
 import type Bottleneck from "./Bottleneck";
 import type { StoreOptions } from "./types";
+import { setDetachedInterval } from "./async-context";
 import BottleneckError from "./BottleneckError";
 import { load, overwrite } from "./parser";
 import sleep from "./sleep";
@@ -65,7 +66,7 @@ class LocalDatastore {
       (this.storeOptions.reservoirIncreaseInterval != null &&
         this.storeOptions.reservoirIncreaseAmount != null)
     ) {
-      this.heartbeat = setInterval(() => {
+      this.heartbeat = setDetachedInterval(() => {
         const now = Date.now();
         if (
           this.storeOptions.reservoirRefreshInterval != null &&

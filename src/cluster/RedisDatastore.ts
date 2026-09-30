@@ -1,6 +1,7 @@
 import type Bottleneck from "../Bottleneck";
 import type { StoreOptions } from "../types";
 import type { RedisLib, RedisLikeClient } from "./redis-types";
+import { runDetached, setDetachedInterval, setDetachedTimeout } from "../async-context";
 import BottleneckError from "../BottleneckError";
 import { load, overwrite } from "../parser";
 import IORedisConnection from "./IORedisConnection";
@@ -41,18 +42,28 @@ class RedisDatastore {
 
     if (!this.connection) {
       if (this.instance.datastore === "redis") {
-        this.connection = new RedisConnection({
-          Redis: this.Redis,
-          clientOptions: this.clientOptions,
-          Events: this.instance.Events,
-        });
+        // Socket setup outlives the constructing caller: the subscriber
+        // socket keeps its creation context, so creating it inside a traced
+        // request would drain pub/sub jobs (and their EVALSHA calls) into
+        // that request's trace for the limiter's whole lifetime.
+        this.connection = runDetached(
+          () =>
+            new RedisConnection({
+              Redis: this.Redis,
+              clientOptions: this.clientOptions,
+              Events: this.instance.Events,
+            }),
+        );
       } else if (this.instance.datastore === "ioredis") {
-        this.connection = new IORedisConnection({
-          Redis: this.Redis,
-          clientOptions: this.clientOptions,
-          clusterNodes: this.clusterNodes,
-          Events: this.instance.Events,
-        });
+        this.connection = runDetached(
+          () =>
+            new IORedisConnection({
+              Redis: this.Redis,
+              clientOptions: this.clientOptions,
+              clusterNodes: this.clusterNodes,
+              Events: this.instance.Events,
+            }),
+        );
       } else {
         throw new BottleneckError(
           `Invalid datastore type: ${this.instance.datastore}`,
@@ -77,7 +88,7 @@ class RedisDatastore {
     await this.connection.__addLimiter__(this.instance);
     await this.runScript("register_client", [this.instance.queued()]);
     if (!this._disconnecting) {
-      this.heartbeat = setInterval(async () => {
+      this.heartbeat = setDetachedInterval(async () => {
         try {
           const running = Number((await this.runScript("heartbeat", [])) ?? 0);
           if (running > 0 || this._orphaned > 0) {
@@ -122,7 +133,7 @@ class RedisDatastore {
           delete this.capacityPriorityCounters[counter!];
           return this.instance._drainAll(capacity);
         } else {
-          return (this.capacityPriorityCounters[counter!] = setTimeout(async () => {
+          return (this.capacityPriorityCounters[counter!] = setDetachedTimeout(async () => {
             try {
               delete this.capacityPriorityCounters[counter!];
               await this.runScript("blacklist_client", [priorityClient]);
