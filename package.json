@@ -72,16 +72,16 @@
     "test:smoke": "vitest run --project light-smoke --project lib-smoke"
   },
   "devDependencies": {
-    "@testcontainers/redis": "^12.1.0",
+    "@testcontainers/redis": "^12.2.0",
     "@types/node": "^24.19.0",
     "@vitest/coverage-v8": "^5.0.2",
     "husky": "^9.1.7",
     "ioredis": "^6.0.0",
     "lint-staged": "^17.6.0",
-    "oxfmt": "^0.70.0",
-    "oxlint": "^1.85.0",
+    "oxfmt": "^0.71.0",
+    "oxlint": "^1.86.0",
     "redis": "^6.2.1",
-    "testcontainers": "^12.1.0",
+    "testcontainers": "^12.2.0",
     "tsdown": "^0.23.0",
     "tsx": "^4.23.15",
     "typescript": "^6.0.0",
@@ -102,7 +102,7 @@
   "devEngines": {
     "packageManager": {
       "name": "pnpm",
-      "version": "12.8.1",
+      "version": "12.8.2",
       "onFail": "download"
     },
     "runtime": {

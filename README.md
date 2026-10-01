@@ -1196,8 +1196,8 @@ Suggestions and bug reports are also welcome.
 
 ### Toolchain
 
-- Node.js: pinned by [.nvmrc](.nvmrc).
-- Package manager: `pnpm`, managed via [corepack](https://nodejs.org/api/corepack.html). Run `corepack enable` once after cloning so the version pinned in [package.json](package.json) (`packageManager`) is used automatically.
+- Node.js: managed by pnpm via `devEngines.runtime` in [package.json](package.json) (`onFail: "download"` auto-provisions it, so `pnpm exec node --version` is the source of truth).
+- Package manager: [`pnpm`](https://pnpm.io/), managed by pnpm itself via `devEngines.packageManager` in [package.json](package.json).
 - Bundler: [`tsdown`](https://tsdown.dev) (configured in [tsdown.config.mts](tsdown.config.mts)). Builds are fast — there is no separate "dev" build mode.
 - Linter / formatter: [`oxlint`](https://oxc.rs/docs/guide/usage/linter.html) and [`oxfmt`](https://oxc.rs/docs/guide/usage/formatter.html).
 - Tests: [`vitest`](https://vitest.dev) (multi-project workspace in [vitest.config.mts](vitest.config.mts)).
