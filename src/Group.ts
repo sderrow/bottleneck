@@ -92,9 +92,6 @@ class Group {
       limiter = new this.Bottleneck(
         Object.assign(this.limiterOptions, {
           id: `${this.id}-${key}`,
-          // Group keys can hold PII (emails, hostnames); the schedule-stack
-          // marker uses the group id so keys never leak into error stacks.
-          scheduleStackLabel: this.id,
           timeout: this.timeout,
           connection: this.connection,
         }) as BottleneckOptions,

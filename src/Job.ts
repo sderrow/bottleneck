@@ -20,12 +20,10 @@ const DEFAULT_PRIORITY = 5;
 export type ScheduleCaptureOptions = {
   /** Cutoff passed to `Error.captureStackTrace` (the outermost `schedule`). */
   cutoff?: object;
-  /** Marker label: the limiter id, or the owning Group id for Group children. */
+  /** Marker label: the limiter id, or a configured `scheduleStackLabel`. */
   label?: string;
   /** When false, skip capture entirely (high-volume limiters). */
   enabled?: boolean;
-  /** When true, skip the `Job`-cut fallback (cutoff is known to be on the stack). */
-  skipFallback?: boolean;
 };
 
 function captureHolder(cutoff: object): { stack?: string } | undefined {
@@ -61,11 +59,8 @@ function captureScheduleStackCapture(
     if (holder == null) {
       return undefined;
     }
-    if (options?.skipFallback === true) {
-      return { holder, label };
-    }
-    // Fallback when cutting at `schedule` comes back empty (a cutoff that
-    // isn't on the stack captures just "Error").
+    // Fallback for when cutting at `schedule` comes back empty (a cutoff
+    // that isn't on the stack captures just "Error").
     const fallback = captureHolder(Job);
     return { holder, fallback, label };
   }

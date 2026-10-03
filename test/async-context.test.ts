@@ -311,21 +311,44 @@ describe("Async context", () => {
     expect(stack).toContain("bypassedScheduleCall");
   });
 
-  test("group child markers use the group id, never the key", async ({ makeGroup }) => {
-    const group = makeGroup({ id: "tm-create-update" });
-    const key = "acme-email-jane@acme.com";
-    const limiter = group.key(key);
+  test("group child markers default to the full child id", async ({ makeGroup }) => {
+    const group = makeGroup({ id: "label-group" });
+    const limiter = group.key("A");
 
     const error = await limiter
       .schedule(() => {
-        throw new Error("boom-group-key");
+        throw new Error("boom-group-default");
       })
       .catch((e: unknown) => e);
     const stack = (error as Error).stack ?? "";
-    expect(stack).toContain("boom-group-key");
+    expect(stack).toContain("boom-group-default");
     // Redis projects prefix the group id per test; match the stable suffix.
-    expect(stack).toContain("tm-create-update):");
+    expect(stack).toContain("label-group-A):");
+  });
+
+  test("an explicit scheduleStackLabel is used for the marker", async ({ makeLimiter }) => {
+    const limiter = makeLimiter({ id: "pii-check-123", scheduleStackLabel: "check" });
+    const error = await limiter
+      .schedule(() => {
+        throw new Error("boom-label");
+      })
+      .catch((e: unknown) => e);
+    const stack = (error as Error).stack ?? "";
+    expect(stack).toContain("From previous Bottleneck.schedule location (check):");
+    expect(stack).not.toContain("pii-check-123");
+  });
+
+  test("a group-level scheduleStackLabel labels child markers", async ({ makeGroup }) => {
+    const group = makeGroup({ id: "tm-create-update", scheduleStackLabel: "payroll" });
+    const limiter = group.key("acme-email-jane@acme.com");
+
+    const error = await limiter
+      .schedule(() => {
+        throw new Error("boom-group-label");
+      })
+      .catch((e: unknown) => e);
+    const stack = (error as Error).stack ?? "";
+    expect(stack).toContain("From previous Bottleneck.schedule location (payroll):");
     expect(stack).not.toContain("jane@acme.com");
-    expect(stack).not.toContain(key);
   });
 });

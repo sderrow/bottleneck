@@ -51,6 +51,8 @@ export type BottleneckOptions = {
   readonly rejectOnDrop?: boolean | null;
   /** Set to false to skip capturing schedule-time stacks (saves the source-map formatting cost for high-volume limiters). Default true. Captures hold the raw call-site frames while a job is queued; jobs already retain their task closures and args, so the extra retention is small. */
   readonly captureScheduleStack?: boolean | null;
+  /** Label rendered in schedule-stack markers instead of the limiter id. Useful when ids contain PII; pass it in Group options to label a whole group's children. Null (default) means the limiter id. */
+  readonly scheduleStackLabel?: string | null;
   /** Set to true to track done jobs with counts() and jobStatus(). Uses more memory. */
   readonly trackDoneStatus?: boolean | null;
   /** Where the limiter stores its internal state: `local` (default) or `redis`/`ioredis` for Clustering. */
