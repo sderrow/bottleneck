@@ -7,6 +7,7 @@ import {
   attachScheduleStack,
   bindTask,
   captureAsyncResource,
+  forwardChain,
   runWithAsyncResource,
   type ScheduleStackCapture,
 } from "./async-context";
@@ -16,60 +17,6 @@ import randomIndex from "./random-index";
 
 const NUM_PRIORITIES = 10;
 const DEFAULT_PRIORITY = 5;
-
-export type ScheduleCaptureOptions = {
-  /** Cutoff passed to `Error.captureStackTrace` (the outermost `schedule`). */
-  cutoff?: object;
-  /** Marker label: the limiter id, or a configured `scheduleStackLabel`. */
-  label?: string;
-  /** When false, skip capture entirely (high-volume limiters). */
-  enabled?: boolean;
-};
-
-function captureHolder(cutoff: object): { stack?: string } | undefined {
-  try {
-    const holder: { stack?: string } = {};
-    if (typeof Error.captureStackTrace === "function") {
-      Error.captureStackTrace(holder, cutoff as never);
-    } else {
-      holder.stack = new Error().stack;
-    }
-    return holder;
-  } catch {
-    return undefined;
-  }
-}
-
-/**
- * Capture the schedule location lazily: the holders keep the unformatted
- * frames and `.stack` is only read inside `attachScheduleStack` (the error
- * path), so scheduling never pays for `Error.prepareStackTrace` /
- * source-map-support.
- */
-function captureScheduleStackCapture(
-  options?: ScheduleCaptureOptions,
-): ScheduleStackCapture | undefined {
-  if (options?.enabled === false) {
-    return undefined;
-  }
-  const label = options?.label ?? "<no-id>";
-  const cutoff = options?.cutoff;
-  if (cutoff != null && cutoff !== Job) {
-    const holder = captureHolder(cutoff);
-    if (holder == null) {
-      return undefined;
-    }
-    // Fallback for when cutting at `schedule` comes back empty (a cutoff
-    // that isn't on the stack captures just "Error").
-    const fallback = captureHolder(Job);
-    return { holder, fallback, label };
-  }
-  const holder = captureHolder(Job);
-  if (holder == null) {
-    return undefined;
-  }
-  return { holder, label };
-}
 
 class Job {
   task: (...args: never[]) => unknown;
@@ -108,7 +55,7 @@ class Job {
     rejectOnDrop: boolean,
     Events: Events,
     _states: States,
-    scheduleCapture?: ScheduleCaptureOptions,
+    scheduleStackCapture?: ScheduleStackCapture,
   ) {
     this.task = bindTask(task);
     this.args = args;
@@ -116,7 +63,7 @@ class Job {
     this.Events = Events;
     this._states = _states;
     this.asyncResource = captureAsyncResource();
-    this.scheduleStackCapture = captureScheduleStackCapture(scheduleCapture);
+    this.scheduleStackCapture = scheduleStackCapture;
     this.options = load(options ?? {}, jobDefaults) as ResolvedJobOptions;
     this.options.priority = this._sanitizePriority(this.options.priority);
     if (this.options.id === jobDefaults.id) {
@@ -217,7 +164,9 @@ class Job {
     try {
       const passed = await (chained != null
         ? runWithAsyncResource(this.asyncResource, () =>
-            chained.schedule(this.options as never, this.task as never, ...(this.args ?? [])),
+            forwardChain(() =>
+              chained.schedule(this.options as never, this.task as never, ...(this.args ?? [])),
+            ),
           )
         : (this.task as (...args: never[]) => unknown)(...(this.args ?? [])));
 

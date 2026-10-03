@@ -13,6 +13,7 @@ import type {
   StrategyConstants,
 } from "./types";
 import pkg from "../package.json" with { type: "json" };
+import { captureScheduleLocation, withScheduleCutoff } from "./async-context";
 import Batcher from "./Batcher";
 import BottleneckError from "./BottleneckError";
 import IORedisConnection from "./cluster/IORedisConnection";
@@ -555,13 +556,10 @@ class Bottleneck {
       this.rejectOnDrop,
       this.Events,
       this._states,
-      {
-        // Resolved off the instance so subclass overrides and instance
-        // patches of schedule() cut their own wrapper frames automatically.
-        cutoff: this.schedule,
-        label: this.scheduleStackLabel ?? this.id,
-        enabled: this.captureScheduleStack !== false,
-      },
+      captureScheduleLocation(
+        this.captureScheduleStack ? (this.scheduleStackLabel ?? this.id) : null,
+        Bottleneck.prototype.schedule,
+      ),
     );
     this._receive(job);
     return job.promise;
@@ -578,13 +576,16 @@ class Bottleneck {
             Awaited<R>
           >)
         : (this.schedule(fn.bind(thisArg) as (...args: A) => R, ...args) as Promise<Awaited<R>>);
+    // Each entry point is its own stack cutoff, so schedule-location stacks
+    // start at the wrapped function's caller rather than inside wrap().
     const wrapped = function (this: unknown, ...args: A): Promise<Awaited<R>> {
-      return run(null, this, args);
+      return withScheduleCutoff(wrapped, () => run(null, this, args));
     } as ((...args: A) => Promise<Awaited<R>>) & {
       withOptions: (options: JobOptions, ...args: A) => Promise<Awaited<R>>;
     };
-    wrapped.withOptions = (options: JobOptions, ...args: A): Promise<Awaited<R>> =>
-      run(options, undefined, args);
+    const withOptions = (options: JobOptions, ...args: A): Promise<Awaited<R>> =>
+      withScheduleCutoff(withOptions, () => run(options, undefined, args));
+    wrapped.withOptions = withOptions;
     return wrapped;
   }
 

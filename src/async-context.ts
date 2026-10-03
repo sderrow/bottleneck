@@ -110,104 +110,104 @@ export function cleanScheduleStack(raw: string | undefined): string | undefined 
 }
 
 /**
- * Lazily-captured schedule location. The holders are created with
- * `Error.captureStackTrace` at schedule() time without reading `.stack`,
- * so `Error.prepareStackTrace` (source-map-support under @swc-node/register)
+ * Lazily-captured schedule location. The holder is filled with
+ * `Error.captureStackTrace` at schedule() time without reading `.stack`, so
+ * `Error.prepareStackTrace` (source-map-support under @swc-node/register)
  * only runs when an error actually needs the schedule location. Queued jobs
  * hold onto the unformatted frames until then.
  */
 export type ScheduleStackCapture = {
-  /** Primary capture, cut at the outermost `schedule` the caller used. */
-  holder: { stack?: string };
-  /** Fallback capture, cut at `Job`, used when the primary comes back empty. */
-  fallback?: { stack?: string };
-  /** Marker label: the limiter id, or the owning Group id for Group children. */
+  /** Frames cut at the public entry point, so the first frame is the caller. */
+  holder?: { stack?: string };
+  /** Marker label: the limiter id, or a configured `scheduleStackLabel`. */
   label: string;
+  /**
+   * Set for a chained limiter's job, which is scheduled from the outer job's
+   * `doExecute` and so never has caller frames of its own. Rendered as a
+   * "via" label on the next section instead of a section of its own.
+   */
+  chained?: boolean;
 };
+
+type ScheduleCutoff = (...args: never[]) => unknown;
+
+// Library frames are cut by function identity (`Error.captureStackTrace`'s
+// cutoff), never by file path, so bundling bottleneck together with app code
+// can't make app frames look like library frames. Both are set only around a
+// synchronous call that constructs a job.
+let scheduleCutoff: ScheduleCutoff | undefined;
+let forwardingChain = false;
+
+/**
+ * Run `cb` with `fn` as the stack cutoff for jobs it schedules. Used by
+ * public entry points layered over schedule() (e.g. `wrap()`), so their own
+ * frames are cut along with schedule()'s.
+ */
+export function withScheduleCutoff<T>(fn: ScheduleCutoff, cb: () => T): T {
+  const previous = scheduleCutoff;
+  scheduleCutoff = fn;
+  try {
+    return cb();
+  } finally {
+    scheduleCutoff = previous;
+  }
+}
+
+/** Run `cb`, marking the job it schedules as a chained forward. */
+export function forwardChain<T>(cb: () => T): T {
+  const previous = forwardingChain;
+  forwardingChain = true;
+  try {
+    return cb();
+  } finally {
+    forwardingChain = previous;
+  }
+}
+
+/**
+ * Capture the schedule location for a new job, or undefined when `label` is
+ * null (capture disabled). `defaultCutoff` is the schedule() implementation,
+ * which is always on the stack when a job is built; frames above it (and it)
+ * are omitted.
+ */
+export function captureScheduleLocation(
+  label: string | null,
+  defaultCutoff: ScheduleCutoff,
+): ScheduleStackCapture | undefined {
+  const chained = forwardingChain;
+  // Consume the flag: anything else scheduled synchronously during the
+  // forward (e.g. from an event listener) is a regular schedule() call.
+  forwardingChain = false;
+  if (label == null) {
+    return undefined;
+  }
+  if (chained) {
+    return { label, chained: true };
+  }
+  try {
+    const holder: { stack?: string } = {};
+    if (typeof Error.captureStackTrace === "function") {
+      Error.captureStackTrace(holder, scheduleCutoff ?? defaultCutoff);
+    } else {
+      holder.stack = new Error().stack;
+    }
+    return { holder, label };
+  } catch {
+    return undefined;
+  }
+}
 
 const SCHEDULE_MARKER_PREFIX = "From previous Bottleneck.schedule location";
 const MAX_SCHEDULE_SECTIONS = 3;
 
-function scheduleMarker(label: string): string {
-  return `${SCHEDULE_MARKER_PREFIX} (${label}):`;
-}
-
-function countScheduleSections(stack: string): number {
-  let count = 0;
-  let index = 0;
-  while ((index = stack.indexOf(SCHEDULE_MARKER_PREFIX, index)) !== -1) {
-    count++;
-    index += SCHEDULE_MARKER_PREFIX.length;
-  }
-  return count;
-}
-
-// Directory containing this library's own modules, detected from a load-time
-// stack frame. Schedule-stack trimming matches the fork's own frames by this
-// path instead of by function name, so app code that happens to mention
-// `Job` (a model class, `/models/Job.ts`, ...) is never mistaken for limiter
-// machinery. In the bundled builds every library frame shares the dist file;
-// in source each library file shares this directory.
-const ownDir: string | undefined = (() => {
-  try {
-    const stack = new Error().stack ?? "";
-    for (const line of stack.split("\n")) {
-      const match = /\(\s*(.*?):\d+:\d+\s*\)/.exec(line) ?? /at\s+(.*?):\d+:\d+/.exec(line);
-      const path = match?.[1]?.trim();
-      if (path != null && path !== "" && !path.startsWith("node:")) {
-        const slash = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
-        if (slash > 0) {
-          return path.slice(0, slash);
-        }
-        return undefined;
-      }
-    }
-  } catch {
-    // Ignore: trimming is best-effort without it.
-  }
-  return undefined;
-})();
-
-function isOwnFrame(line: string): boolean {
-  if (ownDir == null) {
-    return false;
-  }
-  return line.includes(`${ownDir}/`) || line.includes(`${ownDir}\\`);
-}
-
-/**
- * Trim the fork's own machinery from a captured schedule stack. The inner job
- * of a chained pair is scheduled from the outer job's `doExecute`, so its
- * capture trails off into library frames; the next appended section stands in
- * for those, so cut them. Keeps the first frame (the `chained.schedule()`
- * call site) and drops everything from the first subsequent own frame on.
- * Node internals (`processTicksAndRejections`, timers, ...) are left alone:
- * in async stacks the useful frames come after them.
- */
-function trimScheduleStack(cleaned: string): string {
-  const lines = cleaned.split("\n");
-  for (let i = 1; i < lines.length; i++) {
-    if (isOwnFrame(lines[i] ?? "")) {
-      return trimTrailingOwnFrames(lines.slice(0, i)).join("\n");
-    }
-  }
-  return trimTrailingOwnFrames(lines).join("\n");
-}
-
-function trimTrailingOwnFrames(lines: string[]): string[] {
-  // Never drop the first frame: for a chained inner job the call site itself
-  // lives inside the library, and it is the section's whole point.
-  while (lines.length > 1 && isOwnFrame(lines[lines.length - 1] ?? "")) {
-    lines.pop();
-  }
-  return lines;
-}
-
-// Error instances already annotated with these capture holders (by holder
-// identity). A retry reuses the same job — and the same holder — so the
-// second `_onFailure` for the same error is a no-op, while a nested limiter
-// carries a different holder and appends its own section.
-const appendedCaptures = new WeakMap<object, Set<object>>();
+// Per-error annotation state. `seen` holds the captures already applied (a
+// retry reuses the same job and capture, so re-failing with the same error
+// instance is a no-op); `via` holds chained limiter labels waiting for the
+// next section.
+const annotations = new WeakMap<
+  object,
+  { seen: Set<ScheduleStackCapture>; sections: number; via: string[] }
+>();
 
 /**
  * Append the schedule-time stack to a task failure, so the rejection shows
@@ -215,9 +215,9 @@ const appendedCaptures = new WeakMap<object, Set<object>>();
  * formatted here — lazily, on the error path — so the schedule fast path
  * never pays for `Error.prepareStackTrace` / source-map-support. Nested
  * limiters each append their own section (up to MAX_SCHEDULE_SECTIONS);
- * retries reusing the same job/holder annotate only once. Returns the
- * original error (mutated in place when possible). Non-Error rejections and
- * errors without a formatted stack pass through untouched, preserving
+ * chained limiters are listed as "via" labels on the outer section. Returns
+ * the original error (mutated in place when possible). Non-Error rejections
+ * and errors without a formatted stack pass through untouched, preserving
  * rejection identity.
  */
 export function attachScheduleStack<T>(error: T, capture: ScheduleStackCapture | undefined): T {
@@ -231,45 +231,35 @@ export function attachScheduleStack<T>(error: T, capture: ScheduleStackCapture |
   if (typeof target.stack !== "string") {
     return error;
   }
-  const seen = appendedCaptures.get(error);
-  if (seen?.has(capture.holder)) {
+  let state = annotations.get(error);
+  if (state?.seen.has(capture)) {
     return error;
   }
-  if (countScheduleSections(target.stack) >= MAX_SCHEDULE_SECTIONS) {
+  if (state == null) {
+    state = { seen: new Set(), sections: 0, via: [] };
+    annotations.set(error, state);
+  }
+  state.seen.add(capture);
+  if (capture.chained) {
+    // Inner limiters fail first: prepend so the list reads outer → inner.
+    state.via.unshift(capture.label);
     return error;
   }
-  let raw: string | undefined;
+  if (state.sections >= MAX_SCHEDULE_SECTIONS) {
+    return error;
+  }
   try {
-    raw = capture.holder.stack;
-  } catch {
-    return error;
-  }
-  let cleaned = cleanScheduleStack(raw);
-  if (cleaned == null && capture.fallback != null) {
-    try {
-      raw = capture.fallback.stack;
-    } catch {
+    const section = cleanScheduleStack(capture.holder?.stack);
+    if (section == null) {
       return error;
     }
-    cleaned = cleanScheduleStack(raw);
-  }
-  if (cleaned == null) {
-    return error;
-  }
-  const section = trimScheduleStack(cleaned);
-  if (section.trim() === "") {
-    return error;
-  }
-  try {
-    target.stack = `${target.stack}\n${scheduleMarker(capture.label)}\n${section}`;
+    const via = state.via.length > 0 ? `, via ${state.via.join(", ")}` : "";
+    target.stack = `${target.stack}\n${SCHEDULE_MARKER_PREFIX} (${capture.label}${via}):\n${section}`;
+    state.via = [];
+    state.sections++;
   } catch {
-    // Frozen error or read-only stack: leave the original untouched.
+    // Throwing prepareStackTrace, frozen error, or read-only stack: leave the
+    // original untouched.
   }
-  let set = seen;
-  if (set == null) {
-    set = new Set();
-    appendedCaptures.set(error, set);
-  }
-  set.add(capture.holder);
   return error;
 }

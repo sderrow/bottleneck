@@ -49,7 +49,7 @@ export type BottleneckOptions = {
   readonly id?: string | null;
   /** Set to false to leave failed (dropped) jobs hanging instead of rejecting them. */
   readonly rejectOnDrop?: boolean | null;
-  /** Set to false to skip capturing schedule-time stacks (saves the source-map formatting cost for high-volume limiters). Default true. Captures hold the raw call-site frames while a job is queued; jobs already retain their task closures and args, so the extra retention is small. */
+  /** Set to false to skip capturing schedule-time stacks (saves the per-schedule stack walk for high-volume limiters; formatting only ever happens when a task fails). Default true. Captures hold the raw call-site frames while a job is queued; jobs already retain their task closures and args, so the extra retention is small. */
   readonly captureScheduleStack?: boolean | null;
   /** Label rendered in schedule-stack markers instead of the limiter id. Useful when ids contain PII; pass it in Group options to label a whole group's children. Null (default) means the limiter id. */
   readonly scheduleStackLabel?: string | null;
