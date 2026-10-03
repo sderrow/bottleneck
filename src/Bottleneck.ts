@@ -114,6 +114,8 @@ class Bottleneck {
     id: "<no-id>",
     rejectOnDrop: true,
     trackDoneStatus: false,
+    captureScheduleStack: true,
+    scheduleStackLabel: null,
     Promise,
   };
   /** @internal */
@@ -129,6 +131,15 @@ class Bottleneck {
   id: string = "<no-id>";
   /** @internal */
   rejectOnDrop: boolean = true;
+  /** Skip capturing schedule-time stacks when false (high-volume limiters). */
+  captureScheduleStack: boolean = true;
+  /**
+   * Marker label for schedule-stack sections. Groups set this to the group
+   * id so child markers never leak the key (which can hold PII like emails)
+   * into error stacks. Null means the limiter id.
+   * @internal
+   */
+  scheduleStackLabel: string | null = null;
   /** @internal */
   trackDoneStatus: boolean = false;
   /** @internal */
@@ -545,6 +556,16 @@ class Bottleneck {
       this.rejectOnDrop,
       this.Events,
       this._states,
+      {
+        // Resolved off the instance so subclass overrides and instance
+        // patches of schedule() cut their own wrapper frames automatically.
+        // When schedule isn't overridden the cutoff is the running function,
+        // so it's always on the stack and the fallback can't be needed.
+        cutoff: this.schedule,
+        label: this.scheduleStackLabel ?? this.id,
+        enabled: this.captureScheduleStack !== false,
+        skipFallback: this.schedule === Bottleneck.prototype.schedule,
+      },
     );
     this._receive(job);
     return job.promise;

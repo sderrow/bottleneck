@@ -49,6 +49,8 @@ export type BottleneckOptions = {
   readonly id?: string | null;
   /** Set to false to leave failed (dropped) jobs hanging instead of rejecting them. */
   readonly rejectOnDrop?: boolean | null;
+  /** Set to false to skip capturing schedule-time stacks (saves the source-map formatting cost for high-volume limiters). Default true. Captures hold the raw call-site frames while a job is queued; jobs already retain their task closures and args, so the extra retention is small. */
+  readonly captureScheduleStack?: boolean | null;
   /** Set to true to track done jobs with counts() and jobStatus(). Uses more memory. */
   readonly trackDoneStatus?: boolean | null;
   /** Where the limiter stores its internal state: `local` (default) or `redis`/`ioredis` for Clustering. */

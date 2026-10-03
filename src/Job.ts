@@ -7,8 +7,8 @@ import {
   attachScheduleStack,
   bindTask,
   captureAsyncResource,
-  cleanScheduleStack,
   runWithAsyncResource,
+  type ScheduleStackCapture,
 } from "./async-context";
 import BottleneckError from "./BottleneckError";
 import { load } from "./parser";
@@ -17,20 +17,63 @@ import randomIndex from "./random-index";
 const NUM_PRIORITIES = 10;
 const DEFAULT_PRIORITY = 5;
 
-function captureScheduleStack(): string | undefined {
+export type ScheduleCaptureOptions = {
+  /** Cutoff passed to `Error.captureStackTrace` (the outermost `schedule`). */
+  cutoff?: object;
+  /** Marker label: the limiter id, or the owning Group id for Group children. */
+  label?: string;
+  /** When false, skip capture entirely (high-volume limiters). */
+  enabled?: boolean;
+  /** When true, skip the `Job`-cut fallback (cutoff is known to be on the stack). */
+  skipFallback?: boolean;
+};
+
+function captureHolder(cutoff: object): { stack?: string } | undefined {
   try {
     const holder: { stack?: string } = {};
     if (typeof Error.captureStackTrace === "function") {
-      // Cut off at the Job constructor, so the first kept frame is the
-      // schedule() call site that created this job.
-      Error.captureStackTrace(holder, Job);
+      Error.captureStackTrace(holder, cutoff as never);
     } else {
       holder.stack = new Error().stack;
     }
-    return cleanScheduleStack(holder.stack);
+    return holder;
   } catch {
     return undefined;
   }
+}
+
+/**
+ * Capture the schedule location lazily: the holders keep the unformatted
+ * frames and `.stack` is only read inside `attachScheduleStack` (the error
+ * path), so scheduling never pays for `Error.prepareStackTrace` /
+ * source-map-support.
+ */
+function captureScheduleStackCapture(
+  options?: ScheduleCaptureOptions,
+): ScheduleStackCapture | undefined {
+  if (options?.enabled === false) {
+    return undefined;
+  }
+  const label = options?.label ?? "<no-id>";
+  const cutoff = options?.cutoff;
+  if (cutoff != null && cutoff !== Job) {
+    const holder = captureHolder(cutoff);
+    if (holder == null) {
+      return undefined;
+    }
+    if (options?.skipFallback === true) {
+      return { holder, label };
+    }
+    // Fallback when cutting at `schedule` comes back empty (a cutoff that
+    // isn't on the stack captures just "Error").
+    const fallback = captureHolder(Job);
+    return { holder, fallback, label };
+  }
+  const holder = captureHolder(Job);
+  if (holder == null) {
+    return undefined;
+  }
+  return { holder, label };
 }
 
 class Job {
@@ -44,12 +87,12 @@ class Job {
   promise: Promise<unknown>;
   retryCount = 0;
   /**
-   * Stack captured at schedule() time (first frame is the schedule call
-   * site). Appended to task failures so rejections show both where the task
-   * threw and where the job was scheduled.
+   * Lazily-captured schedule location (first frame is the schedule call
+   * site). Formatted and appended to task failures so rejections show both
+   * where the task threw and where the job was scheduled.
    * @internal
    */
-  scheduledStack: string | undefined;
+  scheduleStackCapture: ScheduleStackCapture | undefined;
   /**
    * Async context active when schedule() was called, re-entered for the
    * chained limiter's schedule() path in doExecute (which otherwise runs
@@ -70,6 +113,7 @@ class Job {
     rejectOnDrop: boolean,
     Events: Events,
     _states: States,
+    scheduleCapture?: ScheduleCaptureOptions,
   ) {
     this.task = bindTask(task);
     this.args = args;
@@ -77,7 +121,7 @@ class Job {
     this.Events = Events;
     this._states = _states;
     this.asyncResource = captureAsyncResource();
-    this.scheduledStack = captureScheduleStack();
+    this.scheduleStackCapture = captureScheduleStackCapture(scheduleCapture);
     this.options = load(options ?? {}, jobDefaults) as ResolvedJobOptions;
     this.options.priority = this._sanitizePriority(this.options.priority);
     if (this.options.id === jobDefaults.id) {
@@ -222,7 +266,7 @@ class Job {
     run: (retryAfter: number) => unknown,
     free: (options: ResolvedJobOptions, eventInfo: EventInfo) => Promise<unknown>,
   ): Promise<unknown> {
-    error = attachScheduleStack(error, this.scheduledStack);
+    error = attachScheduleStack(error, this.scheduleStackCapture);
     if (clearGlobalState()) {
       const retry = await this.Events.trigger("failed", error, eventInfo);
       if (retry != null) {

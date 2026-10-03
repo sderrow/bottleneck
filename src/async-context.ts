@@ -109,19 +109,119 @@ export function cleanScheduleStack(raw: string | undefined): string | undefined 
   return lines.join("\n");
 }
 
-const SCHEDULE_MARKER = "From previous Bottleneck.schedule location:";
+/**
+ * Lazily-captured schedule location. The holders are created with
+ * `Error.captureStackTrace` at schedule() time without reading `.stack`,
+ * so `Error.prepareStackTrace` (source-map-support under @swc-node/register)
+ * only runs when an error actually needs the schedule location. Queued jobs
+ * hold onto the unformatted frames until then.
+ */
+export type ScheduleStackCapture = {
+  /** Primary capture, cut at the outermost `schedule` the caller used. */
+  holder: { stack?: string };
+  /** Fallback capture, cut at `Job`, used when the primary comes back empty. */
+  fallback?: { stack?: string };
+  /** Marker label: the limiter id, or the owning Group id for Group children. */
+  label: string;
+};
 
-const augmented = new WeakSet<object>();
+const SCHEDULE_MARKER_PREFIX = "From previous Bottleneck.schedule location";
+const MAX_SCHEDULE_SECTIONS = 3;
+
+function scheduleMarker(label: string): string {
+  return `${SCHEDULE_MARKER_PREFIX} (${label}):`;
+}
+
+function countScheduleSections(stack: string): number {
+  let count = 0;
+  let index = 0;
+  while ((index = stack.indexOf(SCHEDULE_MARKER_PREFIX, index)) !== -1) {
+    count++;
+    index += SCHEDULE_MARKER_PREFIX.length;
+  }
+  return count;
+}
+
+// Directory containing this library's own modules, detected from a load-time
+// stack frame. Schedule-stack trimming matches the fork's own frames by this
+// path instead of by function name, so app code that happens to mention
+// `Job` (a model class, `/models/Job.ts`, ...) is never mistaken for limiter
+// machinery. In the bundled builds every library frame shares the dist file;
+// in source each library file shares this directory.
+const ownDir: string | undefined = (() => {
+  try {
+    const stack = new Error().stack ?? "";
+    for (const line of stack.split("\n")) {
+      const match = /\(\s*(.*?):\d+:\d+\s*\)/.exec(line) ?? /at\s+(.*?):\d+:\d+/.exec(line);
+      const path = match?.[1]?.trim();
+      if (path != null && path !== "" && !path.startsWith("node:")) {
+        const slash = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
+        if (slash > 0) {
+          return path.slice(0, slash);
+        }
+        return undefined;
+      }
+    }
+  } catch {
+    // Ignore: trimming is best-effort without it.
+  }
+  return undefined;
+})();
+
+function isOwnFrame(line: string): boolean {
+  if (ownDir == null) {
+    return false;
+  }
+  return line.includes(`${ownDir}/`) || line.includes(`${ownDir}\\`);
+}
+
+/**
+ * Trim the fork's own machinery from a captured schedule stack. The inner job
+ * of a chained pair is scheduled from the outer job's `doExecute`, so its
+ * capture trails off into library frames; the next appended section stands in
+ * for those, so cut them. Keeps the first frame (the `chained.schedule()`
+ * call site) and drops everything from the first subsequent own frame on.
+ * Node internals (`processTicksAndRejections`, timers, ...) are left alone:
+ * in async stacks the useful frames come after them.
+ */
+function trimScheduleStack(cleaned: string): string {
+  const lines = cleaned.split("\n");
+  for (let i = 1; i < lines.length; i++) {
+    if (isOwnFrame(lines[i] ?? "")) {
+      return trimTrailingOwnFrames(lines.slice(0, i)).join("\n");
+    }
+  }
+  return trimTrailingOwnFrames(lines).join("\n");
+}
+
+function trimTrailingOwnFrames(lines: string[]): string[] {
+  // Never drop the first frame: for a chained inner job the call site itself
+  // lives inside the library, and it is the section's whole point.
+  while (lines.length > 1 && isOwnFrame(lines[lines.length - 1] ?? "")) {
+    lines.pop();
+  }
+  return lines;
+}
+
+// Error instances already annotated with these capture holders (by holder
+// identity). A retry reuses the same job — and the same holder — so the
+// second `_onFailure` for the same error is a no-op, while a nested limiter
+// carries a different holder and appends its own section.
+const appendedCaptures = new WeakMap<object, Set<object>>();
 
 /**
  * Append the schedule-time stack to a task failure, so the rejection shows
- * both where the task threw and where schedule() was called. Returns the
+ * both where the task threw and where schedule() was called. The capture is
+ * formatted here — lazily, on the error path — so the schedule fast path
+ * never pays for `Error.prepareStackTrace` / source-map-support. Nested
+ * limiters each append their own section (up to MAX_SCHEDULE_SECTIONS);
+ * retries reusing the same job/holder annotate only once. Returns the
  * original error (mutated in place when possible). Non-Error rejections and
- * already-augmented errors pass through untouched, preserving rejection
- * identity.
+ * errors without a formatted stack pass through untouched, preserving
+ * rejection identity.
  */
-export function attachScheduleStack<T>(error: T, scheduledStack: string | undefined): T {
-  if (scheduledStack == null) {
+export function attachScheduleStack<T>(error: T, capture: ScheduleStackCapture | undefined): T {
+  if (capture == null) {
     return error;
   }
   if (typeof error !== "object" || error === null) {
@@ -131,14 +231,45 @@ export function attachScheduleStack<T>(error: T, scheduledStack: string | undefi
   if (typeof target.stack !== "string") {
     return error;
   }
-  if (target.stack.includes(SCHEDULE_MARKER) || augmented.has(error)) {
+  const seen = appendedCaptures.get(error);
+  if (seen?.has(capture.holder)) {
     return error;
   }
-  augmented.add(error);
+  if (countScheduleSections(target.stack) >= MAX_SCHEDULE_SECTIONS) {
+    return error;
+  }
+  let raw: string | undefined;
   try {
-    target.stack = `${target.stack}\n${SCHEDULE_MARKER}\n${scheduledStack}`;
+    raw = capture.holder.stack;
+  } catch {
+    return error;
+  }
+  let cleaned = cleanScheduleStack(raw);
+  if (cleaned == null && capture.fallback != null) {
+    try {
+      raw = capture.fallback.stack;
+    } catch {
+      return error;
+    }
+    cleaned = cleanScheduleStack(raw);
+  }
+  if (cleaned == null) {
+    return error;
+  }
+  const section = trimScheduleStack(cleaned);
+  if (section.trim() === "") {
+    return error;
+  }
+  try {
+    target.stack = `${target.stack}\n${scheduleMarker(capture.label)}\n${section}`;
   } catch {
     // Frozen error or read-only stack: leave the original untouched.
   }
+  let set = seen;
+  if (set == null) {
+    set = new Set();
+    appendedCaptures.set(error, set);
+  }
+  set.add(capture.holder);
   return error;
 }
