@@ -200,25 +200,37 @@ export function captureScheduleLocation(
 const SCHEDULE_MARKER_PREFIX = "From previous Bottleneck.schedule location";
 const MAX_SCHEDULE_SECTIONS = 3;
 
-// Per-error annotation state. `seen` holds the captures already applied (a
-// retry reuses the same job and capture, so re-failing with the same error
-// instance is a no-op); `via` holds chained limiter labels waiting for the
-// next section.
-const annotations = new WeakMap<
-  object,
-  { seen: Set<ScheduleStackCapture>; sections: number; via: string[] }
->();
+type Annotation = {
+  /** Captures already applied: a retry reuses the same job and capture. */
+  seen: Set<ScheduleStackCapture>;
+  /** Chained limiter labels waiting for the next section. */
+  via: string[];
+  sections: number;
+  /** Middle sections replaced once the cap is reached. */
+  omitted: number;
+  /** Where the last section (and any omitted note before it) starts. */
+  lastStart: number;
+  /** The stack as last written here, to detect outside edits. */
+  written: string;
+};
+
+const annotations = new WeakMap<object, Annotation>();
 
 /**
  * Append the schedule-time stack to a task failure, so the rejection shows
  * both where the task threw and where schedule() was called. The capture is
  * formatted here — lazily, on the error path — so the schedule fast path
- * never pays for `Error.prepareStackTrace` / source-map-support. Nested
- * limiters each append their own section (up to MAX_SCHEDULE_SECTIONS);
- * chained limiters are listed as "via" labels on the outer section. Returns
- * the original error (mutated in place when possible). Non-Error rejections
- * and errors without a formatted stack pass through untouched, preserving
- * rejection identity.
+ * never pays for `Error.prepareStackTrace` / source-map-support.
+ *
+ * Nested limiters each append their own section, innermost first, since the
+ * innermost job fails first. Past MAX_SCHEDULE_SECTIONS, each new section
+ * replaces the last one, so the outermost section (the app's original call
+ * site) is always kept and the middle is summarized as omitted. Chained
+ * limiters are listed as "via" labels on the next section instead.
+ *
+ * Returns the original error (mutated in place when possible). Non-Error
+ * rejections and errors without a formatted stack pass through untouched,
+ * preserving rejection identity.
  */
 export function attachScheduleStack<T>(error: T, capture: ScheduleStackCapture | undefined): T {
   if (capture == null) {
@@ -236,7 +248,7 @@ export function attachScheduleStack<T>(error: T, capture: ScheduleStackCapture |
     return error;
   }
   if (state == null) {
-    state = { seen: new Set(), sections: 0, via: [] };
+    state = { seen: new Set(), via: [], sections: 0, omitted: 0, lastStart: 0, written: "" };
     annotations.set(error, state);
   }
   state.seen.add(capture);
@@ -245,18 +257,35 @@ export function attachScheduleStack<T>(error: T, capture: ScheduleStackCapture |
     state.via.unshift(capture.label);
     return error;
   }
-  if (state.sections >= MAX_SCHEDULE_SECTIONS) {
+  const replacing = state.sections >= MAX_SCHEDULE_SECTIONS;
+  if (replacing && target.stack !== state.written) {
+    // Something else edited the stack since our last section; slicing at
+    // lastStart could cut its text, so leave the stack alone.
     return error;
   }
   try {
-    const section = cleanScheduleStack(capture.holder?.stack);
-    if (section == null) {
+    const frames = cleanScheduleStack(capture.holder?.stack);
+    if (frames == null) {
       return error;
     }
     const via = state.via.length > 0 ? `, via ${state.via.join(", ")}` : "";
-    target.stack = `${target.stack}\n${SCHEDULE_MARKER_PREFIX} (${capture.label}${via}):\n${section}`;
+    let section = `${SCHEDULE_MARKER_PREFIX} (${capture.label}${via}):\n${frames}`;
+    let base = target.stack;
+    if (replacing) {
+      const omitted = state.omitted + 1;
+      section = `    ... ${omitted} nested schedule location${omitted === 1 ? "" : "s"} omitted\n${section}`;
+      base = base.slice(0, state.lastStart);
+    }
+    const stack = `${base}\n${section}`;
+    target.stack = stack;
     state.via = [];
-    state.sections++;
+    state.lastStart = base.length;
+    state.written = stack;
+    if (replacing) {
+      state.omitted++;
+    } else {
+      state.sections++;
+    }
   } catch {
     // Throwing prepareStackTrace, frozen error, or read-only stack: leave the
     // original untouched.

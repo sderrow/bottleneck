@@ -228,7 +228,9 @@ describe("Async context", () => {
     expectNoLibraryFrames(sections[0]);
   });
 
-  test("schedule locations nested in task bodies are capped", async ({ makeLimiter }) => {
+  test("nested schedule locations keep the innermost two and the outermost", async ({
+    makeLimiter,
+  }) => {
     const limiters = Array.from(
       { length: 5 },
       (_, i) =>
@@ -246,10 +248,24 @@ describe("Async context", () => {
         return scheduleAt(i + 1);
       });
     }
+    function startNestedSchedules(): Promise<unknown> {
+      return scheduleAt(0);
+    }
 
-    const error = await scheduleAt(0).catch((e: unknown) => e);
-    expect((error as Error).stack).toContain("boom-deep-nest");
-    expect(scheduleSections(error)).toHaveLength(3);
+    const error = await startNestedSchedules().catch((e: unknown) => e);
+    const stack = (error as Error).stack ?? "";
+    expect(stack).toContain("boom-deep-nest");
+    const sections = scheduleSections(error);
+    // Redis projects prefix limiter ids per test; match the stable suffixes.
+    expect(sections.map((section) => /nest-cap-\d/.exec(section)?.[0])).toEqual([
+      "nest-cap-4",
+      "nest-cap-3",
+      "nest-cap-0",
+    ]);
+    expect(stack).toContain("... 2 nested schedule locations omitted\nFrom previous");
+    // Only the outermost section reaches the app's original call site.
+    expect(sections[2]).toContain("startNestedSchedules");
+    expect(sections[0]).not.toContain("startNestedSchedules");
   });
 
   test("wrap() and withOptions() capture the wrapped function's caller", async ({
