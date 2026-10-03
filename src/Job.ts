@@ -29,9 +29,7 @@ class Job {
   promise: Promise<unknown>;
   retryCount = 0;
   /**
-   * Lazily-captured schedule location (first frame is the schedule call
-   * site). Formatted and appended to task failures so rejections show both
-   * where the task threw and where the job was scheduled.
+   * Where the job was scheduled, appended to task failures.
    * @internal
    */
   scheduleStackCapture: ScheduleStackCapture | undefined;

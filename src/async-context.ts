@@ -110,39 +110,25 @@ export function cleanScheduleStack(raw: string | undefined): string | undefined 
 }
 
 /**
- * Lazily-captured schedule location. The holder is filled with
- * `Error.captureStackTrace` at schedule() time without reading `.stack`, so
- * `Error.prepareStackTrace` (source-map-support under @swc-node/register)
- * only runs when an error actually needs the schedule location. Queued jobs
- * hold onto the unformatted frames until then.
+ * Where a job was scheduled. `holder.stack` is read only when a task fails,
+ * so `Error.prepareStackTrace` (source maps) stays off the schedule() path.
  */
 export type ScheduleStackCapture = {
-  /** Frames cut at the public entry point, so the first frame is the caller. */
   holder?: { stack?: string };
-  /** Marker label: the limiter id, or a configured `scheduleStackLabel`. */
   label: string;
-  /**
-   * Set for a chained limiter's job, which is scheduled from the outer job's
-   * `doExecute` and so never has caller frames of its own. Rendered as a
-   * "via" label on the next section instead of a section of its own.
-   */
+  /** A chained limiter's job: no caller frames, rendered as a "via" label. */
   chained?: boolean;
 };
 
 type ScheduleCutoff = (...args: never[]) => unknown;
 
-// Library frames are cut by function identity (`Error.captureStackTrace`'s
-// cutoff), never by file path, so bundling bottleneck together with app code
-// can't make app frames look like library frames. Both are set only around a
-// synchronous call that constructs a job.
+// Set around the synchronous call that builds a job. Library frames are cut
+// by function identity, not file path, so bundled app code is never mistaken
+// for library frames.
 let scheduleCutoff: ScheduleCutoff | undefined;
 let forwardingChain = false;
 
-/**
- * Run `cb` with `fn` as the stack cutoff for jobs it schedules. Used by
- * public entry points layered over schedule() (e.g. `wrap()`), so their own
- * frames are cut along with schedule()'s.
- */
+/** Cut stacks of jobs scheduled in `cb` at `fn`, an entry point like wrap(). */
 export function withScheduleCutoff<T>(fn: ScheduleCutoff, cb: () => T): T {
   const previous = scheduleCutoff;
   scheduleCutoff = fn;
@@ -164,19 +150,13 @@ export function forwardChain<T>(cb: () => T): T {
   }
 }
 
-/**
- * Capture the schedule location for a new job, or undefined when `label` is
- * null (capture disabled). `defaultCutoff` is the schedule() implementation,
- * which is always on the stack when a job is built; frames above it (and it)
- * are omitted.
- */
+/** Capture where a job is scheduled; undefined when `label` is null (disabled). */
 export function captureScheduleLocation(
   label: string | null,
   defaultCutoff: ScheduleCutoff,
 ): ScheduleStackCapture | undefined {
   const chained = forwardingChain;
-  // Consume the flag: anything else scheduled synchronously during the
-  // forward (e.g. from an event listener) is a regular schedule() call.
+  // Consume the flag so a listener scheduling during the forward isn't chained.
   forwardingChain = false;
   if (label == null) {
     return undefined;
@@ -200,37 +180,26 @@ export function captureScheduleLocation(
 const SCHEDULE_MARKER_PREFIX = "From previous Bottleneck.schedule location";
 const MAX_SCHEDULE_SECTIONS = 3;
 
+// Per-error state. `seen` skips retries (same capture); `via` holds chained
+// labels for the next section; `lastStart`/`written` let the last section be
+// replaced in place once capped.
 type Annotation = {
-  /** Captures already applied: a retry reuses the same job and capture. */
   seen: Set<ScheduleStackCapture>;
-  /** Chained limiter labels waiting for the next section. */
   via: string[];
   sections: number;
-  /** Middle sections replaced once the cap is reached. */
   omitted: number;
-  /** Where the last section (and any omitted note before it) starts. */
   lastStart: number;
-  /** The stack as last written here, to detect outside edits. */
   written: string;
 };
 
 const annotations = new WeakMap<object, Annotation>();
 
 /**
- * Append the schedule-time stack to a task failure, so the rejection shows
- * both where the task threw and where schedule() was called. The capture is
- * formatted here — lazily, on the error path — so the schedule fast path
- * never pays for `Error.prepareStackTrace` / source-map-support.
- *
- * Nested limiters each append their own section, innermost first, since the
- * innermost job fails first. Past MAX_SCHEDULE_SECTIONS, each new section
- * replaces the last one, so the outermost section (the app's original call
- * site) is always kept and the middle is summarized as omitted. Chained
- * limiters are listed as "via" labels on the next section instead.
- *
- * Returns the original error (mutated in place when possible). Non-Error
- * rejections and errors without a formatted stack pass through untouched,
- * preserving rejection identity.
+ * Append where the job was scheduled to a task failure's stack. Nested
+ * limiters each add a section, innermost first; past MAX_SCHEDULE_SECTIONS
+ * the last section is replaced, so the outermost (the app's call site) is
+ * always kept. Returns the original error, mutated in place when possible;
+ * non-Error rejections pass through untouched.
  */
 export function attachScheduleStack<T>(error: T, capture: ScheduleStackCapture | undefined): T {
   if (capture == null) {
@@ -259,8 +228,7 @@ export function attachScheduleStack<T>(error: T, capture: ScheduleStackCapture |
   }
   const replacing = state.sections >= MAX_SCHEDULE_SECTIONS;
   if (replacing && target.stack !== state.written) {
-    // Something else edited the stack since our last section; slicing at
-    // lastStart could cut its text, so leave the stack alone.
+    // Edited elsewhere since our last write; slicing could cut that text.
     return error;
   }
   try {
@@ -287,8 +255,7 @@ export function attachScheduleStack<T>(error: T, capture: ScheduleStackCapture |
       state.sections++;
     }
   } catch {
-    // Throwing prepareStackTrace, frozen error, or read-only stack: leave the
-    // original untouched.
+    // Throwing prepareStackTrace or read-only stack: leave it untouched.
   }
   return error;
 }

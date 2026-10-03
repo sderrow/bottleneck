@@ -132,13 +132,9 @@ class Bottleneck {
   id: string = "<no-id>";
   /** @internal */
   rejectOnDrop: boolean = true;
-  /** Skip capturing schedule-time stacks when false (high-volume limiters). */
+  /** Append where jobs were scheduled to task failure stacks. */
   captureScheduleStack: boolean = true;
-  /**
-   * Label rendered in schedule-stack markers instead of the limiter id.
-   * Useful when ids contain PII; pass it in Group options to label a whole
-   * group's children. Null means the limiter id.
-   */
+  /** Schedule-stack marker label in place of the id (e.g. ids with PII). */
   scheduleStackLabel: string | null = null;
   /** @internal */
   trackDoneStatus: boolean = false;
@@ -576,8 +572,7 @@ class Bottleneck {
             Awaited<R>
           >)
         : (this.schedule(fn.bind(thisArg) as (...args: A) => R, ...args) as Promise<Awaited<R>>);
-    // Each entry point is its own stack cutoff, so schedule-location stacks
-    // start at the wrapped function's caller rather than inside wrap().
+    // Cut schedule stacks at each entry point so they start at the caller.
     const wrapped = function (this: unknown, ...args: A): Promise<Awaited<R>> {
       return withScheduleCutoff(wrapped, () => run(null, this, args));
     } as ((...args: A) => Promise<Awaited<R>>) & {

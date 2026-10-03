@@ -49,9 +49,9 @@ export type BottleneckOptions = {
   readonly id?: string | null;
   /** Set to false to leave failed (dropped) jobs hanging instead of rejecting them. */
   readonly rejectOnDrop?: boolean | null;
-  /** Set to false to skip capturing schedule-time stacks (saves the per-schedule stack walk for high-volume limiters; formatting only ever happens when a task fails). Default true. Captures hold the raw call-site frames while a job is queued; jobs already retain their task closures and args, so the extra retention is small. */
+  /** Set to false to stop appending where jobs were scheduled to task failure stacks (skips a stack capture per schedule()). Default true. */
   readonly captureScheduleStack?: boolean | null;
-  /** Label rendered in schedule-stack markers instead of the limiter id. Useful when ids contain PII; pass it in Group options to label a whole group's children. Null (default) means the limiter id. */
+  /** Label for schedule-stack markers in place of the limiter id, e.g. when ids hold PII. Also applies to a Group's limiters. */
   readonly scheduleStackLabel?: string | null;
   /** Set to true to track done jobs with counts() and jobStatus(). Uses more memory. */
   readonly trackDoneStatus?: boolean | null;
