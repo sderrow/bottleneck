@@ -13,6 +13,7 @@ import type {
   StrategyConstants,
 } from "./types";
 import pkg from "../package.json" with { type: "json" };
+import { captureScheduleLocation, withScheduleCutoff } from "./async-context";
 import Batcher from "./Batcher";
 import BottleneckError from "./BottleneckError";
 import IORedisConnection from "./cluster/IORedisConnection";
@@ -114,6 +115,8 @@ class Bottleneck {
     id: "<no-id>",
     rejectOnDrop: true,
     trackDoneStatus: false,
+    captureScheduleStack: true,
+    scheduleStackLabel: null,
     Promise,
   };
   /** @internal */
@@ -129,6 +132,10 @@ class Bottleneck {
   id: string = "<no-id>";
   /** @internal */
   rejectOnDrop: boolean = true;
+  /** Append where jobs were scheduled to task failure stacks. */
+  captureScheduleStack: boolean = true;
+  /** Schedule-stack marker label in place of the id (e.g. ids with PII). */
+  scheduleStackLabel: string | null = null;
   /** @internal */
   trackDoneStatus: boolean = false;
   /** @internal */
@@ -545,6 +552,10 @@ class Bottleneck {
       this.rejectOnDrop,
       this.Events,
       this._states,
+      captureScheduleLocation(
+        this.captureScheduleStack ? (this.scheduleStackLabel ?? this.id) : null,
+        Bottleneck.prototype.schedule,
+      ),
     );
     this._receive(job);
     return job.promise;
@@ -561,13 +572,15 @@ class Bottleneck {
             Awaited<R>
           >)
         : (this.schedule(fn.bind(thisArg) as (...args: A) => R, ...args) as Promise<Awaited<R>>);
+    // Cut schedule stacks at each entry point so they start at the caller.
     const wrapped = function (this: unknown, ...args: A): Promise<Awaited<R>> {
-      return run(null, this, args);
+      return withScheduleCutoff(wrapped, () => run(null, this, args));
     } as ((...args: A) => Promise<Awaited<R>>) & {
       withOptions: (options: JobOptions, ...args: A) => Promise<Awaited<R>>;
     };
-    wrapped.withOptions = (options: JobOptions, ...args: A): Promise<Awaited<R>> =>
-      run(options, undefined, args);
+    const withOptions = (options: JobOptions, ...args: A): Promise<Awaited<R>> =>
+      withScheduleCutoff(withOptions, () => run(options, undefined, args));
+    wrapped.withOptions = withOptions;
     return wrapped;
   }
 

@@ -1,5 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { describe, expect, vi } from "vitest";
+import type Bottleneck from "../src/Bottleneck";
 import { runDetached, setDetachedTimeout } from "../src/async-context";
 import { useFakeClock } from "./helpers/clock";
 import { deferred, enqueued, test } from "./helpers/test-api";
@@ -8,6 +9,22 @@ useFakeClock();
 
 function innerTask(): never {
   throw new Error("boom-inner");
+}
+
+const MARKER = "From previous Bottleneck.schedule location";
+
+/** Schedule-location sections appended to an error's stack, marker included. */
+function scheduleSections(error: unknown): string[] {
+  return ((error as Error).stack ?? "")
+    .split(MARKER)
+    .slice(1)
+    .map((section) => MARKER + section);
+}
+
+/** Frames the stack cutoff must remove: schedule(), wrap(), chain forwarding. */
+function expectNoLibraryFrames(section: string | undefined): void {
+  expect(section).toBeDefined();
+  expect(section).not.toMatch(/src[/\\](Bottleneck|Job)\.ts/);
 }
 
 describe("Async context", () => {
@@ -135,8 +152,9 @@ describe("Async context", () => {
     const stack = (error as Error).stack ?? "";
     expect(stack).toContain("boom-inner");
     expect(stack).toContain("innerTask");
-    expect(stack).toContain("outerScheduleTask");
-    expect(stack).toContain("From previous Bottleneck.schedule location:");
+    const [section] = scheduleSections(error);
+    expect(section).toContain("outerScheduleTask");
+    expectNoLibraryFrames(section);
   });
 
   test("retrying the same error instance augments the stack only once", async ({ makeLimiter }) => {
@@ -160,7 +178,199 @@ describe("Async context", () => {
     ).rejects.toBe(failure);
     expect(attempts).toBe(2);
     expect(failures).toBe(2);
-    const occurrences = (failure.stack ?? "").split("From previous Bottleneck.schedule location:");
-    expect(occurrences).toHaveLength(2);
+    expect(scheduleSections(failure)).toHaveLength(1);
+  });
+
+  test("schedule() does not format stacks until a task fails", async ({ makeLimiter }) => {
+    const limiter = makeLimiter({ maxConcurrent: 5 });
+    let formats = 0;
+    const original = Error.prepareStackTrace;
+    Error.prepareStackTrace = ((...args: unknown[]) => {
+      formats++;
+      return (original as (...a: unknown[]) => unknown)?.(...args);
+    }) as typeof Error.prepareStackTrace;
+    try {
+      await Promise.all(
+        Array.from({ length: 20 }, (_, i) => limiter.schedule(() => Promise.resolve(i))),
+      );
+    } finally {
+      Error.prepareStackTrace = original;
+    }
+    expect(formats).toBe(0);
+  });
+
+  test("a chain renders as one section listing every chained limiter", async ({ makeLimiter }) => {
+    // The head limiter uses the project's datastore; the chained ones are local.
+    const limiters = Array.from(
+      { length: 5 },
+      (_, i) =>
+        makeLimiter(
+          i === 0 ? { id: "chain-0" } : { id: `chain-${i}`, datastore: "local" },
+        ) as Bottleneck,
+    );
+    for (let i = 0; i < limiters.length - 1; i++) {
+      limiters[i]!.chain(limiters[i + 1]!);
+    }
+
+    function scheduleOnChain(): Promise<unknown> {
+      return limiters[0]!.schedule(() => {
+        throw new Error("boom-chain");
+      });
+    }
+
+    const error = await scheduleOnChain().catch((e: unknown) => e);
+    expect((error as Error).stack).toContain("boom-chain");
+    const sections = scheduleSections(error);
+    expect(sections).toHaveLength(1);
+    // Redis projects prefix limiter ids per test; match the stable suffixes.
+    expect(sections[0]).toMatch(/chain-0, via \S*chain-1, \S*chain-2, \S*chain-3, \S*chain-4\):/);
+    expect(sections[0]).toContain("scheduleOnChain");
+    expectNoLibraryFrames(sections[0]);
+  });
+
+  test("nested schedule locations keep the innermost two and the outermost", async ({
+    makeLimiter,
+  }) => {
+    const limiters = Array.from(
+      { length: 5 },
+      (_, i) =>
+        makeLimiter({
+          id: `nest-cap-${i}`,
+          datastore: "local",
+        }) as Bottleneck,
+    );
+
+    function scheduleAt(i: number): Promise<unknown> {
+      return limiters[i]!.schedule(() => {
+        if (i === limiters.length - 1) {
+          throw new Error("boom-deep-nest");
+        }
+        return scheduleAt(i + 1);
+      });
+    }
+    function startNestedSchedules(): Promise<unknown> {
+      return scheduleAt(0);
+    }
+
+    const error = await startNestedSchedules().catch((e: unknown) => e);
+    const stack = (error as Error).stack ?? "";
+    expect(stack).toContain("boom-deep-nest");
+    const sections = scheduleSections(error);
+    // Redis projects prefix limiter ids per test; match the stable suffixes.
+    expect(sections.map((section) => /nest-cap-\d/.exec(section)?.[0])).toEqual([
+      "nest-cap-4",
+      "nest-cap-3",
+      "nest-cap-0",
+    ]);
+    expect(stack).toContain("... 2 nested schedule locations omitted\nFrom previous");
+    // Only the outermost section reaches the app's original call site.
+    expect(sections[2]).toContain("startNestedSchedules");
+    expect(sections[0]).not.toContain("startNestedSchedules");
+  });
+
+  test("wrap() and withOptions() capture the wrapped function's caller", async ({
+    makeLimiter,
+  }) => {
+    const limiter = makeLimiter({ id: "wrap-stack" });
+    const wrapped = limiter.wrap((): never => {
+      throw new Error("boom-wrap");
+    });
+
+    function callWrapped(): Promise<unknown> {
+      return wrapped();
+    }
+    function callWithOptions(): Promise<unknown> {
+      return wrapped.withOptions({});
+    }
+
+    for (const [caller, call] of [
+      ["callWrapped", callWrapped],
+      ["callWithOptions", callWithOptions],
+    ] as const) {
+      const sections = scheduleSections(await call().catch((e: unknown) => e));
+      expect(sections).toHaveLength(1);
+      expect(sections[0]).toContain(caller);
+      expectNoLibraryFrames(sections[0]);
+    }
+  });
+
+  test("captureScheduleStack:false skips the schedule location", async ({ makeLimiter }) => {
+    const limiter = makeLimiter({ captureScheduleStack: false });
+    const error = await limiter
+      .schedule(() => {
+        throw new Error("boom-no-stack");
+      })
+      .catch((e: unknown) => e);
+    expect((error as Error).stack).toContain("boom-no-stack");
+    expect(scheduleSections(error)).toHaveLength(0);
+  });
+
+  test("an instance-patched schedule wrapper still captures the caller", async ({
+    makeLimiter,
+  }) => {
+    const limiter = makeLimiter({ id: "patched-schedule-stack" });
+    const originalSchedule = limiter.schedule.bind(limiter);
+    (limiter as { schedule: unknown }).schedule = function (...args: unknown[]) {
+      return (originalSchedule as (...a: never[]) => unknown)(...(args as never[]));
+    };
+
+    function callerScheduleTask(): Promise<unknown> {
+      const schedule = limiter.schedule as (...a: any[]) => Promise<unknown>;
+      return schedule(() => {
+        throw new Error("boom-wrapper");
+      });
+    }
+
+    const error = await callerScheduleTask().catch((e: unknown) => e);
+    const [section] = scheduleSections(error);
+    expect(section).toContain("callerScheduleTask");
+    expectNoLibraryFrames(section);
+  });
+
+  test("a schedule nested in a task body appends both locations", async ({ makeLimiter }) => {
+    const inner = makeLimiter({ id: "task-body-inner", datastore: "local" });
+    const outer = makeLimiter({ id: "task-body-outer", datastore: "local" });
+
+    function scheduleFromTaskBody(): Promise<never> {
+      return outer.schedule(() =>
+        inner.schedule(() => {
+          throw new Error("boom-task-body");
+        }),
+      ) as Promise<never>;
+    }
+
+    const error = await scheduleFromTaskBody().catch((e: unknown) => e);
+    const stack = (error as Error).stack ?? "";
+    expect(stack).toContain("boom-task-body");
+    // Redis projects prefix limiter ids per test; match the stable suffix.
+    expect(stack).toContain("task-body-inner):");
+    expect(stack).toContain("task-body-outer):");
+    expect(stack).toContain("scheduleFromTaskBody");
+  });
+
+  test("an explicit scheduleStackLabel is used for the marker", async ({ makeLimiter }) => {
+    const limiter = makeLimiter({ id: "pii-check-123", scheduleStackLabel: "check" });
+    const error = await limiter
+      .schedule(() => {
+        throw new Error("boom-label");
+      })
+      .catch((e: unknown) => e);
+    const stack = (error as Error).stack ?? "";
+    expect(stack).toContain("From previous Bottleneck.schedule location (check):");
+    expect(stack).not.toContain("pii-check-123");
+  });
+
+  test("a group-level scheduleStackLabel labels child markers", async ({ makeGroup }) => {
+    const group = makeGroup({ id: "tm-create-update", scheduleStackLabel: "payroll" });
+    const limiter = group.key("acme-email-jane@acme.com");
+
+    const error = await limiter
+      .schedule(() => {
+        throw new Error("boom-group-label");
+      })
+      .catch((e: unknown) => e);
+    const stack = (error as Error).stack ?? "";
+    expect(stack).toContain("From previous Bottleneck.schedule location (payroll):");
+    expect(stack).not.toContain("jane@acme.com");
   });
 });

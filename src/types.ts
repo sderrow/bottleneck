@@ -49,6 +49,10 @@ export type BottleneckOptions = {
   readonly id?: string | null;
   /** Set to false to leave failed (dropped) jobs hanging instead of rejecting them. */
   readonly rejectOnDrop?: boolean | null;
+  /** Set to false to stop appending where jobs were scheduled to task failure stacks (skips a stack capture per schedule()). Default true. */
+  readonly captureScheduleStack?: boolean | null;
+  /** Label for schedule-stack markers in place of the limiter id, e.g. when ids hold PII. Also applies to a Group's limiters. */
+  readonly scheduleStackLabel?: string | null;
   /** Set to true to track done jobs with counts() and jobStatus(). Uses more memory. */
   readonly trackDoneStatus?: boolean | null;
   /** Where the limiter stores its internal state: `local` (default) or `redis`/`ioredis` for Clustering. */
