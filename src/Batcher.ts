@@ -9,7 +9,7 @@ type BatcherDefaults = {
   maxSize: number | null;
 };
 
-class Batcher<T = any> {
+class Batcher<T = unknown> {
   /** @internal */
   defaults: BatcherDefaults = { maxTime: null, maxSize: null };
   /** @internal */
@@ -34,11 +34,11 @@ class Batcher<T = any> {
   // Installed on the instance by Events (see Events constructor).
   declare on: {
     <E extends keyof BatcherEvents<T>>(event: E, listener: BatcherEvents<T>[E]): unknown;
-    (event: string, listener: (...args: any[]) => unknown): unknown;
+    (event: string, listener: (...args: never[]) => unknown): unknown;
   };
   declare once: {
     <E extends keyof BatcherEvents<T>>(event: E, listener: BatcherEvents<T>[E]): unknown;
-    (event: string, listener: (...args: any[]) => unknown): unknown;
+    (event: string, listener: (...args: never[]) => unknown): unknown;
   };
   declare removeAllListeners: (name?: string | null) => void;
 

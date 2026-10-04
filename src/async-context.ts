@@ -8,9 +8,12 @@ import { AsyncResource } from "node:async_hooks";
  * Falls back to the unbound task outside Node (the light/browser build stubs
  * this module out entirely).
  */
-export function bindTask<T extends (...args: any[]) => unknown>(task: T): T {
+export function bindTask<T extends (...args: never[]) => unknown>(task: T): T {
   try {
-    return AsyncResource.bind(task);
+    // bind() preserves the signature, but its `(...args: any[]) => any`
+    // constraint rejects `never[]` params, so widen through `unknown`.
+    const bound = AsyncResource.bind(task as unknown as (...args: unknown[]) => unknown);
+    return bound as unknown as T;
   } catch {
     return task;
   }

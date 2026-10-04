@@ -164,11 +164,11 @@ class Bottleneck {
   // is the public event contract.
   declare on: {
     <E extends keyof BottleneckEvents>(event: E, listener: BottleneckEvents[E]): unknown;
-    (event: string, listener: (...args: any[]) => unknown): unknown;
+    (event: string, listener: (...args: never[]) => unknown): unknown;
   };
   declare once: {
     <E extends keyof BottleneckEvents>(event: E, listener: BottleneckEvents[E]): unknown;
-    (event: string, listener: (...args: any[]) => unknown): unknown;
+    (event: string, listener: (...args: never[]) => unknown): unknown;
   };
   declare removeAllListeners: (name?: string | null) => void;
 

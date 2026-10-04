@@ -33,7 +33,7 @@
     "no-underscore-dangle": "off", // Disabled because it's a common pattern in the codebase
     "no-array-constructor": "error",
     "prefer-arrow-callback": "error",
-    "typescript/no-explicit-any": "off", // Disabled because it's a common pattern in the codebase
+    "typescript/no-explicit-any": "error",
     "typescript/no-require-imports": "error",
     "typescript/no-unsafe-function-type": "error",
     "typescript/consistent-type-imports": ["error", { "fixStyle": "inline-type-imports" }],
@@ -76,5 +76,14 @@
         ]
       }
     ]
-  }
+  },
+  "overrides": [
+    {
+      "files": ["test/**"],
+      "rules": {
+        // Temporary: test `any`s are converted in a follow-up commit.
+        "typescript/no-explicit-any": "off"
+      }
+    }
+  ]
 }

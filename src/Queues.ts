@@ -13,8 +13,8 @@ class Queues<J extends JobLike = Job> {
   _lists: DLList<J>[];
 
   // Installed on the instance by Events (see Events constructor).
-  declare on: (name: string, cb: (...args: any[]) => void) => unknown;
-  declare once: (name: string, cb: (...args: any[]) => void) => unknown;
+  declare on: (name: string, cb: (...args: never[]) => void) => unknown;
+  declare once: (name: string, cb: (...args: never[]) => void) => unknown;
   declare removeAllListeners: (name?: string | null) => void;
 
   constructor(num_priorities: number) {

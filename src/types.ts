@@ -161,12 +161,12 @@ export type IORedisConnectionOptions =
     };
 
 /** Datastore-specific map of raw redis clients. */
-export type ClientsList = { client?: any; subscriber?: any };
+export type ClientsList = { client?: unknown; subscriber?: unknown };
 
 export type GroupLimiterPair = { key: string; limiter: Bottleneck };
 
 export type EventInfo = {
-  readonly args: any[];
+  readonly args: readonly unknown[];
   readonly options: {
     readonly id: string;
     readonly priority: number;
@@ -175,8 +175,8 @@ export type EventInfo = {
   };
 };
 export type EventInfoDropped = EventInfo & {
-  readonly task: (...args: any[]) => any;
-  readonly promise: Promise<any>;
+  readonly task: (...args: never[]) => unknown;
+  readonly promise: Promise<unknown>;
 };
 export type EventInfoQueued = EventInfo & {
   readonly reachedHWM: boolean;
@@ -199,7 +199,7 @@ export type Counts = {
 
 /** Event map for the limiter. The `"failed"` listener returns a retry delay in ms (or nothing). */
 export type BottleneckEvents = {
-  debug: (message: string, info: any) => void;
+  debug: (message: string, info: unknown) => void;
   message: (message: string) => void;
   error: (error: unknown) => void;
   empty: () => void;
@@ -220,13 +220,13 @@ export type BottleneckEvents = {
 };
 
 export type GroupEvents = {
-  debug: (message: string, info: any) => void;
+  debug: (message: string, info: unknown) => void;
   error: (error: unknown) => void;
   created: (limiter: Bottleneck, key: string) => void;
 };
 
 export type BatcherEvents<T> = {
-  debug: (message: string, info: any) => void;
+  debug: (message: string, info: unknown) => void;
   error: (error: unknown) => void;
   batch: (batch: T[]) => void;
 };

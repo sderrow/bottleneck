@@ -83,7 +83,7 @@ describe("ioredis-only", () => {
     expect(limiter.datastore).toStrictEqual("ioredis");
 
     await limiter.disconnect();
-    expect(limiter.clients().client.status).toStrictEqual("ready");
+    expect(limiter.clients().client).toHaveProperty("status", "ready");
     await Promise.all([expect(p1).resolves.toEqual([1]), expect(p2).resolves.toEqual([2])]);
   });
 
@@ -93,7 +93,6 @@ describe("ioredis-only", () => {
     makeConnection,
   }) => {
     const client = new Redis(buildClientOptions("ioredis"));
-    Object.assign(client, { id: "super-client" });
 
     const connection = makeConnection({ client }) as any;
     connection.id = "super-connection";
@@ -108,12 +107,12 @@ describe("ioredis-only", () => {
     await h.flushLimiter(limiter);
     expect(h.log).toHaveCallOrder([[1], [2]]);
     expect(h).toHaveFinalCallAt(50);
-    expect(limiter.clients().client.id).toStrictEqual("super-client");
+    expect(limiter.clients().client).toBe(client);
     expect((limiter.connection as any).id).toStrictEqual("super-connection");
     expect(limiter.datastore).toStrictEqual("ioredis");
 
     await limiter.disconnect();
-    expect(limiter.clients().client.status).toStrictEqual("ready");
+    expect(limiter.clients().client).toHaveProperty("status", "ready");
     await Promise.all([expect(p1).resolves.toEqual([1]), expect(p2).resolves.toEqual([2])]);
   });
 
