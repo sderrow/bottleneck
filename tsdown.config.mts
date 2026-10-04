@@ -48,8 +48,7 @@ const excludeClustering: TsdownPlugin = {
 
 // `src/async-context.ts` statically imports `node:async_hooks`, which has no
 // browser equivalent. The light build redirects that import to a shim whose
-// `bind` is the identity function, so tasks simply run unbound. Stack
-// capture/attach (pure `Error` logic) keeps working untouched.
+// `bind` is the identity function, so tasks simply run unbound.
 const shimAsyncHooks: TsdownPlugin = {
   name: "shim-async-hooks",
   resolveId(id) {

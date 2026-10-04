@@ -13,7 +13,6 @@ import type {
   StrategyConstants,
 } from "./types";
 import pkg from "../package.json" with { type: "json" };
-import { captureScheduleLocation, withScheduleCutoff } from "./async-context";
 import Batcher from "./Batcher";
 import BottleneckError from "./BottleneckError";
 import IORedisConnection from "./cluster/IORedisConnection";
@@ -26,6 +25,7 @@ import LocalDatastore from "./LocalDatastore";
 import { load, overwrite } from "./parser";
 import Queues from "./Queues";
 import randomIndex from "./random-index";
+import { captureScheduleLocation, withScheduleCutoff } from "./schedule-stack";
 import States from "./States";
 import Sync from "./Sync";
 

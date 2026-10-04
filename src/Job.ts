@@ -3,17 +3,11 @@ import type Bottleneck from "./Bottleneck";
 import type Events from "./Events";
 import type States from "./States";
 import type { EventInfo, EventInfoRetryable, JobDefaults, ResolvedJobOptions } from "./types";
-import {
-  attachScheduleStack,
-  bindTask,
-  captureAsyncResource,
-  forwardChain,
-  runWithAsyncResource,
-  type ScheduleStackCapture,
-} from "./async-context";
+import { bindTask, captureAsyncResource, runWithAsyncResource } from "./async-context";
 import BottleneckError from "./BottleneckError";
 import { load } from "./parser";
 import randomIndex from "./random-index";
+import { attachScheduleStack, forwardChain, type ScheduleStackCapture } from "./schedule-stack";
 
 const NUM_PRIORITIES = 10;
 const DEFAULT_PRIORITY = 5;
