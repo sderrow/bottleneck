@@ -142,8 +142,8 @@ class Group {
         `b_${this.id}-*_settings`,
         "count",
         10000,
-      ])) as [string | number | null, string[]];
-      cursor = ~~next!;
+      ])) as [string | number, string[]];
+      cursor = ~~next;
       for (const k of found) {
         keys.push(k.slice(start, -end));
       }

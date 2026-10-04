@@ -27,8 +27,7 @@ describe("Batcher", () => {
       [1, 2, 3],
       [4, 5],
     ]);
-    expect(batchTimes[0]! - t0).toBe(0);
-    expect(batchTimes[1]! - batchTimes[0]!).toBe(100);
+    expect(batchTimes).toStrictEqual([t0, t0 + 100]);
   });
 
   test("Should batch by time", async () => {
@@ -45,7 +44,7 @@ describe("Batcher", () => {
     await Promise.all([batcher.add(1), batcher.add(2)]);
 
     expect(batches).toStrictEqual([[1, 2]]);
-    expect(batchTimes[0]! - t0).toBe(100);
+    expect(batchTimes).toStrictEqual([t0 + 100]);
 
     const t1 = Date.now();
     await Promise.all([batcher.add(3), batcher.add(4)]);
@@ -54,7 +53,7 @@ describe("Batcher", () => {
       [1, 2],
       [3, 4],
     ]);
-    expect(batchTimes[1]! - t1).toBe(100);
+    expect(batchTimes).toStrictEqual([t0 + 100, t1 + 100]);
   });
 
   test("Should batch by size", async () => {
@@ -92,7 +91,7 @@ describe("Batcher", () => {
     await Promise.all([p1, p2]);
 
     expect(batches).toStrictEqual([[1, 2]]);
-    expect(batchTimes[0]! - t0).toBe(100);
+    expect(batchTimes).toStrictEqual([t0 + 100]);
   });
 
   test("Should force then stagger flushes", async () => {
@@ -108,7 +107,7 @@ describe("Batcher", () => {
     const t0 = Date.now();
     await Promise.all([batcher.add(1), batcher.add(2), batcher.add(3)]);
     expect(batches).toStrictEqual([[1, 2, 3]]);
-    expect(batchTimes[0]! - t0).toBe(0);
+    expect(batchTimes).toStrictEqual([t0]);
 
     const t1 = Date.now();
     const p4 = batcher.add(4);
@@ -120,7 +119,7 @@ describe("Batcher", () => {
       [1, 2, 3],
       [4, 5],
     ]);
-    expect(batchTimes[1]! - t1).toBe(100);
+    expect(batchTimes).toStrictEqual([t0, t1 + 100]);
   });
 
   test("Should default to no time/size limits when constructed without options", () => {

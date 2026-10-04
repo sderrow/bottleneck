@@ -1,6 +1,7 @@
 import type Bottleneck from "../Bottleneck";
 import type { StoreOptions } from "../types";
-import type { RedisLib, RedisLikeClient } from "./redis-types";
+import type { IORedisLib, NodeRedisLib, RedisClients } from "./redis-types";
+import type { ScriptName } from "./Scripts";
 import { runDetached, setDetachedInterval, setDetachedTimeout } from "../async-context";
 import BottleneckError from "../BottleneckError";
 import { load, overwrite } from "../parser";
@@ -13,7 +14,7 @@ class RedisDatastore {
   _orphaned = 0;
   instance: Bottleneck;
   storeOptions: StoreOptions;
-  Redis: RedisLib | null = null;
+  Redis: NodeRedisLib | IORedisLib | null = null;
   clientOptions: object = {};
   clusterNodes: unknown = null;
   Promise: PromiseConstructor = Promise;
@@ -25,10 +26,10 @@ class RedisDatastore {
   originalId: string;
   clientId: string;
   sharedConnection: boolean;
-  clients: Record<string, RedisLikeClient> = {};
+  clients: Partial<RedisClients> = {};
   capacityPriorityCounters: Record<string, ReturnType<typeof setTimeout>> = {};
   heartbeat: ReturnType<typeof setInterval> | undefined;
-  ready: Promise<Record<string, RedisLikeClient>>;
+  ready: Promise<RedisClients>;
 
   constructor(instance: Bottleneck, storeOptions: StoreOptions, storeInstanceOptions: object) {
     this.instance = instance;
@@ -82,8 +83,9 @@ class RedisDatastore {
   }
 
   /** @internal */
-  async _initReady(): Promise<Record<string, RedisLikeClient>> {
-    this.clients = (await this.connection.ready) as Record<string, RedisLikeClient>;
+  async _initReady(): Promise<RedisClients> {
+    const clients: RedisClients = await this.connection.ready;
+    this.clients = clients;
     await this.runScript("init", this.prepareInitSettings(this.clearDatastore));
     await this.connection.__addLimiter__(this.instance);
     await this.runScript("register_client", [this.instance.queued()]);
@@ -102,13 +104,13 @@ class RedisDatastore {
         }
       }, this.heartbeatInterval).unref?.();
     }
-    return this.clients;
+    return clients;
   }
 
   /** @internal */
   async __publish__(message: string): Promise<unknown> {
-    const client = (await this.ready).client!;
-    return client.publish!(this.instance.channel(), `message:${message.toString()}`);
+    const { client } = await this.ready;
+    return client.publish(this.instance.channel(), `message:${message.toString()}`);
   }
 
   async onMessage(_channel: string, message: string): Promise<unknown> {
@@ -118,24 +120,28 @@ class RedisDatastore {
       if (type === "capacity") {
         return await this.instance._drainAll(data.length > 0 ? ~~data : undefined);
       } else if (type === "capacity-priority") {
-        const [rawCapacity, priorityClient, counter] = data.split(":");
-        const capacity = rawCapacity!.length > 0 ? ~~rawCapacity! : undefined;
+        const [rawCapacity = "", priorityClient, counter = ""] = data.split(":");
+        const capacity = rawCapacity.length > 0 ? ~~rawCapacity : undefined;
         if (priorityClient === this.clientId) {
           this.instance.Events.trigger("capacity-priority", capacity);
           const drained = await this.instance._drainAll(capacity);
           const newCapacity = capacity != null ? capacity - (drained || 0) : "";
-          return await this.clients.client!.publish!(
+          const { client } = this.clients;
+          if (client == null) {
+            throw new BottleneckError("Received a Redis message before the client was ready");
+          }
+          return await client.publish(
             this.instance.channel(),
             `capacity-priority:${newCapacity}::${counter}`,
           );
         } else if (priorityClient === "") {
-          clearTimeout(this.capacityPriorityCounters[counter!]);
-          delete this.capacityPriorityCounters[counter!];
+          clearTimeout(this.capacityPriorityCounters[counter]);
+          delete this.capacityPriorityCounters[counter];
           return this.instance._drainAll(capacity);
         } else {
-          return (this.capacityPriorityCounters[counter!] = setDetachedTimeout(async () => {
+          return (this.capacityPriorityCounters[counter] = setDetachedTimeout(async () => {
             try {
-              delete this.capacityPriorityCounters[counter!];
+              delete this.capacityPriorityCounters[counter];
               await this.runScript("blacklist_client", [priorityClient]);
               return await this.instance._drainAll(capacity);
             } catch (e) {
@@ -169,7 +175,7 @@ class RedisDatastore {
     }
   }
 
-  async runScript(name: string, args: unknown[]): Promise<unknown> {
+  async runScript(name: ScriptName, args: unknown[]): Promise<unknown> {
     if (name !== "init" && name !== "register_client") {
       await this.ready;
     }

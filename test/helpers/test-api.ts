@@ -113,7 +113,7 @@ vitestExpect.extend({
     const calls = received.mock.calls;
     const pass =
       calls.length === expected.length &&
-      expected.every((order, i) => vitestExpect(callResultArgs(calls[i]!)).toEqual(order));
+      calls.every((call, i) => vitestExpect(callResultArgs(call)).toEqual(expected[i]));
 
     const message = () =>
       pass
@@ -132,10 +132,9 @@ vitestExpect.extend({
     minBound?: number,
   ) {
     const lo = minBound !== undefined ? minBound : 10;
+    const { callTimes } = received as { callTimes?: number[] };
     const duration =
-      (received as { callTimes?: number[] }).callTimes != null
-        ? (received as { callTimes?: number[] }).callTimes!.at(-1)
-        : (received as JobHarness).getResults().callsDuration;
+      callTimes != null ? callTimes.at(-1) : (received as JobHarness).getResults().callsDuration;
 
     if (isFakeClock()) {
       const pass = duration === expectedMs;
@@ -216,9 +215,9 @@ export const test = baseTest.extend<{
       resources.push(resource);
       return resource;
     });
-    for (let i = resources.length - 1; i >= 0; i--) {
+    for (const resource of resources.toReversed()) {
       try {
-        await resources[i]!.disconnect(false);
+        await resource.disconnect(false);
       } catch {
         // tolerate mid-test disconnects
       }

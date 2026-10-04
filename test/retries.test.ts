@@ -7,13 +7,17 @@ useFakeClock();
 const badJob = () => Promise.reject(new Error("boom"));
 
 const assertBackoffs = (attemptTimes: number[], backoffMs: number) => {
-  for (let i = 1; i < attemptTimes.length; i++) {
-    const delta = attemptTimes[i]! - attemptTimes[i - 1]!;
-    if (isFakeClock()) {
-      expect(delta).toBe(backoffMs);
-    } else {
-      expect(delta).toBeGreaterThanOrEqual(backoffMs - 5);
+  let previous: number | undefined;
+  for (const time of attemptTimes) {
+    if (previous != null) {
+      const delta = time - previous;
+      if (isFakeClock()) {
+        expect(delta).toBe(backoffMs);
+      } else {
+        expect(delta).toBeGreaterThanOrEqual(backoffMs - 5);
+      }
     }
+    previous = time;
   }
 };
 

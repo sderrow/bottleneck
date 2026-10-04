@@ -4,7 +4,10 @@ const doRedisSetup = () => {
   // REDIS_HOST and REDIS_PORT are set by the root-level globalSetup
   // (test/global-setup/redis.ts) and inherited by worker forks via process.env.
   // No inject() needed since the values arrive through the environment.
-  const host = process.env.REDIS_HOST!;
+  const host = process.env.REDIS_HOST;
+  if (host == null) {
+    throw new Error("REDIS_HOST is not set; it should come from test/global-setup/redis.ts");
+  }
   const port = Number(process.env.REDIS_PORT);
 
   // Generate the fork-scoped id prefix here (this setup file is loaded first

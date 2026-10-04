@@ -38,26 +38,26 @@ export async function setup(): Promise<void> {
   // Retry with a fresh builder each attempt; containers leaked by a failed
   // attempt are reaped by ryuk at session end, and vitest applies no timeout
   // to root globalSetup, so the worst-case ~40s here is safe.
-  let container: StartedRedisContainer | undefined;
-  for (let attempt = 1; attempt <= START_ATTEMPTS; attempt++) {
-    try {
-      // valkey images ship redis-* compatibility symlinks, so the command
-      // works across the whole image matrix.
-      container = await new RedisContainer(REDIS_IMAGE)
-        .withStartupTimeout(30_000)
-        .withCommand(["redis-server", "--save", "", "--appendonly", "no"])
-        .start();
-      break;
-    } catch (err) {
-      if (attempt === START_ATTEMPTS) throw err;
-      console.warn(
-        `[global-setup] Redis container start failed (attempt ${attempt}/${START_ATTEMPTS}): ${err}; retrying in ${RETRY_DELAY_MS}ms`,
-      );
-      await sleep(RETRY_DELAY_MS);
+  const startContainer = async (): Promise<StartedRedisContainer> => {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        // valkey images ship redis-* compatibility symlinks, so the command
+        // works across the whole image matrix.
+        return await new RedisContainer(REDIS_IMAGE)
+          .withStartupTimeout(30_000)
+          .withCommand(["redis-server", "--save", "", "--appendonly", "no"])
+          .start();
+      } catch (err) {
+        if (attempt >= START_ATTEMPTS) throw err;
+        console.warn(
+          `[global-setup] Redis container start failed (attempt ${attempt}/${START_ATTEMPTS}): ${err}; retrying in ${RETRY_DELAY_MS}ms`,
+        );
+        await sleep(RETRY_DELAY_MS);
+      }
     }
-  }
+  };
 
-  const started = container!;
+  const started = await startContainer();
 
   process.env.REDIS_HOST = started.getHost();
   process.env.REDIS_PORT = String(started.getPort());

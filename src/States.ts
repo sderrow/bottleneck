@@ -16,11 +16,11 @@ class States {
     if (current == null) return;
     const next = current + 1;
     if (next < this.status.length) {
-      this.counts[current]!--;
-      this.counts[next]!++;
+      this._adjust(current, -1);
+      this._adjust(next, 1);
       this._jobs[id] = next;
     } else {
-      this.counts[current]!--;
+      this._adjust(current, -1);
       delete this._jobs[id];
     }
   }
@@ -28,16 +28,23 @@ class States {
   start(id: string): number {
     const initial = 0;
     this._jobs[id] = initial;
-    return this.counts[initial]!++;
+    return this._adjust(initial, 1);
   }
 
   remove(id: string): boolean {
     const current = this._jobs[id];
     if (current != null) {
-      this.counts[current]!--;
+      this._adjust(current, -1);
       delete this._jobs[id];
     }
     return current != null;
+  }
+
+  /** @internal Adds `delta` to a status count; returns the previous count. */
+  _adjust(pos: number, delta: number): number {
+    const previous = this.counts[pos] ?? 0;
+    this.counts[pos] = previous + delta;
+    return previous;
   }
 
   jobStatus(id: string): string | null {
