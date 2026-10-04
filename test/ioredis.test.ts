@@ -1,6 +1,7 @@
+import Redis from "ioredis";
+import ioredisPkg from "ioredis/package.json" with { type: "json" };
 import { describe, expect } from "vitest";
 import { test } from "./helpers/test-api";
-const Redis = require("ioredis");
 import buildClientOptions from "./redis-client-options";
 
 describe("ioredis-only", () => {
@@ -40,7 +41,7 @@ describe("ioredis-only", () => {
     makeLimiter,
     makeConnection,
   }) => {
-    const client = new Redis.Cluster("");
+    const client = new Redis.Cluster([]);
     makeConnection({ client });
     const limiter = makeLimiter({
       maxConcurrent: 2,
@@ -92,7 +93,7 @@ describe("ioredis-only", () => {
     makeConnection,
   }) => {
     const client = new Redis(buildClientOptions("ioredis"));
-    client.id = "super-client";
+    Object.assign(client, { id: "super-client" });
 
     const connection = makeConnection({ client }) as any;
     connection.id = "super-connection";
@@ -150,7 +151,7 @@ describe("ioredis-only", () => {
 // 6+. The CI client-matrix runs this suite against ioredis 5 as well, so the
 // RESP3-specific tests are skipped there; the RESP2 test still applies since
 // ioredis 5 ignores the unknown `protocol` option and is RESP2-only anyway.
-const ioredisMajor = parseInt(Redis.version ?? require("ioredis/package.json").version, 10);
+const ioredisMajor = parseInt(ioredisPkg.version, 10);
 const describeResp3 = ioredisMajor >= 6 ? describe : describe.skip;
 
 // ioredis 6 negotiates RESP3 by default but keeps RESP2-compatible reply

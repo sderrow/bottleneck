@@ -1,10 +1,10 @@
+import assert from "node:assert";
 import { describe, expect } from "vitest";
 import type BottleneckBase from "../src/Bottleneck";
 import type { JobOptions } from "../src/types";
 import * as Scripts from "../src/cluster/Scripts";
 import sleep from "../src/sleep";
 import { test, waitForState, deferred, enqueued } from "./helpers/test-api";
-const assert = require("assert");
 
 // Causality policy (Workstream B): observe product-timer effects via waitForState
 // and state counts — never assert wall-clock bounds around real network time.

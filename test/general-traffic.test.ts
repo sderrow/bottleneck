@@ -1,12 +1,14 @@
+import { execFile as execFileCb } from "node:child_process";
+import path from "node:path";
+import { promisify } from "node:util";
 import { describe, expect } from "vitest";
 import type { JobOptions } from "../src/types";
 import sleep from "../src/sleep";
 import { useFakeClock, useRealClockForThisTest } from "./helpers/clock";
+import { defined } from "./helpers/defined";
 import { test, waitForState, deferred } from "./helpers/test-api";
 
-const path = require("path");
-const util = require("util");
-const execFile = util.promisify(require("child_process").execFile);
+const execFile = promisify(execFileCb);
 
 useFakeClock();
 
@@ -388,11 +390,10 @@ describe("General traffic", () => {
       // sanity check (`nums[2] > nums[0]`) to confirm the second pair
       // landed strictly after the first, which proves the refresh gate
       // held without depending on the absolute bucket value.
-      const matches = stdout.match(/\[(\d+)\]/g);
-      expect(matches).toBeTruthy();
-      expect(matches.length).toEqual(4);
-      const nums = matches.map((m: string) => Number(m.slice(1, -1)));
-      expect(nums[2]).toBeGreaterThan(nums[0]);
+      const matches = stdout.match(/\[(\d+)\]/g) ?? [];
+      expect(matches).toHaveLength(4);
+      const nums = matches.map((m) => Number(m.slice(1, -1)));
+      expect(defined(nums[2])).toBeGreaterThan(defined(nums[0]));
       expect(stderr).toEqual("");
     });
   });
@@ -508,11 +509,10 @@ describe("General traffic", () => {
       // strictly later than jobs 1-2). Tighter bucket assertions flake on
       // fresh-connection / module-load jitter when the fixture runs
       // against a Redis datastore inherited from the parent suite.
-      const matches = stdout.match(/\[(\d+)\]/g);
-      expect(matches).toBeTruthy();
-      expect(matches.length).toEqual(4);
-      const nums = matches.map((m: string) => Number(m.slice(1, -1)));
-      expect(nums[2]).toBeGreaterThan(nums[0]);
+      const matches = stdout.match(/\[(\d+)\]/g) ?? [];
+      expect(matches).toHaveLength(4);
+      const nums = matches.map((m) => Number(m.slice(1, -1)));
+      expect(defined(nums[2])).toBeGreaterThan(defined(nums[0]));
       expect(stderr).toEqual("");
     });
   });

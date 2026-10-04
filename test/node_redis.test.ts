@@ -1,6 +1,6 @@
+import * as Redis from "redis";
 import { describe, expect } from "vitest";
 import { test } from "./helpers/test-api";
-const Redis = require("redis");
 import buildClientOptions from "./redis-client-options";
 
 describe("node_redis-only", () => {
@@ -48,7 +48,7 @@ describe("node_redis-only", () => {
     makeConnection,
   }) => {
     const client = Redis.createClient(buildClientOptions("redis"));
-    client.id = "super-client";
+    Object.assign(client, { id: "super-client" });
     await client.connect();
 
     const connection = makeConnection({ client }) as any;
