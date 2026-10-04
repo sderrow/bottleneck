@@ -555,6 +555,7 @@ class Bottleneck {
       captureScheduleLocation(
         this.captureScheduleStack ? (this.scheduleStackLabel ?? this.id) : null,
         Bottleneck.prototype.schedule,
+        this.schedule,
       ),
     );
     this._receive(job);

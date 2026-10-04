@@ -1,7 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { describe, expect, vi } from "vitest";
-import type Bottleneck from "../src/Bottleneck";
 import { runDetached, setDetachedTimeout } from "../src/async-context";
+import Bottleneck from "../src/Bottleneck";
 import { useFakeClock } from "./helpers/clock";
 import { deferred, enqueued, test } from "./helpers/test-api";
 
@@ -305,26 +305,69 @@ describe("Async context", () => {
     expect(scheduleSections(error)).toHaveLength(0);
   });
 
-  test("an instance-patched schedule wrapper still captures the caller", async ({
-    makeLimiter,
-  }) => {
-    const limiter = makeLimiter({ id: "patched-schedule-stack" });
-    const originalSchedule = limiter.schedule.bind(limiter);
-    (limiter as { schedule: unknown }).schedule = function (...args: unknown[]) {
-      return (originalSchedule as (...a: never[]) => unknown)(...(args as never[]));
-    };
+  test("schedule overrides cut their own wrapper frames", async ({ track }) => {
+    class SubclassLimiter extends Bottleneck {
+      override schedule(...args: unknown[]): Promise<unknown> {
+        return this.scheduleWithOpts(args);
+      }
+      scheduleWithOpts(args: unknown[]): Promise<unknown> {
+        return (super.schedule as (...a: unknown[]) => Promise<unknown>)(...args);
+      }
+    }
+    const subclassed = track(new SubclassLimiter({ id: "override-subclass", datastore: "local" }));
 
-    function callerScheduleTask(): Promise<unknown> {
-      const schedule = limiter.schedule as (...a: any[]) => Promise<unknown>;
-      return schedule(() => {
-        throw new Error("boom-wrapper");
+    const arrowPatched = track(new Bottleneck({ id: "override-arrow", datastore: "local" }));
+    const original = Bottleneck.prototype.schedule as (...a: unknown[]) => Promise<unknown>;
+    function scheduleWithOpts(args: unknown[]): Promise<unknown> {
+      return original.apply(arrowPatched, args);
+    }
+    (arrowPatched as { schedule: unknown }).schedule = (...args: unknown[]) =>
+      scheduleWithOpts(args);
+
+    for (const limiter of [subclassed, arrowPatched]) {
+      function callOverride(): Promise<unknown> {
+        return (limiter.schedule as (...a: unknown[]) => Promise<unknown>)(() => {
+          throw new Error("boom-override");
+        });
+      }
+      const [section] = scheduleSections(await callOverride().catch((e: unknown) => e));
+      expect(section).toContain("callOverride");
+      expect(section).not.toContain("scheduleWithOpts");
+      expectNoLibraryFrames(section);
+    }
+  });
+
+  test("bound overrides and bypassed overrides still capture the caller", async ({ track }) => {
+    // V8 ignores bound functions as cutoffs, so their wrapper frames remain;
+    // calling the base schedule() past an override uses the fallback capture.
+    const bound = track(new Bottleneck({ id: "override-bound", datastore: "local" }));
+    const original = Bottleneck.prototype.schedule as (...a: unknown[]) => Promise<unknown>;
+    (bound as { schedule: unknown }).schedule = function scheduleWithOpts(
+      this: Bottleneck,
+      ...args: unknown[]
+    ) {
+      return original.apply(this, args);
+    }.bind(bound);
+
+    function callBound(): Promise<unknown> {
+      return (bound.schedule as (...a: unknown[]) => Promise<unknown>)(() => {
+        throw new Error("boom-bound");
+      });
+    }
+    function callBypass(): Promise<unknown> {
+      return original.call(bound, () => {
+        throw new Error("boom-bypass");
       });
     }
 
-    const error = await callerScheduleTask().catch((e: unknown) => e);
-    const [section] = scheduleSections(error);
-    expect(section).toContain("callerScheduleTask");
-    expectNoLibraryFrames(section);
+    for (const [caller, call] of [
+      ["callBound", callBound],
+      ["callBypass", callBypass],
+    ] as const) {
+      const [section] = scheduleSections(await call().catch((e: unknown) => e));
+      expect(section).toContain(caller);
+      expectNoLibraryFrames(section);
+    }
   });
 
   test("a schedule nested in a task body appends both locations", async ({ makeLimiter }) => {

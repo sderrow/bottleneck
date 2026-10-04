@@ -115,6 +115,8 @@ export function cleanScheduleStack(raw: string | undefined): string | undefined 
  */
 export type ScheduleStackCapture = {
   holder?: { stack?: string };
+  /** Cut at the base schedule(), for when an override cutoff captured nothing. */
+  fallback?: { stack?: string };
   label: string;
   /** A chained limiter's job: no caller frames, rendered as a "via" label. */
   chained?: boolean;
@@ -150,10 +152,15 @@ export function forwardChain<T>(cb: () => T): T {
   }
 }
 
-/** Capture where a job is scheduled; undefined when `label` is null (disabled). */
+/**
+ * Capture where a job is scheduled; undefined when `label` is null (disabled).
+ * `base` is the library's schedule(); `override` is the limiter's own
+ * `schedule`, which differs when a subclass or instance replaces it.
+ */
 export function captureScheduleLocation(
   label: string | null,
-  defaultCutoff: ScheduleCutoff,
+  base: ScheduleCutoff,
+  override: ScheduleCutoff,
 ): ScheduleStackCapture | undefined {
   const chained = forwardingChain;
   // Consume the flag so a listener scheduling during the forward isn't chained.
@@ -166,12 +173,23 @@ export function captureScheduleLocation(
   }
   try {
     const holder: { stack?: string } = {};
-    if (typeof Error.captureStackTrace === "function") {
-      Error.captureStackTrace(holder, scheduleCutoff ?? defaultCutoff);
-    } else {
+    if (typeof Error.captureStackTrace !== "function") {
       holder.stack = new Error().stack;
+      return { holder, label };
     }
-    return { holder, label };
+    // Cutting at an override drops its wrapper frames too. V8 ignores bound
+    // functions as cutoffs, so those fall back to `base`.
+    const useOverride =
+      scheduleCutoff == null && override !== base && !override.name.startsWith("bound ");
+    Error.captureStackTrace(holder, scheduleCutoff ?? (useOverride ? override : base));
+    if (!useOverride) {
+      return { holder, label };
+    }
+    // An override that isn't on the stack (e.g. `base` called directly)
+    // captures nothing.
+    const fallback: { stack?: string } = {};
+    Error.captureStackTrace(fallback, base);
+    return { holder, fallback, label };
   } catch {
     return undefined;
   }
@@ -232,7 +250,8 @@ export function attachScheduleStack<T>(error: T, capture: ScheduleStackCapture |
     return error;
   }
   try {
-    const frames = cleanScheduleStack(capture.holder?.stack);
+    const frames =
+      cleanScheduleStack(capture.holder?.stack) ?? cleanScheduleStack(capture.fallback?.stack);
     if (frames == null) {
       return error;
     }
