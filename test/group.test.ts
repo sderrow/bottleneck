@@ -2,6 +2,7 @@ import { describe, expect } from "vitest";
 import sleep from "../src/sleep";
 import Bottleneck from "./bottleneck";
 import { useFakeClock } from "./helpers/clock";
+import { defined } from "./helpers/defined";
 import { test, waitForState } from "./helpers/test-api";
 
 useFakeClock();
@@ -19,9 +20,9 @@ describe("Group", () => {
       minTime: 100,
     });
 
-    const results: any[][] = [];
+    const results: number[][] = [];
 
-    const job = async (...result: any[]) => {
+    const job = async (...result: number[]) => {
       results.push(result);
       await sleep(50);
     };
@@ -46,7 +47,7 @@ describe("Group", () => {
       for (const [v] of results) {
         const key = v === 1 || v === 3 || v === 4 ? "A" : v === 5 ? "B" : "C";
         byGroup[key] = byGroup[key] || [];
-        byGroup[key].push(v);
+        byGroup[key].push(defined(v));
       }
       expect(byGroup.A).toStrictEqual([1, 3, 4]);
       expect(byGroup.B).toStrictEqual([5]);
@@ -133,9 +134,9 @@ describe("Group", () => {
     });
     expect(Object.keys(group.limiters)).toStrictEqual([]);
 
-    const results: any[][] = [];
+    const results: unknown[][] = [];
 
-    const job = async (...result: any[]) => {
+    const job = async (...result: unknown[]) => {
       results.push(result);
       await sleep(50);
     };

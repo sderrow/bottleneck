@@ -1,10 +1,18 @@
 import { describe, test, expect, vi } from "vitest";
 import Events from "../src/Events";
+import { wrongType } from "./helpers/wrong-type";
 
 const noop = () => {};
 
 // Events installs on/once/removeAllListeners onto the target instance.
-type EmitterTarget = Record<string, any>;
+type EmitterTarget = {
+  on(name: string, cb: (...args: never[]) => unknown): unknown;
+  once(name: string, cb: (...args: never[]) => unknown): unknown;
+  removeAllListeners(name?: string | null): void;
+};
+
+/** An empty object, typed as the emitter surface `new Events(target)` installs. */
+const emptyTarget = () => wrongType<EmitterTarget>({});
 
 describe("Events", () => {
   test("Should refuse an object that already has an emitter", () => {
@@ -16,7 +24,7 @@ describe("Events", () => {
   });
 
   test("removeAllListeners(name) removes one event, removeAllListeners() removes all", () => {
-    const target: EmitterTarget = {};
+    const target = emptyTarget();
     const events = new Events(target);
     const cb = noop;
     target.on("a", cb);
@@ -31,10 +39,10 @@ describe("Events", () => {
   });
 
   test("A throwing listener triggers the error event and does not break others", async () => {
-    const target: EmitterTarget = {};
+    const target = emptyTarget();
     const events = new Events(target);
-    const onError = vi.fn<(...args: any[]) => void>();
-    const good = vi.fn<(...args: any[]) => string>(() => "ok");
+    const onError = vi.fn<(...args: unknown[]) => void>();
+    const good = vi.fn<(...args: unknown[]) => string>(() => "ok");
     target.on("error", onError);
     target.on("boom", () => {
       throw new Error("listener exploded");
@@ -48,7 +56,7 @@ describe("Events", () => {
   });
 
   test("A throwing error-event listener does not recurse", async () => {
-    const target: EmitterTarget = {};
+    const target = emptyTarget();
     const events = new Events(target);
     target.on("error", () => {
       throw new Error("error handler broke");

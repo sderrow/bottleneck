@@ -21,8 +21,7 @@ describe("node_redis-only", () => {
     const connection = makeConnection({
       Redis,
       clientOptions: buildClientOptions("redis"),
-    }) as any;
-    connection.id = "super-connection";
+    });
     const limiter = makeLimiter({
       minTime: 50,
       connection,
@@ -34,7 +33,7 @@ describe("node_redis-only", () => {
     await h.flushLimiter(limiter);
     expect(h.log).toHaveCallOrder([[1], [2]]);
     expect(h).toHaveFinalCallAt(50);
-    expect((limiter.connection as any).id).toStrictEqual("super-connection");
+    expect(limiter.connection).toBe(connection);
     expect(limiter.datastore).toStrictEqual("redis");
 
     await limiter.disconnect();
@@ -50,8 +49,7 @@ describe("node_redis-only", () => {
     const client = Redis.createClient(buildClientOptions("redis"));
     await client.connect();
 
-    const connection = makeConnection({ client }) as any;
-    connection.id = "super-connection";
+    const connection = makeConnection({ client });
     const limiter = makeLimiter({
       minTime: 50,
       connection,
@@ -64,7 +62,7 @@ describe("node_redis-only", () => {
     expect(h.log).toHaveCallOrder([[1], [2]]);
     expect(h).toHaveFinalCallAt(50);
     expect(limiter.clients().client).toBe(client);
-    expect((limiter.connection as any).id).toStrictEqual("super-connection");
+    expect(limiter.connection).toBe(connection);
     expect(limiter.datastore).toStrictEqual("redis");
 
     await limiter.disconnect();
@@ -90,7 +88,7 @@ describe("node_redis-only", () => {
       connection.ready.catch(() => {});
       let fired = false;
       const limiter = makeLimiter({ connection }, { expectErrors: true });
-      (connection as any).on("error", (_err: unknown) => {
+      connection.on("error", (_err: unknown) => {
         if (fired) return;
         fired = true;
         expect(limiter.datastore).toStrictEqual("redis");

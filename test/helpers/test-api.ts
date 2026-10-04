@@ -5,6 +5,7 @@ import Bottleneck from "../bottleneck";
 import { isFakeClock } from "./clock";
 import { createTaskFns } from "./job-tasks";
 import makeLimiterHelper from "./limiter";
+import { wrongType } from "./wrong-type";
 
 export { waitForState } from "./wait-for-state";
 export { deferred } from "./job-tasks";
@@ -14,7 +15,7 @@ type Group = InstanceType<(typeof Bottleneck)["Group"]>;
 type Connection =
   | InstanceType<(typeof BottleneckBase)["RedisConnection"]>
   | InstanceType<(typeof BottleneckBase)["IORedisConnection"]>;
-type LimiterOptions = Record<string, any>;
+type LimiterOptions = Record<string, unknown>;
 type Disconnectable = { disconnect(flush?: boolean): unknown };
 type Track = <T extends Disconnectable>(resource: T) => T;
 
@@ -51,7 +52,7 @@ function createJobHarness() {
   const start = Date.now();
   const callTimes: number[] = [];
 
-  const record = vi.fn<(_err: unknown, _result: unknown) => void>((_err, _result) => {
+  const record = vi.fn<(_err: unknown, _result: unknown[]) => void>((_err, _result) => {
     callTimes.push(Date.now() - start);
   });
 
@@ -66,7 +67,7 @@ function createJobHarness() {
     return {
       elapsed: Date.now() - start,
       callsDuration: callTimes.length > 0 ? callTimes.at(-1) : null,
-      calls: record.mock.calls.map((call: unknown[], i: number) => {
+      calls: record.mock.calls.map((call, i) => {
         return { err: call[0], result: call[1], time: callTimes[i] };
       }),
     };
@@ -239,7 +240,7 @@ export const test = baseTest.extend<{
         process.env.DATASTORE === "ioredis"
           ? Bottleneck.IORedisConnection
           : Bottleneck.RedisConnection;
-      return track(new Connection(opts as any) as unknown as Connection);
+      return track(new Connection(wrongType(opts)) as unknown as Connection);
     });
   },
   async limiter({ makeLimiter, limiterOptions, limiterMeta }, use) {

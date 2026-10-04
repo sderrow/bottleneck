@@ -1,6 +1,7 @@
 import Redis from "ioredis";
 import ioredisPkg from "ioredis/package.json" with { type: "json" };
 import { describe, expect } from "vitest";
+import { redisStore } from "./helpers/store";
 import { test } from "./helpers/test-api";
 import buildClientOptions from "./redis-client-options";
 
@@ -34,7 +35,7 @@ describe("ioredis-only", () => {
     });
 
     expect(limiter.datastore).toStrictEqual("ioredis");
-    expect((limiter._store as any).connection.client.nodes().length).toBeGreaterThanOrEqual(0);
+    expect(redisStore(limiter).connection.client).toBeInstanceOf(Redis.Cluster);
   });
 
   test("Should connect in Redis Cluster mode with premade client", ({
@@ -55,7 +56,7 @@ describe("ioredis-only", () => {
     });
 
     expect(limiter.datastore).toStrictEqual("ioredis");
-    expect((limiter._store as any).connection.client.nodes().length).toBeGreaterThanOrEqual(0);
+    expect(redisStore(limiter).connection.client).toBeInstanceOf(Redis.Cluster);
   });
 
   test("Should accept existing connections", async ({
@@ -66,8 +67,7 @@ describe("ioredis-only", () => {
     const connection = makeConnection({
       Redis,
       clientOptions: buildClientOptions("ioredis"),
-    }) as any;
-    connection.id = "super-connection";
+    });
     const limiter = makeLimiter({
       minTime: 50,
       connection,
@@ -79,7 +79,7 @@ describe("ioredis-only", () => {
     await h.flushLimiter(limiter);
     expect(h.log).toHaveCallOrder([[1], [2]]);
     expect(h).toHaveFinalCallAt(50);
-    expect((limiter.connection as any).id).toStrictEqual("super-connection");
+    expect(limiter.connection).toBe(connection);
     expect(limiter.datastore).toStrictEqual("ioredis");
 
     await limiter.disconnect();
@@ -94,8 +94,7 @@ describe("ioredis-only", () => {
   }) => {
     const client = new Redis(buildClientOptions("ioredis"));
 
-    const connection = makeConnection({ client }) as any;
-    connection.id = "super-connection";
+    const connection = makeConnection({ client });
     const limiter = makeLimiter({
       minTime: 50,
       connection,
@@ -108,7 +107,7 @@ describe("ioredis-only", () => {
     expect(h.log).toHaveCallOrder([[1], [2]]);
     expect(h).toHaveFinalCallAt(50);
     expect(limiter.clients().client).toBe(client);
-    expect((limiter.connection as any).id).toStrictEqual("super-connection");
+    expect(limiter.connection).toBe(connection);
     expect(limiter.datastore).toStrictEqual("ioredis");
 
     await limiter.disconnect();
@@ -130,7 +129,7 @@ describe("ioredis-only", () => {
       });
       let fired = false;
       const limiter = makeLimiter({ connection });
-      (connection as any).on("error", (_err: unknown) => {
+      connection.on("error", (_err: unknown) => {
         if (fired) return;
         fired = true;
         expect(limiter.datastore).toStrictEqual("ioredis");
@@ -192,8 +191,8 @@ describeResp3("ioredis RESP3", () => {
     // Guard against silently testing RESP2: if this ever fails on an ioredis
     // upgrade, the option name or default protocol changed and these tests
     // are no longer covering the RESP3 path.
-    expect((connection.client as any).options.protocol).toStrictEqual(3);
-    expect((connection.client as any).options.replyMapping).toStrictEqual("resp3");
+    expect(connection.client).toHaveProperty("options.protocol", 3);
+    expect(connection.client).toHaveProperty("options.replyMapping", "resp3");
     const prefix = process.env.BOTTLENECK_TEST_PREFIX;
     const hashKey = `b_${prefix}resp3-hash`;
     const zsetKey = `b_${prefix}resp3-zset`;
@@ -223,7 +222,7 @@ describeResp3("ioredis RESP3", () => {
     await connection.ready;
     // ioredis 5 has no protocol option (RESP2-only); only assert under v6+.
     if (ioredisMajor >= 6) {
-      expect((connection.client as any).options.protocol).toStrictEqual(2);
+      expect(connection.client).toHaveProperty("options.protocol", 2);
     }
     const prefix = process.env.BOTTLENECK_TEST_PREFIX;
     const hashKey = `b_${prefix}resp2-hash`;

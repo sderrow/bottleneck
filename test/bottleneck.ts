@@ -21,7 +21,9 @@ const Bottleneck: BottleneckClass =
 // child limiters created from a "connection-only" Group inherit the 5000ms
 // production default and produce 5-second flakes (see cluster.test.ts:75
 // and similar).
-const isRedisBacked = (options: Record<string, any> | undefined): options is Record<string, any> =>
+const isRedisBacked = (
+  options: Record<string, unknown> | undefined,
+): options is Record<string, unknown> =>
   options != null &&
   typeof options === "object" &&
   (options.datastore === "redis" || options.datastore === "ioredis" || options.connection != null);
@@ -59,9 +61,9 @@ async function makeTestBottleneck(Base: BottleneckClass): Promise<BottleneckClas
   // top-level host/port (defaulting to localhost:6379).
   const buildClientOptions = (await import("./redis-client-options.ts")).default;
 
-  const withRedis = (options: Record<string, any> | undefined) => {
+  const withRedis = (options: Record<string, unknown> | undefined) => {
     if (!isRedisBacked(options)) return options;
-    const next = { ...options } as Record<string, any>;
+    const next = { ...options };
     // Only inject the Redis library / clientOptions when the test isn't
     // bringing its own pre-built client or connection. Both of those carry
     // their own clientOptions and the Bottleneck constructor would reject
@@ -69,7 +71,7 @@ async function makeTestBottleneck(Base: BottleneckClass): Promise<BottleneckClas
     if (options.connection == null && options.client == null) {
       if (next.Redis == null) next.Redis = Redis;
       if (next.clientOptions == null) {
-        next.clientOptions = buildClientOptions(next.datastore);
+        next.clientOptions = buildClientOptions(String(next.datastore));
       }
     }
     // The default `heartbeatInterval` for Redis-backed limiters is 5000ms,
@@ -94,10 +96,10 @@ async function makeTestBottleneck(Base: BottleneckClass): Promise<BottleneckClas
     // Group.key() builds child ids as `${groupId}-${key}`, so child limiters
     // arrive here pre-prefixed. Re-prefixing them would break Group.clusterKeys
     // (which SCANs `b_${this.id}-*`).
-    if (options.id != null && options.id.startsWith(FILE_PREFIX)) {
+    if (typeof options.id === "string" && options.id.startsWith(FILE_PREFIX)) {
       next.id = options.id;
     } else {
-      next.id = FILE_PREFIX + (options.id ?? "no-id");
+      next.id = FILE_PREFIX + String(options.id ?? "no-id");
     }
     return next;
   };
@@ -108,7 +110,7 @@ async function makeTestBottleneck(Base: BottleneckClass): Promise<BottleneckClas
     static override [Symbol.hasInstance](instance: unknown) {
       return instance instanceof Base;
     }
-    constructor(options?: Record<string, any>) {
+    constructor(options?: Record<string, unknown>) {
       super(withRedis(options));
     }
   }
@@ -117,7 +119,7 @@ async function makeTestBottleneck(Base: BottleneckClass): Promise<BottleneckClas
     static override [Symbol.hasInstance](instance: unknown) {
       return instance instanceof Base.Group;
     }
-    constructor(options?: Record<string, any>) {
+    constructor(options?: Record<string, unknown>) {
       super(withRedis(options));
       // Group.key() instantiates child limiters via `this.Bottleneck`, which
       // the parent Group constructor sets to the library's Bottleneck class.

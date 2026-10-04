@@ -76,14 +76,5 @@
         ]
       }
     ]
-  },
-  "overrides": [
-    {
-      "files": ["test/**"],
-      "rules": {
-        // Temporary: test `any`s are converted in a follow-up commit.
-        "typescript/no-explicit-any": "off"
-      }
-    }
-  ]
+  }
 }
