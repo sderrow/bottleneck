@@ -314,8 +314,16 @@ describe("Async context", () => {
         return (super.schedule as (...a: unknown[]) => Promise<unknown>)(...args);
       }
     }
-    const subclassed = track(new SubclassLimiter({ id: "override-subclass", datastore: "local" }));
-
+    // Async overrides run synchronously until their first await, so the
+    // override is still on the stack when the base schedule() captures.
+    class AsyncSubclassLimiter extends Bottleneck {
+      override async schedule(...args: unknown[]): Promise<unknown> {
+        return this.scheduleWithOpts(args);
+      }
+      scheduleWithOpts(args: unknown[]): Promise<unknown> {
+        return (super.schedule as (...a: unknown[]) => Promise<unknown>)(...args);
+      }
+    }
     const arrowPatched = track(new Bottleneck({ id: "override-arrow", datastore: "local" }));
     const original = Bottleneck.prototype.schedule as (...a: unknown[]) => Promise<unknown>;
     function scheduleWithOpts(args: unknown[]): Promise<unknown> {
@@ -324,7 +332,12 @@ describe("Async context", () => {
     (arrowPatched as { schedule: unknown }).schedule = (...args: unknown[]) =>
       scheduleWithOpts(args);
 
-    for (const limiter of [subclassed, arrowPatched]) {
+    const limiters = [
+      track(new SubclassLimiter({ id: "override-subclass", datastore: "local" })),
+      track(new AsyncSubclassLimiter({ id: "override-async", datastore: "local" })),
+      arrowPatched,
+    ];
+    for (const limiter of limiters) {
       function callOverride(): Promise<unknown> {
         return (limiter.schedule as (...a: unknown[]) => Promise<unknown>)(() => {
           throw new Error("boom-override");
@@ -335,11 +348,21 @@ describe("Async context", () => {
       expect(section).not.toContain("scheduleWithOpts");
       expectNoLibraryFrames(section);
     }
+
+    // Bypassing the override: its cutoff isn't on the stack, so the first
+    // capture is empty and the base-cut fallback supplies the section.
+    function callBypass(): Promise<unknown> {
+      return original.call(arrowPatched, () => {
+        throw new Error("boom-bypass");
+      });
+    }
+    const [section] = scheduleSections(await callBypass().catch((e: unknown) => e));
+    expect(section).toContain("callBypass");
+    expectNoLibraryFrames(section);
   });
 
-  test("bound overrides and bypassed overrides still capture the caller", async ({ track }) => {
-    // V8 ignores bound functions as cutoffs, so their wrapper frames remain;
-    // calling the base schedule() past an override uses the fallback capture.
+  test("a bound schedule override keeps its wrapper frames", async ({ track }) => {
+    // V8 can't cut at a bound function, so the base cutoff is used instead.
     const bound = track(new Bottleneck({ id: "override-bound", datastore: "local" }));
     const original = Bottleneck.prototype.schedule as (...a: unknown[]) => Promise<unknown>;
     (bound as { schedule: unknown }).schedule = function scheduleWithOpts(
@@ -354,20 +377,11 @@ describe("Async context", () => {
         throw new Error("boom-bound");
       });
     }
-    function callBypass(): Promise<unknown> {
-      return original.call(bound, () => {
-        throw new Error("boom-bypass");
-      });
-    }
 
-    for (const [caller, call] of [
-      ["callBound", callBound],
-      ["callBypass", callBypass],
-    ] as const) {
-      const [section] = scheduleSections(await call().catch((e: unknown) => e));
-      expect(section).toContain(caller);
-      expectNoLibraryFrames(section);
-    }
+    const [section] = scheduleSections(await callBound().catch((e: unknown) => e));
+    expect(section).toContain("callBound");
+    expect(section).toContain("scheduleWithOpts");
+    expectNoLibraryFrames(section);
   });
 
   test("a schedule nested in a task body appends both locations", async ({ makeLimiter }) => {

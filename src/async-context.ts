@@ -177,8 +177,9 @@ export function captureScheduleLocation(
       holder.stack = new Error().stack;
       return { holder, label };
     }
-    // Cutting at an override drops its wrapper frames too. V8 ignores bound
-    // functions as cutoffs, so those fall back to `base`.
+    // Cutting at an override drops its wrapper frames too. V8 doesn't cut at
+    // a bound function: the capture would start inside bottleneck and isn't
+    // empty, so the fallback can't catch it. Bound overrides use `base`.
     const useOverride =
       scheduleCutoff == null && override !== base && !override.name.startsWith("bound ");
     Error.captureStackTrace(holder, scheduleCutoff ?? (useOverride ? override : base));
