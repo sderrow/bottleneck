@@ -410,8 +410,8 @@ class Bottleneck {
 
     const waitForExecuting = (at: number): Promise<void> => {
       const finished = (): boolean => {
-        // Jobs in every status before DONE (RECEIVED, QUEUED, RUNNING, EXECUTING).
-        const total = this._states.counts.slice(0, 4).reduce((a, b) => a + b, 0);
+        const [received = 0, queued = 0, running = 0, executing = 0] = this._states.counts;
+        const total = received + queued + running + executing;
         return total === at;
       };
       return new Promise((resolve) => {
