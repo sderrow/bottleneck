@@ -1,5 +1,25 @@
+// The frame runTask adds. Only the sync stack carries it: after an await in
+// the task, the capture ends in `at async Job.doExecute` instead.
+const TASK_RUNNER_FRAME = /^\s*at (?:\S+\.)?__bottleneckRunTask\b/;
+
+// A method, since minifiers keep property names but rename functions.
+const taskRunner = {
+  __bottleneckRunTask(this: unknown, task: (...args: never[]) => unknown, args: never[]): unknown {
+    return task.apply(this, args);
+  },
+};
+
 /**
- * Strip the "Error" headline from a captured stack, leaving only the frames.
+ * Call `task`. Its frame marks where library frames begin in the schedule
+ * stack of a job scheduled from inside the task. Pass it straight to
+ * `runInAsyncScope` so it replaces that call's wrapper frame instead of
+ * adding one.
+ */
+export const runTask = taskRunner.__bottleneckRunTask;
+
+/**
+ * Strip the "Error" headline from a captured stack, leaving only the frames,
+ * and the library frames below a task that scheduled the job.
  */
 function cleanScheduleStack(raw: string | undefined): string | undefined {
   if (typeof raw !== "string") {
@@ -14,6 +34,12 @@ function cleanScheduleStack(raw: string | undefined): string | undefined {
   }
   if (lines.length === 0) {
     return undefined;
+  }
+  // Scheduled from inside a task: the frames from the task runner down are
+  // the library running that task, which the next section stands in for.
+  const runner = lines.findIndex((line) => TASK_RUNNER_FRAME.test(line));
+  if (runner > 0) {
+    lines.length = runner;
   }
   return lines.join("\n");
 }

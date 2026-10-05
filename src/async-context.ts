@@ -1,26 +1,10 @@
 import { AsyncResource } from "node:async_hooks";
 
 /**
- * Bind a scheduled task to the async context (e.g. AsyncLocalStorage state)
- * active when schedule() is called, so the task observes that context when it
- * eventually runs — no matter which tick, timer, or queued drain executes it.
- *
- * Falls back to the unbound task outside Node (the light/browser build stubs
- * this module out entirely).
- */
-export function bindTask<T extends (...args: never[]) => unknown>(task: T): T {
-  try {
-    return AsyncResource.bind(task as T & ((...args: unknown[]) => unknown));
-  } catch {
-    return task;
-  }
-}
-
-/**
  * Capture the async context (e.g. AsyncLocalStorage state) active right now
  * as a resource that can be re-entered later from a foreign async context.
- * Used for the chained limiter's schedule() path in `Job.doExecute`, which
- * runs from this job's timer context instead of the schedule-time context.
+ * `Job` captures one at schedule() and runs its task inside it, so the task
+ * observes that context no matter which tick, timer, or drain executes it.
  *
  * Returns undefined outside Node (the light/browser build shims
  * `node:async_hooks` without an AsyncResource constructor).

@@ -47,8 +47,8 @@ const excludeClustering: TsdownPlugin = {
 };
 
 // `src/async-context.ts` statically imports `node:async_hooks`, which has no
-// browser equivalent. The light build redirects that import to a shim whose
-// `bind` is the identity function, so tasks simply run unbound.
+// browser equivalent. The light build redirects that import to a shim with no
+// AsyncResource constructor, so tasks simply run without async context.
 const shimAsyncHooks: TsdownPlugin = {
   name: "shim-async-hooks",
   resolveId(id) {
@@ -57,7 +57,7 @@ const shimAsyncHooks: TsdownPlugin = {
   load(id) {
     if (id === "virtual:async-hooks-shim") {
       return {
-        code: "export const AsyncResource = { bind: (fn) => fn };",
+        code: "export const AsyncResource = {};",
         moduleType: "js",
       };
     }
