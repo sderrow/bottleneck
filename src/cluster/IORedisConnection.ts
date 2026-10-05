@@ -143,12 +143,7 @@ class IORedisConnection {
   /** @internal */
   __runScript__(name: Scripts.ScriptName, id: string, args: unknown[]): Promise<unknown> {
     const keys = Scripts.keys(name, id);
-    // defineCommand() installs each script as a method named after it.
-    const command = (this.client as unknown as Record<string, (...a: unknown[]) => unknown>)[name];
-    if (typeof command !== "function") {
-      throw new BottleneckError(`Redis script ${name} is not defined on the ioredis client`);
-    }
-    return command.call(this.client, keys.length, ...keys, ...args) as Promise<unknown>;
+    return this.client[name](keys.length, ...keys, ...args);
   }
 
   /** @internal */

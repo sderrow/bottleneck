@@ -6,6 +6,8 @@
  * supported version has are required; methods that vary by version are not.
  */
 
+import type { ScriptName } from "./Scripts";
+
 type BaseClient = {
   on(event: string, cb: (...args: any[]) => void): unknown;
   removeAllListeners?(event?: string): unknown;
@@ -27,6 +29,15 @@ export type NodeRedisClient = BaseClient &
     subscribe(channel: string, cb: (message: string) => void): unknown;
   };
 
+/**
+ * Installed on ioredis clients by `defineCommand()` in
+ * IORedisConnection._loadScripts, which runs before the connection is ready.
+ */
+type IORedisScriptCommands = Record<
+  ScriptName,
+  (numKeys: number, ...args: unknown[]) => Promise<unknown>
+>;
+
 export type IORedisClient = BaseClient & {
   status: string;
   once(event: string, cb: (...args: any[]) => void): unknown;
@@ -41,7 +52,7 @@ export type IORedisClient = BaseClient & {
   // ioredis Cluster clients only
   startupNodes?: unknown;
   options?: unknown;
-};
+} & IORedisScriptCommands;
 
 export type RedisClients<C extends BaseClient = NodeRedisClient | IORedisClient> = {
   client: C;
