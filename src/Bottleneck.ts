@@ -1,7 +1,6 @@
 import type {
   BottleneckEvents,
   BottleneckOptions,
-  ClientsList,
   Counts,
   EventInfo,
   JobDefaults,
@@ -18,6 +17,7 @@ import BottleneckError from "./BottleneckError";
 import IORedisConnection from "./cluster/IORedisConnection";
 import RedisConnection from "./cluster/RedisConnection";
 import RedisDatastore from "./cluster/RedisDatastore";
+import { validateDatastoreOptions } from "./datastore-options";
 import Events from "./Events";
 import Group from "./Group";
 import Job from "./Job";
@@ -102,15 +102,11 @@ class Bottleneck {
     timeout: null as number | null,
     heartbeatInterval: 5000,
     clientTimeout: 10000,
-    Redis: null,
-    clientOptions: {} as object,
-    clusterNodes: null as unknown,
     clearDatastore: false,
     connection: null,
   };
   /** @internal */
   instanceDefaults = {
-    datastore: "local",
     connection: null,
     id: "<no-id>",
     rejectOnDrop: true,
@@ -126,8 +122,9 @@ class Bottleneck {
     dropErrorMessage: "This limiter has been stopped.",
   };
 
-  // Populated from instanceDefaults via parser.load in the constructor.
+  /** `"local"`, or the connection's `"redis"` / `"ioredis"`. */
   datastore: string = "local";
+  // Populated from instanceDefaults via parser.load in the constructor.
   connection: RedisConnection | IORedisConnection | null = null;
   id: string = "<no-id>";
   /** @internal */
@@ -186,14 +183,12 @@ class Bottleneck {
     this._registerLock = new Sync("register");
     const storeOptions = load(options, this.storeDefaults, {});
 
-    if (this.datastore === "redis" || this.datastore === "ioredis" || this.connection != null) {
+    if (this.connection != null) {
       const opts = load(options, this.redisStoreDefaults, {});
       this._store = new RedisDatastore(this, storeOptions, opts);
-    } else if (this.datastore === "local") {
+    } else {
       const opts = load(options, this.localStoreDefaults, {});
       this._store = new LocalDatastore(this, storeOptions, opts);
-    } else {
-      throw new BottleneckError(`Invalid datastore type: ${this.datastore}`, "INVALID_DATASTORE");
     }
 
     this._queues.on("leftzero", () => this._store.heartbeat?.ref?.());
@@ -208,14 +203,12 @@ class Bottleneck {
         "INVALID_ARGUMENTS",
       );
     }
+    validateDatastoreOptions(options);
   }
 
-  ready(): Promise<unknown> {
-    return this._store.ready;
-  }
-
-  clients(): ClientsList {
-    return this._store.clients as ClientsList;
+  /** Resolves once the limiter is connected to Redis (immediately for a local limiter). */
+  async ready(): Promise<void> {
+    await this._store.ready;
   }
 
   channel(): string {

@@ -1,10 +1,17 @@
 import { test as baseTest, expect as vitestExpect, vi } from "vitest";
 import type BottleneckBase from "../../src/Bottleneck";
-import type { BottleneckOptions, JobOptions } from "../../src/types";
+import type { IORedisClient, NodeRedisClient } from "../../src/cluster/redis-types";
+import type {
+  BottleneckOptions,
+  IORedisConnectionOptions,
+  JobOptions,
+  RedisConnectionOptions,
+} from "../../src/types";
 import Bottleneck from "../bottleneck";
+import { closeTestClient, makeTestClient } from "./clients";
 import { isFakeClock } from "./clock";
 import { createTaskFns } from "./job-tasks";
-import makeLimiterHelper, { defaultConnectionOptions } from "./limiter";
+import makeLimiterHelper from "./limiter";
 import { wrongType } from "./wrong-type";
 
 export { waitForState } from "./wait-for-state";
@@ -24,13 +31,19 @@ export type JobHarness = ReturnType<typeof createJobHarness>;
 
 type MakeLimiter = (opts?: LimiterOptions, meta?: { expectErrors?: boolean }) => Limiter;
 type MakeGroup = (opts?: LimiterOptions) => Group;
-type MakeConnection = (opts?: LimiterOptions) => Connection;
+type Client = NodeRedisClient | IORedisClient;
+type MakeClient = (
+  clientOptions?: Record<string, unknown>,
+  meta?: { expectErrors?: boolean },
+) => Client;
+type MakeConnection = (opts?: { client: Client; subscriber?: Client }) => Connection;
 
 export interface TestFixtures {
   harness: JobHarness;
   track: Track;
   makeLimiter: MakeLimiter;
   makeGroup: MakeGroup;
+  makeClient: MakeClient;
   makeConnection: MakeConnection;
   limiter: Limiter;
   limiterOptions: LimiterOptions;
@@ -198,6 +211,7 @@ export const test = baseTest.extend<{
   track: <T extends Disconnectable>(resource: T) => T;
   makeLimiter: MakeLimiter;
   makeGroup: MakeGroup;
+  makeClient: MakeClient;
   makeConnection: MakeConnection;
   limiter: Limiter;
   limiterOptions: Record<string, unknown>;
@@ -234,15 +248,23 @@ export const test = baseTest.extend<{
       track(new Bottleneck.Group(opts ?? {}) as unknown as Group),
     );
   },
-  async makeConnection({ track }, use) {
-    await use((opts?: LimiterOptions) => {
-      const Connection =
+  async makeClient({ track }, use) {
+    await use((clientOptions, meta) => {
+      const client = makeTestClient(clientOptions, meta);
+      track({ disconnect: () => closeTestClient(client) });
+      return client;
+    });
+  },
+  async makeConnection({ track, makeClient }, use) {
+    await use((opts) => {
+      // The fixture picks the connection class for the current datastore, so
+      // the client's type isn't tied to it here.
+      const options = opts ?? { client: makeClient() };
+      const connection =
         process.env.DATASTORE === "ioredis"
-          ? Bottleneck.IORedisConnection
-          : Bottleneck.RedisConnection;
-      return track(
-        new Connection(wrongType(opts ?? defaultConnectionOptions())) as unknown as Connection,
-      );
+          ? new Bottleneck.IORedisConnection(wrongType<IORedisConnectionOptions>(options))
+          : new Bottleneck.RedisConnection(wrongType<RedisConnectionOptions>(options));
+      return track(connection);
     });
   },
   async limiter({ makeLimiter, limiterOptions, limiterMeta }, use) {

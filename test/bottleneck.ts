@@ -14,13 +14,14 @@ const distPath: string | null =
 const Bottleneck: BottleneckClass =
   distPath == null ? SourceBottleneck : (await import(/* @vite-ignore */ distPath)).default;
 
-// A limiter (or group) is Redis-backed if its options either name a Redis
-// datastore explicitly OR provide a pre-built `connection` (in which case
-// the Bottleneck constructor infers the datastore from the connection).
-// Both paths must get the test heartbeat override applied, otherwise
-// child limiters created from a "connection-only" Group inherit the 5000ms
-// production default and produce 5-second flakes (see cluster.test.ts:75
-// and similar).
+// Test-harness convention: `datastore: "redis" | "ioredis"` (and optionally
+// `clientOptions`) asks for a Redis-backed limiter or Group with its own test
+// client and connection, which the wrapper builds, owns, and closes on
+// disconnect(). The product itself only takes `connection`. Options with a
+// `connection` are Redis-backed too. Both paths must get the test heartbeat
+// override applied, otherwise child limiters created from a
+// "connection-only" Group inherit the 5000ms production default and produce
+// 5-second flakes (see cluster.test.ts:75 and similar).
 const isRedisBacked = (
   options: Record<string, unknown> | undefined,
 ): options is Record<string, unknown> =>
@@ -31,10 +32,9 @@ const isRedisBacked = (
 const usingRedis = process.env.DATASTORE === "redis" || process.env.DATASTORE === "ioredis";
 
 async function makeTestBottleneck(Base: BottleneckClass): Promise<BottleneckClass> {
-  const Redis =
-    process.env.DATASTORE === "redis"
-      ? (await import("redis")).default
-      : (await import("ioredis")).default;
+  const { closeTestClient, makeTestClient } = await import("./helpers/clients.ts");
+  type TestClient = ReturnType<typeof makeTestClient>;
+  type Owned = { client: TestClient; connection: { disconnect(flush?: boolean): Promise<void> } };
 
   // One prefix per fork. Every test limiter's `id` is namespaced with this so
   // workers running in parallel against the single shared Redis (started by
@@ -50,29 +50,38 @@ async function makeTestBottleneck(Base: BottleneckClass): Promise<BottleneckClas
   }
   const FILE_PREFIX = process.env.BOTTLENECK_TEST_PREFIX;
 
-  // Tests construct limiters and Groups directly via `new Bottleneck({ datastore: ... })`
-  // without threading `Redis` or `clientOptions` through every call site. We subclass
-  // here to inject both. clientOptions is critical — without it, ioredis/node-redis
-  // default to localhost:6379, which can silently point at a different Redis than the
-  // one the test harness provisioned (e.g. a leftover Docker container, dev server, or
-  // host Redis), producing tests that "pass" by accidentally writing to two databases.
+  // The test client's clientOptions default to buildClientOptions(datastore):
+  // without them, ioredis/node-redis default to localhost:6379, which can
+  // silently point at a different Redis than the one the test harness
+  // provisioned (e.g. a leftover Docker container, dev server, or host Redis),
+  // producing tests that "pass" by accidentally writing to two databases.
   // The shape is datastore-specific: ioredis accepts flat { host, port }, but
   // node-redis v4/v5 requires { socket: { host, port } } and silently ignores
   // top-level host/port (defaulting to localhost:6379).
   const buildClientOptions = (await import("./redis-client-options.ts")).default;
 
+  const ownConnection = (datastore: unknown, clientOptions: unknown): Owned => {
+    const options =
+      (clientOptions as Record<string, unknown> | undefined) ??
+      buildClientOptions(String(datastore));
+    // The client's errors surface through the limiter (failed commands, and
+    // the connection's subscriber errors), so the harness client stays quiet.
+    const client = makeTestClient(options, { expectErrors: true, datastore: String(datastore) });
+    // Only ioredis clients have a `status`.
+    const connection =
+      "status" in client
+        ? new Base.IORedisConnection({ client })
+        : new Base.RedisConnection({ client });
+    return { client, connection };
+  };
+
   const withRedis = (options: Record<string, unknown> | undefined) => {
-    if (!isRedisBacked(options)) return options;
-    const next = { ...options };
-    // Only inject the Redis library / clientOptions when the test isn't
-    // bringing its own pre-built client or connection. Both of those carry
-    // their own clientOptions and the Bottleneck constructor would reject
-    // duplicates.
-    if (options.connection == null && options.client == null) {
-      if (next.Redis == null) next.Redis = Redis;
-      if (next.clientOptions == null) {
-        next.clientOptions = buildClientOptions(String(next.datastore));
-      }
+    if (!isRedisBacked(options)) return { options, owned: null };
+    const { datastore, clientOptions, ...next } = options;
+    let owned: Owned | null = null;
+    if (next.connection == null) {
+      owned = ownConnection(datastore, clientOptions);
+      next.connection = owned.connection;
     }
     // The default `heartbeatInterval` for Redis-backed limiters is 5000ms,
     // which bounds cross-limiter capacity-message recovery: when a
@@ -101,7 +110,13 @@ async function makeTestBottleneck(Base: BottleneckClass): Promise<BottleneckClas
     } else {
       next.id = FILE_PREFIX + String(options.id ?? "no-id");
     }
-    return next;
+    return { options: next, owned };
+  };
+
+  const closeOwned = async (owned: Owned | null, flush?: boolean) => {
+    if (owned == null) return;
+    await owned.connection.disconnect(flush);
+    await closeTestClient(owned.client);
   };
 
   // `Group.limiters()` returns instances of the real `Bottleneck`, so we override
@@ -110,8 +125,16 @@ async function makeTestBottleneck(Base: BottleneckClass): Promise<BottleneckClas
     static override [Symbol.hasInstance](instance: unknown) {
       return instance instanceof Base;
     }
+    #owned: Owned | null;
     constructor(options?: Record<string, unknown>) {
-      super(withRedis(options));
+      const { options: next, owned } = withRedis(options);
+      super(next);
+      this.#owned = owned;
+    }
+    override async disconnect(flush?: boolean): Promise<void> {
+      await super.disconnect(flush);
+      await closeOwned(this.#owned, flush);
+      this.#owned = null;
     }
   }
 
@@ -119,8 +142,11 @@ async function makeTestBottleneck(Base: BottleneckClass): Promise<BottleneckClas
     static override [Symbol.hasInstance](instance: unknown) {
       return instance instanceof Base.Group;
     }
+    #owned: Owned | null;
     constructor(options?: Record<string, unknown>) {
-      super(withRedis(options));
+      const { options: next, owned } = withRedis(options);
+      super(next);
+      this.#owned = owned;
       // Group.key() instantiates child limiters via `this.Bottleneck`, which
       // the parent Group constructor sets to the library's Bottleneck class.
       // That bypasses our test-wrapper's heartbeatInterval injection, so
@@ -128,6 +154,11 @@ async function makeTestBottleneck(Base: BottleneckClass): Promise<BottleneckClas
       // produce the exact 5-second flakes we're trying to eliminate. Pointing
       // it at TestBottleneck makes child limiters inherit the test wrapper.
       this.Bottleneck = TestBottleneck;
+    }
+    override async disconnect(flush?: boolean): Promise<void> {
+      await super.disconnect(flush);
+      await closeOwned(this.#owned, flush);
+      this.#owned = null;
     }
   };
 

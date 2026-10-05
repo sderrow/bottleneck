@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import lua from "./lua/index";
 
 const headers: Record<string, string> = {
@@ -159,4 +160,40 @@ export const payload = (name: ScriptName): string => {
       template.code,
     )
     .join("\n");
+};
+
+const shas = new Map<ScriptName, string>();
+
+/** The SHA1 Redis assigns `name`'s script, computed locally (no SCRIPT LOAD). */
+export const sha = (name: ScriptName): string => {
+  let digest = shas.get(name);
+  if (digest == null) {
+    digest = createHash("sha1").update(payload(name)).digest("hex");
+    shas.set(name, digest);
+  }
+  return digest;
+};
+
+/** Redis arguments are strings; null/undefined become "" (as ioredis does). */
+export const stringifyArgs = (args: unknown[]): string[] =>
+  args.map((a) => (a == null ? "" : typeof a === "string" ? a : String(a)));
+
+const isNoScript = (e: unknown) => e instanceof Error && e.message.startsWith("NOSCRIPT");
+
+/**
+ * Run `name` by its SHA, falling back to sending the full script when the
+ * server doesn't have it cached yet (first use, SCRIPT FLUSH, a restart, or
+ * another node of a Cluster). EVAL also caches it, so later calls hit EVALSHA.
+ */
+export const run = async (
+  name: ScriptName,
+  evalsha: (sha: string) => Promise<unknown>,
+  evaluate: (script: string) => Promise<unknown>,
+): Promise<unknown> => {
+  try {
+    return await evalsha(sha(name));
+  } catch (e) {
+    if (isNoScript(e)) return evaluate(payload(name));
+    throw e;
+  }
 };

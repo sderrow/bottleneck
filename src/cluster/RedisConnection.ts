@@ -1,9 +1,9 @@
 import type Bottleneck from "../Bottleneck";
 import type { RedisConnectionOptions } from "../types";
-import type { NodeRedisClient, NodeRedisLib, RedisClients } from "./redis-types";
+import type { NodeRedisClient, RedisClients } from "./redis-types";
+import { runDetached } from "../async-context";
 import BottleneckError from "../BottleneckError";
 import Events from "../Events";
-import { load } from "../parser";
 import { normalizeReply } from "./normalizeReply";
 import * as Scripts from "./Scripts";
 
@@ -18,23 +18,13 @@ const safe = async (run: () => unknown): Promise<undefined> => {
     return undefined;
   }
 };
+const noop = () => {};
 
-const connectIfNeeded = async (c: NodeRedisClient) => {
-  if (c.isOpen === false) {
-    await c.connect();
-  }
-};
-
-const stringifyArgs = (args: unknown[]): string[] =>
-  args.map((a) => (a == null ? "" : typeof a === "string" ? a : String(a)));
-
-class RedisConnection {
-  /** @internal */
-  Redis: NodeRedisLib | null;
-  /** @internal */
-  clientOptions: object;
-  /** @internal */
-  client: NodeRedisClient;
+class RedisConnection<C extends NodeRedisClient = NodeRedisClient> {
+  /** The client passed in. The connection only sends commands on it. */
+  readonly client: C;
+  /** The pub/sub client: `options.subscriber`, or a `client.duplicate()` the connection owns. */
+  readonly subscriber: C;
   /** @internal */
   Events: Events;
   /** @internal */
@@ -42,12 +32,12 @@ class RedisConnection {
   /** @internal */
   terminated = false;
   /** @internal */
-  shas: Partial<Record<Scripts.ScriptName, string>> = {};
-  /** @internal */
-  subscriber: NodeRedisClient;
-  /** @internal */
   limiters: Record<string, Bottleneck> = {};
-  ready: Promise<RedisClients<NodeRedisClient>>;
+  /** @internal Limiters using this connection, which receive its subscriber's errors. */
+  instances = new Set<Bottleneck>();
+  /** @internal Whether the connection duplicated (and so connects and closes) its subscriber. */
+  ownsSubscriber: boolean;
+  ready: Promise<RedisClients<C>>;
 
   // Installed on the instance by Events (see Events constructor).
   declare on: {
@@ -60,108 +50,73 @@ class RedisConnection {
   };
   declare removeAllListeners: (name?: string | null) => void;
 
-  constructor(options?: RedisConnectionOptions) {
-    const opts = load(options ?? {}, this.defaults);
-    this.Redis = opts.Redis;
-    this.clientOptions = opts.clientOptions;
-
-    const client = opts.client ?? opts.Redis?.createClient(opts.clientOptions);
+  constructor(options: RedisConnectionOptions<C>) {
+    const { client, subscriber }: Partial<RedisConnectionOptions<C>> = options ?? {};
     if (client == null) {
       throw new BottleneckError(
-        "Bottleneck cluster mode requires a `Redis` library reference or a pre-built `client`. " +
-          "Pass it explicitly: `new Bottleneck({ datastore: 'redis', Redis: require('redis'), clientOptions })`.",
+        "RedisConnection requires a node-redis `client`: `new RedisConnection({ client })`.",
         "MISSING_CLIENT",
       );
     }
+    for (const c of [client, subscriber]) {
+      if (c?.isOpen === false) {
+        throw new BottleneckError(
+          "RedisConnection requires a connected node-redis client: call `client.connect()` first.",
+          "CLIENT_NOT_OPEN",
+        );
+      }
+    }
 
-    this.Events = opts.Events ?? new Events(this);
-    this.terminated = false;
-
+    this.Events = new Events(this);
     this.client = client;
-    this.subscriber = this.client.duplicate();
-    this.limiters = {};
+    this.ownsSubscriber = subscriber == null;
+    // Sockets the connection creates must not capture the constructing
+    // caller's async context: pub/sub-driven work would otherwise run (and
+    // trace) inside it for the connection's whole lifetime.
+    this.subscriber = subscriber ?? runDetached(() => client.duplicate() as C);
 
-    this.ready = this._initReady();
+    this.ready = runDetached(() => this._initReady());
     // Stored init promise: consumers await `ready` lazily, so suppress the
     // unhandled-rejection that would fire before anyone attaches a handler.
     this.ready.catch(() => {});
   }
 
   /** @internal */
-  defaults: {
-    Redis: NodeRedisLib | null;
-    clientOptions: object;
-    client: NodeRedisClient | null;
-    Events: Events | null;
-  } = {
-    Redis: null,
-    clientOptions: {},
-    client: null,
-    Events: null,
+  _onSubscriberError = (e: unknown): void => {
+    if (this.terminated) return;
+    this.Events.trigger("error", e);
+    for (const instance of this.instances) {
+      instance.Events.trigger("error", e);
+    }
   };
 
   /** @internal */
-  async _initReady() {
-    await Promise.all([this._setup(this.client, false), this._setup(this.subscriber, true)]);
-    await this._loadScripts();
-    return { client: this.client, subscriber: this.subscriber };
-  }
-
-  /** @internal */
-  async _setup(client: NodeRedisClient, _sub: boolean): Promise<void> {
-    client.setMaxListeners?.(0);
-    client.on("error", (e: unknown) => {
-      if (!this.terminated) {
-        this.Events.trigger("error", e);
+  async _initReady(): Promise<RedisClients<C>> {
+    if (this.ownsSubscriber) {
+      this.subscriber.setMaxListeners?.(0);
+      this.subscriber.on("error", this._onSubscriberError);
+      if (this.subscriber.isOpen === false) {
+        await this.subscriber.connect();
       }
-    });
-    await connectIfNeeded(client);
-  }
-
-  /** @internal */
-  async _loadScript(name: Scripts.ScriptName): Promise<string> {
-    const sha = await this.client.scriptLoad(Scripts.payload(name));
-    this.shas[name] = sha;
-    return sha;
-  }
-
-  /** @internal */
-  _loadScripts(): Promise<unknown[]> {
-    return Promise.all(
-      Scripts.names.map(async (k) => {
-        try {
-          return await this._loadScript(k);
-        } catch (e) {
-          if (!this.terminated) throw e;
-        }
-      }),
-    );
+    }
+    return { client: this.client, subscriber: this.subscriber };
   }
 
   /** @internal */
   async __runCommand__(cmd: unknown[]): Promise<unknown> {
     await this.ready;
-    const reply = await this.client.sendCommand(stringifyArgs(cmd));
+    const reply = await this.client.sendCommand(Scripts.stringifyArgs(cmd));
     return normalizeReply(cmd, reply);
   }
 
   /** @internal */
-  async __runScript__(name: Scripts.ScriptName, id: string, args: unknown[]): Promise<unknown> {
-    const keys = Scripts.keys(name, id);
-    const stringArgs = stringifyArgs(args);
-    try {
-      const sha = this.shas[name] ?? (await this._loadScript(name));
-      return await this.client.evalSha(sha, { keys, arguments: stringArgs });
-    } catch (e) {
-      if (
-        typeof (e as Error)?.message === "string" &&
-        (e as Error).message.startsWith("NOSCRIPT")
-      ) {
-        const sha = await this._loadScript(name);
-        return await this.client.evalSha(sha, { keys, arguments: stringArgs });
-      }
-      throw e;
-    }
+  __runScript__(name: Scripts.ScriptName, id: string, args: unknown[]): Promise<unknown> {
+    const options = { keys: Scripts.keys(name, id), arguments: Scripts.stringifyArgs(args) };
+    return Scripts.run(
+      name,
+      (sha) => this.client.evalSha(sha, options),
+      (script) => this.client.eval(script, options),
+    );
   }
 
   /** @internal */
@@ -184,37 +139,40 @@ class RedisConnection {
   async __removeLimiter__(instance: Bottleneck): Promise<void> {
     await Promise.all(
       [instance.channel(), instance.channel_client()].map(async (channel) => {
-        if (!this.terminated) {
-          await this.subscriber.unsubscribe(channel);
-        }
+        // Only release channels this limiter holds: one whose setup failed
+        // never subscribed (unsubscribing on its dead subscriber would never
+        // settle), and a later limiter with the same id may own `channel()`.
+        if (this.limiters[channel] !== instance) return;
         delete this.limiters[channel];
+        if (this.terminated) return;
+        try {
+          await this.subscriber.unsubscribe(channel);
+        } catch (e) {
+          // Closing the connection mid-UNSUBSCRIBE releases the channel anyway.
+          if (!this.terminated) throw e;
+        }
       }),
     );
   }
 
+  /**
+   * Stop the connection's limiters and close the subscriber it duplicated.
+   * The client (and a subscriber passed in) stay open: close them yourself.
+   */
   async disconnect(flush = true): Promise<void> {
     for (const v of Object.values(this.limiters)) {
       clearInterval(v._store?.heartbeat);
     }
     this.limiters = {};
+    this.instances.clear();
     if (this.terminated) return;
     this.terminated = true;
 
-    this.client.removeAllListeners?.("error");
-    this.client.on?.("error", () => {});
-    this.subscriber.removeAllListeners?.("error");
-    this.subscriber.on?.("error", () => {});
-
-    if (flush) {
-      await Promise.all([
-        safe(() => closeClient(this.client)),
-        safe(() => closeClient(this.subscriber)),
-      ]);
-    } else {
-      await Promise.all([
-        safe(() => destroyClient(this.client)),
-        safe(() => destroyClient(this.subscriber)),
-      ]);
+    if (this.ownsSubscriber) {
+      // Absorb late socket errors from the closing subscriber.
+      this.subscriber.removeListener("error", this._onSubscriberError);
+      this.subscriber.on("error", noop);
+      await safe(() => (flush ? closeClient(this.subscriber) : destroyClient(this.subscriber)));
     }
   }
 }

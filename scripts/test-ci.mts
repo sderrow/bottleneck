@@ -172,6 +172,7 @@ if (selectedLegs.has("clients")) {
           cmd: ["pnpm", "add", "-D", `${pin.client}@${pin.version}`],
           pin,
         },
+        { title: "tsc", cmd: ["pnpm", "exec", "tsc"] },
         {
           title: `vitest run --project ${pin.project}`,
           cmd: ["pnpm", "exec", "vitest", "run", "--project", pin.project],

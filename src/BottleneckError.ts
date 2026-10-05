@@ -11,7 +11,9 @@ export type BottleneckErrorCode =
   | "OVERWEIGHT"
   | "INVALID_DATASTORE"
   | "INVALID_ARGUMENTS"
-  | "MISSING_CLIENT";
+  | "MISSING_CLIENT"
+  | "CLIENT_NOT_OPEN"
+  | "LEGACY_REDIS_OPTIONS";
 
 class BottleneckError extends Error {
   /** Stable machine-readable reason; absent on internal invariant failures. */

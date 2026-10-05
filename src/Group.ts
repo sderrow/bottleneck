@@ -1,15 +1,10 @@
-import type {
-  BottleneckOptions,
-  GroupEvents,
-  GroupLimiterPair,
-  IORedisConnectionOptions,
-  RedisConnectionOptions,
-} from "./types";
-import { runDetached, setDetachedInterval } from "./async-context";
+import type IORedisConnection from "./cluster/IORedisConnection";
+import type RedisConnection from "./cluster/RedisConnection";
+import type { BottleneckOptions, GroupEvents, GroupLimiterPair } from "./types";
+import { setDetachedInterval } from "./async-context";
 import Bottleneck from "./Bottleneck";
-import IORedisConnection from "./cluster/IORedisConnection";
-import RedisConnection from "./cluster/RedisConnection";
 import * as Scripts from "./cluster/Scripts";
+import { validateDatastoreOptions } from "./datastore-options";
 import Events from "./Events";
 import { load, overwrite } from "./parser";
 
@@ -47,43 +42,17 @@ class Group {
   /** @internal */
   interval: ReturnType<typeof setInterval> | undefined;
   /** @internal */
-  sharedConnection: boolean;
-  /** @internal */
   Bottleneck: typeof Bottleneck;
 
   constructor(limiterOptions: BottleneckOptions = {}) {
+    validateDatastoreOptions(limiterOptions);
     this.deleteKey = this.deleteKey.bind(this);
     this.limiterOptions = { ...limiterOptions } as Record<string, unknown>;
     load(this.limiterOptions, this.defaults, this);
     this.Events = new Events(this);
     this.instances = {};
     this._startAutoCleanup();
-    this.sharedConnection = this.connection != null;
     this.Bottleneck = Bottleneck;
-
-    if (this.connection == null) {
-      if (this.limiterOptions.datastore === "redis") {
-        // Same detachment rationale as RedisDatastore: socket setup must not
-        // capture the constructing caller's async context.
-        this.connection = runDetached(
-          () =>
-            new RedisConnection(
-              Object.assign({}, this.limiterOptions, {
-                Events: this.Events,
-              }) as unknown as RedisConnectionOptions,
-            ),
-        );
-      } else if (this.limiterOptions.datastore === "ioredis") {
-        this.connection = runDetached(
-          () =>
-            new IORedisConnection(
-              Object.assign({}, this.limiterOptions, {
-                Events: this.Events,
-              }) as unknown as IORedisConnectionOptions,
-            ),
-        );
-      }
-    }
   }
 
   key(key = ""): Bottleneck {
@@ -182,10 +151,14 @@ class Group {
     }
   }
 
-  disconnect(flush = true): Promise<void> | undefined {
+  /**
+   * Stop the Group's auto-cleanup and disconnect its Redis-backed limiters.
+   * The connection stays open: close it (and its client) yourself.
+   */
+  async disconnect(flush = true): Promise<void> {
     clearInterval(this.interval);
-    if (!this.sharedConnection) {
-      return this.connection?.disconnect(flush);
+    if (this.connection != null) {
+      await Promise.all(Object.values(this.instances).map((limiter) => limiter.disconnect(flush)));
     }
   }
 }

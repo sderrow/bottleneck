@@ -6,6 +6,9 @@
  * opaquely through parser.load/overwrite.
  */
 import type Bottleneck from "./Bottleneck";
+import type IORedisConnection from "./cluster/IORedisConnection";
+import type { IORedisClient, NodeRedisClient } from "./cluster/redis-types";
+import type RedisConnection from "./cluster/RedisConnection";
 
 /** Queue-shedding strategy when the queue length reaches `highWater`. */
 export type Strategy = 1 | 2 | 3 | 4;
@@ -55,20 +58,14 @@ export type BottleneckOptions = {
   readonly scheduleStackLabel?: string | null;
   /** Set to true to track done jobs with counts() and jobStatus(). Uses more memory. */
   readonly trackDoneStatus?: boolean | null;
-  /** Where the limiter stores its internal state: `local` (default) or `redis`/`ioredis` for Clustering. */
-  readonly datastore?: string | null;
   /** Override the Promise library used by Bottleneck. */
   readonly Promise?: unknown;
-  /** Passed directly to the redis client library you've selected. */
-  readonly clientOptions?: unknown;
-  /** **ioredis only.** When set, the client is created via `new Redis.Cluster(clusterNodes, clientOptions)`. */
-  readonly clusterNodes?: unknown;
-  /** The imported client library (`redis` or `ioredis`), required for clustering unless `client`/`connection` is provided. */
-  readonly Redis?: unknown;
-  /** A pre-built client to use instead of creating one from `clientOptions`. */
-  readonly client?: unknown;
-  /** A connection object from `new Bottleneck.RedisConnection` / `new Bottleneck.IORedisConnection`. */
-  readonly connection?: unknown;
+  /**
+   * Store the limiter's state in Redis (Clustering) through this connection,
+   * built from your own client: `new IORedisConnection({ client })` or
+   * `new RedisConnection({ client })`. Without one, the limiter is local.
+   */
+  readonly connection?: RedisConnection | IORedisConnection | null;
   /** When true, the limiter wipes existing Bottleneck state on the Redis db at startup. */
   readonly clearDatastore?: boolean | null;
   /** Redis TTL in ms for the limiter's keys (state removed after this much inactivity). Defaults to 300000 under a Group. */
@@ -110,58 +107,32 @@ export type BatcherOptions = {
 };
 
 /**
- * Options for `new Bottleneck.RedisConnection(...)`. Either `Redis` (the
- * imported `redis` library) or `client` (a pre-built NodeRedis client) is
- * required; passing both is rejected by the union.
+ * Options for `new Bottleneck.RedisConnection(...)`. The connection only sends
+ * commands on `client`: it never connects, closes, or adds listeners to it.
  */
-export type RedisConnectionOptions =
-  | {
-      /** The `redis` library, e.g. `Redis from "redis"`. Required unless `client` is provided. */
-      readonly Redis: unknown;
-      /** Passed directly to NodeRedis' `createClient()` method. */
-      readonly clientOptions?: unknown;
-      readonly client?: never;
-      /** Internal: pubsub event sink wired up by RedisDatastore. */
-      readonly Events?: unknown;
-    }
-  | {
-      /** An existing NodeRedis client to use. When provided, `clientOptions` is ignored. */
-      readonly client: unknown;
-      readonly Redis?: never;
-      readonly clientOptions?: unknown;
-      /** Internal: pubsub event sink wired up by RedisDatastore. */
-      readonly Events?: unknown;
-    };
+export type RedisConnectionOptions<C extends NodeRedisClient = NodeRedisClient> = {
+  /** A node-redis client. Call `client.connect()` first (no need to await it). */
+  readonly client: C;
+  /**
+   * A client dedicated to Bottleneck's pub/sub subscriptions. Defaults to
+   * `client.duplicate()`, which the connection connects and closes itself.
+   */
+  readonly subscriber?: C;
+};
 
 /**
- * Options for `new Bottleneck.IORedisConnection(...)`. Either `Redis` (the
- * imported `ioredis` library) or `client` (a pre-built ioredis client) is
- * required; passing both is rejected by the union.
+ * Options for `new Bottleneck.IORedisConnection(...)`. The connection only sends
+ * commands on `client`: it never connects, closes, or adds listeners to it.
  */
-export type IORedisConnectionOptions =
-  | {
-      /** The `ioredis` library, e.g. `Redis from "ioredis"`. Required unless `client` is provided. */
-      readonly Redis: unknown;
-      /** Passed directly to ioredis' constructor. */
-      readonly clientOptions?: unknown;
-      /** When set, clients are created via `new Redis.Cluster(clusterNodes, clientOptions)`. */
-      readonly clusterNodes?: unknown;
-      readonly client?: never;
-      /** Internal: pubsub event sink wired up by RedisDatastore. */
-      readonly Events?: unknown;
-    }
-  | {
-      /** An existing ioredis client to use. When provided, `clientOptions` and `clusterNodes` are ignored. */
-      readonly client: unknown;
-      readonly Redis?: never;
-      readonly clientOptions?: unknown;
-      readonly clusterNodes?: unknown;
-      /** Internal: pubsub event sink wired up by RedisDatastore. */
-      readonly Events?: unknown;
-    };
-
-/** Datastore-specific map of raw redis clients. */
-export type ClientsList = { client?: unknown; subscriber?: unknown };
+export type IORedisConnectionOptions<C extends IORedisClient = IORedisClient> = {
+  /** An ioredis client: `new Redis(...)` or `new Redis.Cluster(...)`. */
+  readonly client: C;
+  /**
+   * A client dedicated to Bottleneck's pub/sub subscriptions. Defaults to
+   * `client.duplicate()`, which the connection closes itself.
+   */
+  readonly subscriber?: C;
+};
 
 export type GroupLimiterPair = { key: string; limiter: Bottleneck };
 

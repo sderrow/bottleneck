@@ -1,5 +1,5 @@
 import assert from "node:assert";
-import { describe, expect } from "vitest";
+import { describe, expect, vi } from "vitest";
 import type BottleneckBase from "../src/Bottleneck";
 import type { ScriptName } from "../src/cluster/Scripts";
 import type { JobOptions } from "../src/types";
@@ -7,7 +7,6 @@ import sleep from "../src/sleep";
 import { defined } from "./helpers/defined";
 import { limiterKeys, redisStore, runCommand } from "./helpers/store";
 import { test, waitForState, deferred, enqueued } from "./helpers/test-api";
-import { wrongType } from "./helpers/wrong-type";
 
 // Causality policy (Workstream B): observe product-timer effects via waitForState
 // and state counts — never assert wall-clock bounds around real network time.
@@ -55,12 +54,14 @@ describe("Cluster-only", () => {
     return ready;
   });
 
-  test("Should return clients", async ({ makeLimiter }) => {
+  test("Should expose its connection's clients", async ({ makeLimiter }) => {
     const rootLimiter = makeLimiter({ maxConcurrent: 2 });
 
-    const clients = await rootLimiter.ready();
-    expect(Object.keys(clients as Record<string, unknown>)).toEqual(["client", "subscriber"]);
-    expect(Object.keys(rootLimiter.clients())).toEqual(["client", "subscriber"]);
+    await expect(rootLimiter.ready()).resolves.toBeUndefined();
+    const { client, subscriber } = defined(rootLimiter.connection);
+    expect(client).toBeDefined();
+    expect(subscriber).toBeDefined();
+    expect(subscriber).not.toBe(client);
   });
 
   test("Should return a promise when disconnecting", async ({ makeLimiter }) => {
@@ -1072,8 +1073,9 @@ describe("Cluster-only", () => {
     await limiter.ready();
     const store = redisStore(limiter);
     const published: [string, string][] = [];
-    store.clients.client = wrongType({
-      publish: async (ch: string, msg: string) => published.push([ch, msg]),
+    vi.spyOn(store.connection.client, "publish").mockImplementation(async (ch, msg) => {
+      published.push([ch, msg]);
+      return 0;
     });
 
     const capacities: (number | undefined)[] = [];

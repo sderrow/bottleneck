@@ -220,7 +220,7 @@ describe("Schedule stacks", () => {
         return (super.schedule as (...a: unknown[]) => Promise<unknown>)(...args);
       }
     }
-    const arrowPatched = track(new Bottleneck({ id: "override-arrow", datastore: "local" }));
+    const arrowPatched = track(new Bottleneck({ id: "override-arrow" }));
     const original = Bottleneck.prototype.schedule as (...a: unknown[]) => Promise<unknown>;
     function scheduleWithOpts(args: unknown[]): Promise<unknown> {
       return original.apply(arrowPatched, args);
@@ -229,8 +229,8 @@ describe("Schedule stacks", () => {
       scheduleWithOpts(args);
 
     const limiters = [
-      track(new SubclassLimiter({ id: "override-subclass", datastore: "local" })),
-      track(new AsyncSubclassLimiter({ id: "override-async", datastore: "local" })),
+      track(new SubclassLimiter({ id: "override-subclass" })),
+      track(new AsyncSubclassLimiter({ id: "override-async" })),
       arrowPatched,
     ];
     for (const limiter of limiters) {
@@ -259,7 +259,7 @@ describe("Schedule stacks", () => {
 
   test("a bound schedule override keeps its wrapper frames", async ({ track }) => {
     // V8 can't cut at a bound function, so the base cutoff is used instead.
-    const bound = track(new Bottleneck({ id: "override-bound", datastore: "local" }));
+    const bound = track(new Bottleneck({ id: "override-bound" }));
     const original = Bottleneck.prototype.schedule as (...a: unknown[]) => Promise<unknown>;
     (bound as { schedule: unknown }).schedule = function scheduleWithOpts(
       this: Bottleneck,
