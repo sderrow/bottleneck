@@ -7,7 +7,7 @@ import { test } from "./helpers/test-api";
 const jobDefaults = { priority: 5, weight: 1, expiration: null, id: "<no-id>" };
 
 const makeJob = (options: object) => {
-  const states = new States(["RECEIVED", "QUEUED", "RUNNING", "EXECUTING"]);
+  const states = new States(false);
   const job = new Job(
     () => Promise.resolve(),
     [],

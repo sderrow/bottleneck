@@ -1,62 +1,61 @@
+import type { Counts, Status } from "./types";
 import BottleneckError from "./BottleneckError";
 
-class States {
-  status: string[];
-  /** @internal */
-  _jobs: Record<string, number> = {};
-  counts: number[];
+const STATUSES = ["RECEIVED", "QUEUED", "RUNNING", "EXECUTING", "DONE"] as const;
+type Pos = 0 | 1 | 2 | 3 | 4;
+const NEXT = [1, 2, 3, 4, null] as const;
+const EXECUTING = 3;
+const DONE = 4;
 
-  constructor(status: string[]) {
-    this.status = status;
-    this.counts = this.status.map(() => 0);
+class States {
+  /** @internal */
+  _jobs: Record<string, Pos> = {};
+  counts: [number, number, number, number, number] = [0, 0, 0, 0, 0];
+  /** @internal The last status a job passes through before it's forgotten. */
+  _final: Pos;
+
+  constructor(trackDone: boolean) {
+    this._final = trackDone ? DONE : EXECUTING;
   }
 
   next(id: string): void {
     const current = this._jobs[id];
     if (current == null) return;
-    const next = current + 1;
-    if (next < this.status.length) {
-      this._adjust(current, -1);
-      this._adjust(next, 1);
+    const next = NEXT[current];
+    this.counts[current]--;
+    if (next != null && next <= this._final) {
+      this.counts[next]++;
       this._jobs[id] = next;
     } else {
-      this._adjust(current, -1);
       delete this._jobs[id];
     }
   }
 
   start(id: string): number {
-    const initial = 0;
-    this._jobs[id] = initial;
-    return this._adjust(initial, 1);
+    this._jobs[id] = 0;
+    return this.counts[0]++;
   }
 
   remove(id: string): boolean {
     const current = this._jobs[id];
     if (current != null) {
-      this._adjust(current, -1);
+      this.counts[current]--;
       delete this._jobs[id];
     }
     return current != null;
   }
 
-  /** @internal Adds `delta` to a status count; returns the previous count. */
-  _adjust(pos: number, delta: number): number {
-    const previous = this.counts[pos] ?? 0;
-    this.counts[pos] = previous + delta;
-    return previous;
-  }
-
-  jobStatus(id: string): string | null {
+  jobStatus(id: string): Status | null {
     const pos = this._jobs[id];
-    return pos != null ? (this.status[pos] ?? null) : null;
+    return pos != null ? STATUSES[pos] : null;
   }
 
-  statusJobs(status?: string): string[] {
+  statusJobs(status?: Status): string[] {
     if (status != null) {
-      const pos = this.status.indexOf(status);
-      if (pos < 0) {
-        throw new BottleneckError(`status must be one of ${this.status.join(", ")}`);
+      const pos = STATUSES.indexOf(status);
+      if (pos < 0 || pos > this._final) {
+        const valid = STATUSES.slice(0, this._final + 1);
+        throw new BottleneckError(`status must be one of ${valid.join(", ")}`);
       }
       const result = [];
       for (const [k, v] of Object.entries(this._jobs)) {
@@ -70,11 +69,18 @@ class States {
     }
   }
 
-  statusCounts(): Record<string, number> {
-    return this.counts.reduce<Record<string, number>>((acc, v, i) => {
-      acc[this.status[i] as string] = v;
-      return acc;
-    }, {});
+  statusCounts(): Counts {
+    const [received, queued, running, executing, done] = this.counts;
+    const counts: Counts = {
+      RECEIVED: received,
+      QUEUED: queued,
+      RUNNING: running,
+      EXECUTING: executing,
+    };
+    if (this._final === DONE) {
+      counts.DONE = done;
+    }
+    return counts;
   }
 }
 
