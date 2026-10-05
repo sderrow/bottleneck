@@ -94,6 +94,41 @@ describe("Async context", () => {
     },
   );
 
+  test.runIf(process.env.DATASTORE != null)(
+    "runs pub/sub-driven drains outside the async context that constructed the limiter",
+    async ({ makeLimiter }) => {
+      const als = new AsyncLocalStorage<string>();
+      // Long heartbeats so the only thing that can drain `waiter` is the
+      // capacity message `holder` publishes when its job frees up.
+      const options = { id: "als-pubsub", maxConcurrent: 1, heartbeatInterval: 60_000 };
+      const holder = makeLimiter(options);
+      // Constructing inside a context must not leak it into the limiter's
+      // pub/sub socket: a drain triggered by a message on that socket would
+      // otherwise run (and report its Redis calls) inside the constructor's
+      // context for the limiter's whole lifetime.
+      const waiter = als.run("constructor-store", () => makeLimiter(options));
+      await Promise.all([holder.ready(), waiter.ready()]);
+
+      const hold = deferred();
+      const held = holder.schedule(() => hold.signal);
+      await enqueued(holder);
+      const waiting = waiter.schedule(() => Promise.resolve("ran"));
+      await enqueued(waiter);
+      expect(waiter.counts().QUEUED).toBe(1);
+
+      const registerStore = new Promise((resolve) => {
+        waiter.on("debug", (message: string) => {
+          if (message.includes("register.lua")) resolve(als.getStore());
+        });
+      });
+      hold.release();
+
+      await expect(registerStore).resolves.toBeUndefined();
+      await expect(waiting).resolves.toBe("ran");
+      await held;
+    },
+  );
+
   test("runDetached and setDetachedTimeout run outside the caller's context", async () => {
     const als = new AsyncLocalStorage<string>();
 

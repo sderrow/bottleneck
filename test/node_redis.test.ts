@@ -1,5 +1,5 @@
 import * as Redis from "redis";
-import { describe, expect } from "vitest";
+import { describe, expect, vi } from "vitest";
 import { test } from "./helpers/test-api";
 import buildClientOptions from "./redis-client-options";
 
@@ -101,5 +101,40 @@ describe("node_redis-only", () => {
         reject(err);
       });
     });
+  });
+});
+
+// Pins what a connection does to a client passed in to it. v5 stops all of
+// this (the client belongs to the consumer); these tests change with it.
+describe("node_redis passed-in client side effects", () => {
+  test("Should connect the client and install listeners, then strip and close it", async ({
+    makeConnection,
+  }) => {
+    const client = Redis.createClient(buildClientOptions("redis"));
+    const consumerListener = vi.fn<() => void>();
+    client.on("error", consumerListener);
+    expect(client.isOpen).toBe(false);
+
+    const connection = makeConnection({ client });
+    await connection.ready;
+    expect(client.isOpen).toBe(true);
+    expect(client.listenerCount("error")).toBe(2);
+    expect(client.getMaxListeners()).toBe(0);
+
+    await connection.disconnect(true);
+    expect(client.listeners("error")).not.toContain(consumerListener);
+    expect(client.listenerCount("error")).toBe(1);
+    expect(client.isOpen).toBe(false);
+  });
+
+  test("Should destroy a passed-in client on disconnect(false)", async ({ makeConnection }) => {
+    const client = Redis.createClient(buildClientOptions("redis"));
+    await client.connect();
+    const connection = makeConnection({ client });
+    await connection.ready;
+
+    await connection.disconnect(false);
+
+    expect(client.isOpen).toBe(false);
   });
 });

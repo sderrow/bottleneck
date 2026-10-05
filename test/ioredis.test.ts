@@ -1,8 +1,8 @@
 import Redis from "ioredis";
 import ioredisPkg from "ioredis/package.json" with { type: "json" };
-import { describe, expect } from "vitest";
+import { describe, expect, vi } from "vitest";
 import { redisStore } from "./helpers/store";
-import { test } from "./helpers/test-api";
+import { test, waitForState } from "./helpers/test-api";
 import buildClientOptions from "./redis-client-options";
 
 describe("ioredis-only", () => {
@@ -42,21 +42,22 @@ describe("ioredis-only", () => {
     makeLimiter,
     makeConnection,
   }) => {
-    const client = new Redis.Cluster([]);
-    makeConnection({ client });
-    const limiter = makeLimiter({
-      maxConcurrent: 2,
-      clientOptions: {},
-      clusterNodes: [
-        {
-          host: process.env.REDIS_HOST,
-          port: process.env.REDIS_PORT,
-        },
-      ],
-    });
+    // The test server isn't a Redis Cluster, so this only checks wiring: the
+    // client never connects, its errors are expected, and with no offline
+    // queue its commands fail fast instead of hanging teardown.
+    const client = new Redis.Cluster(
+      [{ host: process.env.REDIS_HOST, port: Number(process.env.REDIS_PORT) }],
+      { enableOfflineQueue: false },
+    );
+    const connection = makeConnection({ client });
+    const limiter = makeLimiter({ maxConcurrent: 2, connection }, { expectErrors: true });
 
     expect(limiter.datastore).toStrictEqual("ioredis");
-    expect(redisStore(limiter).connection.client).toBeInstanceOf(Redis.Cluster);
+    expect(limiter.connection).toBe(connection);
+    expect(connection.client).toBe(client);
+    // The subscriber is a second Cluster client, not the premade one.
+    expect(connection.subscriber).toBeInstanceOf(Redis.Cluster);
+    expect(connection.subscriber).not.toBe(client);
   });
 
   test("Should accept existing connections", async ({
@@ -261,5 +262,39 @@ describeResp3("ioredis RESP3", () => {
 
     expect(await group.deleteKey("AAA")).toStrictEqual(true);
     expect(await group.deleteKey("AAA")).toStrictEqual(false);
+  });
+});
+
+// Pins what a connection does to a client passed in to it. v5 stops all of
+// this (the client belongs to the consumer); these tests change with it.
+describe("ioredis passed-in client side effects", () => {
+  test("Should install listeners and scripts on the client, then strip and close it", async ({
+    makeConnection,
+  }) => {
+    const client = new Redis(buildClientOptions("ioredis"));
+    const consumerListener = vi.fn<() => void>();
+    client.on("error", consumerListener);
+
+    const connection = makeConnection({ client });
+    await connection.ready;
+    expect(client.listenerCount("error")).toBe(2);
+    expect(client.getMaxListeners()).toBe(0);
+    // defineCommand installs each Lua script as a client method.
+    expect(client).toHaveProperty("submit", expect.any(Function));
+
+    await connection.disconnect(true);
+    expect(client.listeners("error")).not.toContain(consumerListener);
+    expect(client.listenerCount("error")).toBe(1);
+    await waitForState(() => expect(client.status).toBe("end"));
+  });
+
+  test("Should disconnect a passed-in client on disconnect(false)", async ({ makeConnection }) => {
+    const client = new Redis(buildClientOptions("ioredis"));
+    const connection = makeConnection({ client });
+    await connection.ready;
+
+    await connection.disconnect(false);
+
+    await waitForState(() => expect(client.status).toBe("end"));
   });
 });
