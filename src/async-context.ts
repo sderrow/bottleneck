@@ -10,10 +10,7 @@ import { AsyncResource } from "node:async_hooks";
  */
 export function bindTask<T extends (...args: never[]) => unknown>(task: T): T {
   try {
-    // bind() preserves the signature, but its `(...args: any[]) => any`
-    // constraint rejects `never[]` params, so widen through `unknown`.
-    const bound = AsyncResource.bind(task as unknown as (...args: unknown[]) => unknown);
-    return bound as unknown as T;
+    return AsyncResource.bind(task as T & ((...args: unknown[]) => unknown));
   } catch {
     return task;
   }
