@@ -116,6 +116,12 @@ jobs:
       - name: Pin client version
         run: pnpm add -D ${{ matrix.client }}@${{ matrix.version }}
 
+      # Connections are generic over the consumer's client and constrain it
+      # with structural types (src/cluster/redis-types.ts): every supported
+      # client major must still type-check against them.
+      - name: Type check against the pinned client
+        run: pnpm exec tsc
+
       - name: Run cluster tests
         run: pnpm exec vitest run --project ${{ matrix.project }}
 
