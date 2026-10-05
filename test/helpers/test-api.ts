@@ -4,7 +4,7 @@ import type { BottleneckOptions, JobOptions } from "../../src/types";
 import Bottleneck from "../bottleneck";
 import { isFakeClock } from "./clock";
 import { createTaskFns } from "./job-tasks";
-import makeLimiterHelper from "./limiter";
+import makeLimiterHelper, { defaultConnectionOptions } from "./limiter";
 import { wrongType } from "./wrong-type";
 
 export { waitForState } from "./wait-for-state";
@@ -240,7 +240,9 @@ export const test = baseTest.extend<{
         process.env.DATASTORE === "ioredis"
           ? Bottleneck.IORedisConnection
           : Bottleneck.RedisConnection;
-      return track(new Connection(wrongType(opts)) as unknown as Connection);
+      return track(
+        new Connection(wrongType(opts ?? defaultConnectionOptions())) as unknown as Connection,
+      );
     });
   },
   async limiter({ makeLimiter, limiterOptions, limiterMeta }, use) {

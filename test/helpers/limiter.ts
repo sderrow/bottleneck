@@ -66,3 +66,13 @@ function makeLimiter(
 
 export default makeLimiter;
 export { makeLimiter, buildClientOptions };
+
+/**
+ * Options for a connection to the test Redis for the current datastore, so
+ * tests can build one without caring how connections are constructed.
+ */
+export function defaultConnectionOptions(): Record<string, unknown> {
+  return process.env.DATASTORE === "ioredis"
+    ? { Redis: IORedis, clientOptions: buildClientOptions("ioredis") }
+    : { Redis: RedisClient, clientOptions: buildClientOptions("redis") };
+}
