@@ -11,7 +11,7 @@ useFakeClock();
 
 describe("Batcher", () => {
   test("Should batch by time and size", async () => {
-    const batcher = new Bottleneck.Batcher({ maxTime: 100, maxSize: 3 });
+    const batcher = new Bottleneck.Batcher<number>({ maxTime: 100, maxSize: 3 });
     const batches: number[][] = [];
     const batchTimes: number[] = [];
 
@@ -31,7 +31,7 @@ describe("Batcher", () => {
   });
 
   test("Should batch by time", async () => {
-    const batcher = new Bottleneck.Batcher({ maxTime: 100 });
+    const batcher = new Bottleneck.Batcher<number>({ maxTime: 100 });
     const batches: number[][] = [];
     const batchTimes: number[] = [];
 
@@ -57,7 +57,7 @@ describe("Batcher", () => {
   });
 
   test("Should batch by size", async () => {
-    const batcher = new Bottleneck.Batcher({ maxSize: 2 });
+    const batcher = new Bottleneck.Batcher<number>({ maxSize: 2 });
     const batches: number[][] = [];
 
     batcher.on("batch", (groups) => {
@@ -75,7 +75,7 @@ describe("Batcher", () => {
   });
 
   test("Should stagger flushes", async () => {
-    const batcher = new Bottleneck.Batcher({ maxTime: 100, maxSize: 3 });
+    const batcher = new Bottleneck.Batcher<number>({ maxTime: 100, maxSize: 3 });
     const batches: number[][] = [];
     const batchTimes: number[] = [];
 
@@ -95,7 +95,7 @@ describe("Batcher", () => {
   });
 
   test("Should force then stagger flushes", async () => {
-    const batcher = new Bottleneck.Batcher({ maxTime: 100, maxSize: 3 });
+    const batcher = new Bottleneck.Batcher<number>({ maxTime: 100, maxSize: 3 });
     const batches: number[][] = [];
     const batchTimes: number[] = [];
 
@@ -123,7 +123,7 @@ describe("Batcher", () => {
   });
 
   test("Should default to no time/size limits when constructed without options", () => {
-    const batcher = new Bottleneck.Batcher();
+    const batcher = new Bottleneck.Batcher<number>();
     expect(batcher.maxTime).toBeNull();
     expect(batcher.maxSize).toBeNull();
   });

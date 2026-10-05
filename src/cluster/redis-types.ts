@@ -9,7 +9,7 @@
 import type { ScriptName } from "./Scripts";
 
 type BaseClient = {
-  on(event: string, cb: (...args: any[]) => void): unknown;
+  on(event: string, cb: (...args: never[]) => void): unknown;
   removeAllListeners?(event?: string): unknown;
   publish(channel: string, message: string): Promise<unknown>;
   unsubscribe(channel: string): unknown;
@@ -40,7 +40,7 @@ type IORedisScriptCommands = Record<
 
 export type IORedisClient = BaseClient & {
   status: string;
-  once(event: string, cb: (...args: any[]) => void): unknown;
+  once(event: string, cb: (...args: never[]) => void): unknown;
   setMaxListeners(n: number): unknown;
   /** Absent on ioredis Cluster clients. */
   duplicate?(): IORedisClient;

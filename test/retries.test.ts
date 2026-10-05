@@ -114,16 +114,16 @@ describe("Retries", () => {
       retryEvents++;
     });
 
-    limiter.on("error", (error: any, _info: any) => {
-      expect(error.message).toStrictEqual("Nope");
+    limiter.on("error", (error) => {
+      expect(error).toHaveProperty("message", "Nope");
       errorEvents++;
     });
 
     try {
       await limiter.schedule(badJob);
       throw new Error("Should not reach");
-    } catch (error: any) {
-      expect(error.message).toStrictEqual("boom");
+    } catch (error) {
+      expect(error).toHaveProperty("message", "boom");
       caught = true;
     }
     expect(failedEvents).toStrictEqual(1);
@@ -152,16 +152,16 @@ describe("Retries", () => {
       retryEvents++;
     });
 
-    limiter.on("error", (error: any, _info: any) => {
-      expect(error.message).toStrictEqual("Nope");
+    limiter.on("error", (error) => {
+      expect(error).toHaveProperty("message", "Nope");
       errorEvents++;
     });
 
     try {
       await limiter.schedule(badJob);
       throw new Error("Should not reach");
-    } catch (error: any) {
-      expect(error.message).toStrictEqual("boom");
+    } catch (error) {
+      expect(error).toHaveProperty("message", "boom");
       caught = true;
     }
     expect(failedEvents).toStrictEqual(1);
@@ -192,8 +192,8 @@ describe("Retries", () => {
     try {
       await limiter.schedule(badJob);
       throw new Error("Should not reach");
-    } catch (error: any) {
-      expect(error.message).toStrictEqual("boom");
+    } catch (error) {
+      expect(error).toHaveProperty("message", "boom");
       caught = true;
     }
     expect(failedEvents).toStrictEqual(1);
@@ -223,8 +223,8 @@ describe("Retries", () => {
     try {
       await limiter.schedule(badJob);
       throw new Error("Should not reach");
-    } catch (error: any) {
-      expect(error.message).toStrictEqual("boom");
+    } catch (error) {
+      expect(error).toHaveProperty("message", "boom");
       caught = true;
     }
     expect(failedEvents).toStrictEqual(1);

@@ -26,11 +26,11 @@ class Group {
   // Installed on the instance by Events (see Events constructor).
   declare on: {
     <E extends keyof GroupEvents>(event: E, listener: GroupEvents[E]): unknown;
-    (event: string, listener: (...args: any[]) => unknown): unknown;
+    (event: string, listener: (...args: never[]) => unknown): unknown;
   };
   declare once: {
     <E extends keyof GroupEvents>(event: E, listener: GroupEvents[E]): unknown;
-    (event: string, listener: (...args: any[]) => unknown): unknown;
+    (event: string, listener: (...args: never[]) => unknown): unknown;
   };
   declare removeAllListeners: (name?: string | null) => void;
 

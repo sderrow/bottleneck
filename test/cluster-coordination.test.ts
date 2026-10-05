@@ -1,21 +1,18 @@
 import { describe, expect } from "vitest";
 import type BottleneckBase from "../src/Bottleneck";
-import * as Scripts from "../src/cluster/Scripts";
+import type { ScriptName } from "../src/cluster/Scripts";
 import sleep from "../src/sleep";
 import Bottleneck from "./bottleneck";
 import { defined } from "./helpers/defined";
+import { limiterKeys, redisStore, runCommand } from "./helpers/store";
 import { test, waitForState, deferred, enqueued } from "./helpers/test-api";
 
 // Causality policy (Workstream B): observe product-timer effects via waitForState
 // and state counts — never assert wall-clock bounds around real network time.
 
 type Limiter = BottleneckBase;
-const limiterKeys = (limiter: Limiter): any[] =>
-  Scripts.allKeys((limiter._store as any).originalId);
 const countKeys = (limiter: Limiter) => runCommand(limiter, "exists", limiterKeys(limiter));
 const deleteKeys = (limiter: Limiter) => runCommand(limiter, "del", limiterKeys(limiter));
-const runCommand = (limiter: Limiter, command: string, args: string[]) =>
-  (limiter._store as any).connection.__runCommand__([command, ...args]);
 const runningOrExecuting = (limiter: Limiter) => {
   const counts = limiter.counts();
   return counts.RUNNING + counts.EXECUTING;
@@ -26,11 +23,11 @@ const SETTINGS_KEY_NOT_FOUND = /^(.*\s)?SETTINGS_KEY_NOT_FOUND$/;
 const UNKNOWN_CLIENT = /^(.*\s)?UNKNOWN_CLIENT$/;
 
 async function captureFirstScriptError(limiter: Limiter, trigger: () => unknown) {
-  const connection = (limiter._store as any).connection;
+  const connection = redisStore(limiter).connection;
   const original = connection.__runScript__.bind(connection);
-  let captured: any;
+  let captured: unknown;
 
-  connection.__runScript__ = async (name: string, id: string, args: unknown[]) => {
+  connection.__runScript__ = async (name: ScriptName, id: string, args: unknown[]) => {
     try {
       return await original(name, id, args);
     } catch (e) {
@@ -209,7 +206,7 @@ describe("Cluster coordination", () => {
     const err = await captureFirstScriptError(limiter, () => limiter.running());
 
     expect(err).toBeTruthy();
-    expect(err.message).toMatch(SETTINGS_KEY_NOT_FOUND);
+    expect(err).toHaveProperty("message", expect.stringMatching(SETTINGS_KEY_NOT_FOUND));
   });
 
   test("Should re-register when client registration is missing in Redis", async ({
@@ -236,7 +233,7 @@ describe("Cluster coordination", () => {
     const err = await captureFirstScriptError(limiter, () => limiter.running());
 
     expect(err).toBeTruthy();
-    expect(err.message).toMatch(UNKNOWN_CLIENT);
+    expect(err).toHaveProperty("message", expect.stringMatching(UNKNOWN_CLIENT));
   });
 
   test("Should drop all jobs in the Cluster when entering blocked mode", async ({
@@ -368,7 +365,7 @@ describe("Cluster coordination", () => {
       minTime: 100,
       id: "nope",
     });
-    const received: any[] = [];
+    const received: unknown[] = [];
 
     rootLimiter.on("message", (msg) => {
       received.push(1, msg);
@@ -400,7 +397,7 @@ describe("Cluster coordination", () => {
       minTime: 100,
       datastore: process.env.DATASTORE,
     });
-    const received: any[] = [];
+    const received: unknown[] = [];
 
     await new Promise<void>((resolve, _reject) => {
       const limiter = group.key("A");
@@ -526,7 +523,7 @@ describe("Cluster coordination", () => {
     // need to be flushed before the assertions below.
     await waitForState(() => {
       expect(group.keys().length).toBe(0);
-      expect(Object.keys((group.connection as any).limiters).length).toBe(0);
+      expect(Object.keys(defined(group.connection).limiters).length).toBe(0);
     });
 
     const countsAfterCleanup = await Promise.all([
@@ -536,7 +533,7 @@ describe("Cluster coordination", () => {
     ]);
     expect(countsAfterCleanup).toEqual([0, 0, 0]);
     expect(group.keys().length).toEqual(0);
-    expect(Object.keys((group.connection as any).limiters).length).toEqual(0);
+    expect(Object.keys(defined(group.connection).limiters).length).toEqual(0);
   });
 
   test("Should not recreate a key when running heartbeat", async ({ harness: h, makeGroup }) => {
@@ -774,7 +771,7 @@ describe("Cluster coordination", () => {
     //   - Per-limiter FIFO: 4 before 6 (limiter3), 5 before 7 (limiter4) —
     //     each client drains its own queue in order no matter which slots
     //     it wins.
-    const calls = h.results().calls.map((call) => (call.result as any)[0]);
+    const calls = h.results().calls.map((call) => call.result[0]);
     expect(calls.length).toEqual(11);
     expect(calls.slice(0, 5)).toEqual(["A", "B", "C", "D", 1]);
     expect(calls.slice(5, 9).sort()).toEqual([4, 5, 6, 7]);
@@ -845,7 +842,7 @@ describe("Cluster coordination", () => {
     // capacity-priority tiebreak is covered at the broadcast level below.
     // What is guaranteed: warm-ups + [1] first, all three 50ms jobs ran
     // before the 550ms job, and limiter4's own FIFO ([4] before [5]).
-    const calls = h.results().calls.map((call) => (call.result as any)[0]);
+    const calls = h.results().calls.map((call) => call.result[0]);
     expect(calls.length).toEqual(9);
     expect(calls.slice(0, 5)).toEqual(["A", "B", "C", "D", 1]);
     expect(calls.slice(5, 8).sort()).toEqual([3, 4, 5]);

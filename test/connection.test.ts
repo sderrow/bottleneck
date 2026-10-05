@@ -1,96 +1,117 @@
 import { describe, test, expect, vi } from "vitest";
+import type BottleneckBase from "../src/Bottleneck";
+import type { IORedisClient, NodeRedisClient } from "../src/cluster/redis-types";
 import type { IORedisConnectionOptions, RedisConnectionOptions } from "../src/types";
 import IORedisConnection from "../src/cluster/IORedisConnection";
 import RedisConnection from "../src/cluster/RedisConnection";
 import * as Scripts from "../src/cluster/Scripts";
+import { wrongType } from "./helpers/wrong-type";
 
 // These are datastore-independent unit tests: both connection classes are
 // driven with fake clients, so the file is deterministic in every test
 // project (local + redis) without touching the shared Redis container.
 
-const makeNodeClient = (
-  overrides: Record<string, any> = {},
-  dupOverrides: Record<string, any> = {},
-) => {
-  const handlers: Record<string, any> = {};
-  const client: any = {
-    isOpen: true,
-    on(name: string, cb: (...args: any[]) => void) {
+type Handler = (...args: unknown[]) => void;
+type Overrides = Record<string, unknown>;
+
+const fakes = new WeakSet<object>();
+
+type FakeNodeClient = ReturnType<typeof makeNodeClient>;
+type FakeIOClient = ReturnType<typeof makeIOClient>;
+
+/** Retype a client the connection created from one of the fake factories. */
+function fake(client: NodeRedisClient): FakeNodeClient;
+function fake(client: IORedisClient): FakeIOClient;
+function fake(client: object): FakeNodeClient | FakeIOClient {
+  if (!fakes.has(client)) throw new Error("Expected a fake client");
+  return wrongType(client);
+}
+
+const makeEmitter = () => {
+  const handlers: Record<string, Handler[]> = {};
+  return {
+    on(name: string, cb: Handler) {
       (handlers[name] ??= []).push(cb);
     },
-    emit(name: string, ...args: any[]) {
+    emit(name: string, ...args: unknown[]) {
       for (const cb of handlers[name] ?? []) cb(...args);
     },
     removeAllListeners(name?: string) {
       if (name != null) delete handlers[name];
     },
+  };
+};
+
+const makeNodeClient = (overrides: Overrides = {}, dupOverrides: Overrides = {}) => {
+  const subscriptions: Record<string, Handler> = {};
+  const client = {
+    ...makeEmitter(),
+    _subscriptions: subscriptions,
+    isOpen: true,
     scriptLoad: vi.fn<(payload: string) => Promise<string>>(
       async (payload) => `sha-${payload.length}`,
     ),
-    evalSha: vi.fn<() => Promise<number>>(async () => 1),
+    evalSha: vi.fn<
+      (sha: string, options: { keys: string[]; arguments: string[] }) => Promise<number>
+    >(async () => 1),
     sendCommand: vi.fn<() => Promise<string>>(async () => "OK"),
-    subscribe: vi.fn<(channel: string, cb: (...args: any[]) => void) => Promise<void>>(
-      async (channel, cb) => {
-        (handlers.__subscriptions ??= {})[channel] = cb;
-      },
-    ),
+    subscribe: vi.fn<(channel: string, cb: Handler) => Promise<void>>(async (channel, cb) => {
+      subscriptions[channel] = cb;
+    }),
     unsubscribe: vi.fn<() => Promise<void>>(async () => {}),
     close: vi.fn<() => Promise<void>>(async () => {}),
     quit: vi.fn<() => Promise<void>>(async () => {}),
     destroy: vi.fn<() => Promise<void>>(async () => {}),
     disconnect: vi.fn<() => void>(),
-    ...overrides,
+    duplicate: (): NodeRedisClient => makeNodeClient(dupOverrides),
   };
-  client._handlers = handlers;
-  client.duplicate = () => makeNodeClient(dupOverrides);
-  return client;
+  Object.assign(client, overrides);
+  fakes.add(client);
+  // The fake implements only what RedisConnection calls.
+  return wrongType<NodeRedisClient & typeof client>(client);
 };
 
-const makeIOClient = (overrides: Record<string, any> = {}) => {
-  const handlers: Record<string, any> = {};
-  const client: any = {
+const makeIOClient = (overrides: Overrides = {}) => {
+  const client = {
+    ...makeEmitter(),
     status: "connect",
-    on(name: string, cb: (...args: any[]) => void) {
-      (handlers[name] ??= []).push(cb);
-    },
-    once(name: string, cb: (...args: any[]) => void) {
-      (handlers[name] ??= []).push(cb);
-    },
-    emit(name: string, ...args: any[]) {
-      for (const cb of handlers[name] ?? []) cb(...args);
+    once(name: string, cb: Handler) {
+      client.on(name, cb);
     },
     setMaxListeners() {},
-    defineCommand: vi.fn<(...args: any[]) => void>(),
-    subscribe: vi.fn<(...args: any[]) => Promise<number>>(async () => 1),
-    unsubscribe: vi.fn<(...args: any[]) => Promise<number>>(async () => 1),
-    ...overrides,
+    defineCommand: vi.fn<(...args: unknown[]) => void>(),
+    subscribe: vi.fn<(...args: unknown[]) => Promise<number>>(async () => 1),
+    unsubscribe: vi.fn<(...args: unknown[]) => Promise<number>>(async () => 1),
   };
-  client._handlers = handlers;
-  return client;
+  Object.assign(client, overrides);
+  fakes.add(client);
+  // The fake implements only what IORedisConnection calls.
+  return wrongType<IORedisClient & typeof client>(client);
 };
 
-const makeFakeRedis = (
-  mainOverrides: Record<string, any> = {},
-  subOverrides: Record<string, any> = {},
-) => {
+const makeFakeRedis = (mainOverrides: Overrides = {}, subOverrides: Overrides = {}) => {
   // Plain functions, not vi.fn(): `new FakeRedis(...)` must return the fake
   // client object the factory builds.
-  const FakeRedis: any = function () {
-    return makeIOClient({ ...mainOverrides, duplicate: () => makeIOClient(subOverrides) });
-  };
-  FakeRedis.Cluster = function (nodes: any, options: any) {
-    FakeRedis.Cluster.calls.push({ nodes, options });
+  const calls: { nodes: unknown; options: unknown }[] = [];
+  function Cluster(nodes: unknown, options: unknown) {
+    calls.push({ nodes, options });
     return makeIOClient({ status: "ready" });
-  };
-  FakeRedis.Cluster.calls = [];
-  return FakeRedis;
+  }
+  function FakeRedis() {
+    return makeIOClient({ ...mainOverrides, duplicate: () => makeIOClient(subOverrides) });
+  }
+  return Object.assign(FakeRedis, { Cluster: Object.assign(Cluster, { calls }) });
 };
 
-const makeLimiterInstance = () => ({
-  channel: () => "ch-one",
-  channel_client: () => "ch-two",
-  _store: { onMessage: vi.fn<(...args: any[]) => void>() },
-});
+/** Just the limiter surface the connections touch when (un)registering. */
+const makeLimiterInstance = () => {
+  const instance = {
+    channel: () => "ch-one",
+    channel_client: () => "ch-two",
+    _store: { onMessage: vi.fn<(...args: unknown[]) => void>() },
+  };
+  return { instance, limiter: wrongType<BottleneckBase>(instance) };
+};
 
 describe("RedisConnection (node-redis)", () => {
   test("Should refuse to build without a Redis reference or a pre-built client", () => {
@@ -120,7 +141,7 @@ describe("RedisConnection (node-redis)", () => {
 
     await expect(conn.__runScript__("register", "id", [null, 5])).resolves.toBe(7);
     expect(client.scriptLoad).toHaveBeenCalledTimes(Scripts.names.length + 1);
-    expect(client.evalSha.mock.calls[1][1].arguments[0]).toBe("");
+    expect(client.evalSha.mock.calls[1]?.[1].arguments[0]).toBe("");
   });
 
   test("Should reject ready when script loading fails", async () => {
@@ -152,15 +173,15 @@ describe("RedisConnection (node-redis)", () => {
     await conn.ready;
 
     const errors: unknown[] = [];
-    (conn as any).on("error", (e: unknown) => errors.push(e));
+    conn.on("error", (e: unknown) => errors.push(e));
 
     client.emit("error", new Error("boom"));
-    (conn.subscriber as any).emit("error", new Error("boom"));
+    fake(conn.subscriber).emit("error", new Error("boom"));
     expect(errors.length).toBe(2);
 
     conn.terminated = true;
     client.emit("error", new Error("ignored"));
-    (conn.subscriber as any).emit("error", new Error("ignored"));
+    fake(conn.subscriber).emit("error", new Error("ignored"));
     expect(errors.length).toBe(2);
   });
 
@@ -169,15 +190,15 @@ describe("RedisConnection (node-redis)", () => {
     const conn = new RedisConnection({ client });
     await conn.ready;
 
-    const instance = makeLimiterInstance() as any;
-    await conn.__addLimiter__(instance);
+    const { instance, limiter } = makeLimiterInstance();
+    await conn.__addLimiter__(limiter);
     expect(conn.subscriber.subscribe).toHaveBeenCalledTimes(2);
 
-    const onMessage = (conn.subscriber as any)._handlers.__subscriptions["ch-one"];
-    onMessage("hello");
+    const onMessage = fake(conn.subscriber)._subscriptions["ch-one"];
+    onMessage?.("hello");
     expect(instance._store.onMessage).toHaveBeenCalledWith("ch-one", "hello");
 
-    await conn.__removeLimiter__(instance);
+    await conn.__removeLimiter__(limiter);
     expect(conn.subscriber.unsubscribe).toHaveBeenCalledTimes(2);
     expect(conn.limiters["ch-one"]).toBeUndefined();
   });
@@ -188,21 +209,21 @@ describe("RedisConnection (node-redis)", () => {
     await conn1.ready;
     await conn1.disconnect(true);
     expect(client1.close).toHaveBeenCalledTimes(1);
-    expect(client1.subscriber).toBeUndefined();
-    expect((conn1.subscriber as any).quit).toHaveBeenCalledTimes(1);
-    expect((conn1.subscriber as any).close).toBeUndefined();
+    expect(client1).not.toHaveProperty("subscriber");
+    expect(fake(conn1.subscriber).quit).toHaveBeenCalledTimes(1);
+    expect(conn1.subscriber.close).toBeUndefined();
 
     // The no-op error handlers installed by disconnect() must absorb late
     // client error events.
-    (conn1.client as any).emit("error", new Error("late"));
-    (conn1.subscriber as any).emit("error", new Error("late"));
+    fake(conn1.client).emit("error", new Error("late"));
+    fake(conn1.subscriber).emit("error", new Error("late"));
 
     const client2 = makeNodeClient({}, { close: undefined, destroy: undefined });
     const conn2 = new RedisConnection({ client: client2 });
     await conn2.ready;
     await conn2.disconnect(false);
     expect(client2.destroy).toHaveBeenCalledTimes(1);
-    expect((conn2.subscriber as any).disconnect).toHaveBeenCalledTimes(1);
+    expect(fake(conn2.subscriber).disconnect).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -235,19 +256,23 @@ describe("IORedisConnection", () => {
     await Promise.resolve();
     expect(resolved).toBe(false);
 
-    (conn.subscriber as any).emit("ready");
+    fake(conn.subscriber).emit("ready");
     await conn.ready;
     expect(resolved).toBe(true);
   });
 
   test("Should build a Cluster subscriber when the client cannot duplicate", async () => {
     const Redis = makeFakeRedis();
-    const client = makeIOClient({ status: "ready" });
-    client.startupNodes = ["node-1"];
-    client.options = { keyPrefix: "x" };
-    delete client.duplicate;
+    const client = makeIOClient({
+      status: "ready",
+      startupNodes: ["node-1"],
+      options: { keyPrefix: "x" },
+      duplicate: undefined,
+    });
 
-    const conn = new IORedisConnection({ Redis, client });
+    // The options type forbids `Redis` alongside `client`, but the Cluster
+    // fallback for a non-duplicating client reads it.
+    const conn = new IORedisConnection(wrongType({ Redis, client }));
 
     await conn.ready;
     expect(Redis.Cluster.calls).toEqual([{ nodes: client.startupNodes, options: client.options }]);
@@ -258,14 +283,14 @@ describe("IORedisConnection", () => {
     const conn = new IORedisConnection({ Redis, clientOptions: {} });
     await conn.ready;
 
-    const instance = makeLimiterInstance() as any;
-    await conn.__addLimiter__(instance);
+    const { instance, limiter } = makeLimiterInstance();
+    await conn.__addLimiter__(limiter);
     expect(conn.subscriber.subscribe).toHaveBeenCalledTimes(2);
 
-    (conn.subscriber as any).emit("message", "ch-one", "hello");
+    fake(conn.subscriber).emit("message", "ch-one", "hello");
     expect(instance._store.onMessage).toHaveBeenCalledWith("ch-one", "hello");
 
-    await conn.__removeLimiter__(instance);
+    await conn.__removeLimiter__(limiter);
     expect(conn.subscriber.unsubscribe).toHaveBeenCalledTimes(2);
     expect(conn.limiters["ch-one"]).toBeUndefined();
   });
@@ -276,14 +301,14 @@ describe("IORedisConnection", () => {
     await conn.ready;
 
     const errors = [];
-    (conn as any).on("error", (e: unknown) => errors.push(e));
+    conn.on("error", (e: unknown) => errors.push(e));
 
-    (conn.client as any).emit("error", new Error("boom"));
-    (conn.subscriber as any).emit("error", new Error("boom"));
+    fake(conn.client).emit("error", new Error("boom"));
+    fake(conn.subscriber).emit("error", new Error("boom"));
     expect(errors.length).toBe(2);
 
     conn.terminated = true;
-    (conn.client as any).emit("error", new Error("ignored"));
+    fake(conn.client).emit("error", new Error("ignored"));
     expect(errors.length).toBe(2);
   });
 
@@ -291,23 +316,23 @@ describe("IORedisConnection", () => {
     const Redis1 = makeFakeRedis({ status: "ready" }, { status: "ready" });
     const conn1 = new IORedisConnection({ Redis: Redis1, clientOptions: {} });
     await conn1.ready;
-    (conn1.client as any).quit = vi.fn<() => Promise<string>>(async () => "OK");
-    (conn1.subscriber as any).quit = vi.fn<() => Promise<string>>(async () => "OK");
+    conn1.client.quit = vi.fn<() => Promise<string>>(async () => "OK");
+    conn1.subscriber.quit = vi.fn<() => Promise<string>>(async () => "OK");
     await conn1.disconnect(true);
-    expect((conn1.client as any).quit).toHaveBeenCalledTimes(1);
-    expect((conn1.subscriber as any).quit).toHaveBeenCalledTimes(1);
+    expect(conn1.client.quit).toHaveBeenCalledTimes(1);
+    expect(conn1.subscriber.quit).toHaveBeenCalledTimes(1);
 
     // Late errors are absorbed by the no-op handlers disconnect() installs.
-    (conn1.client as any).emit("error", new Error("late"));
-    (conn1.subscriber as any).emit("error", new Error("late"));
+    fake(conn1.client).emit("error", new Error("late"));
+    fake(conn1.subscriber).emit("error", new Error("late"));
 
     const Redis2 = makeFakeRedis({ status: "ready" }, { status: "ready" });
     const conn2 = new IORedisConnection({ Redis: Redis2, clientOptions: {} });
     await conn2.ready;
-    (conn2.client as any).disconnect = vi.fn<() => void>();
-    (conn2.subscriber as any).disconnect = vi.fn<() => void>();
+    conn2.client.disconnect = vi.fn<() => void>();
+    conn2.subscriber.disconnect = vi.fn<() => void>();
     await conn2.disconnect(false);
-    expect((conn2.client as any).disconnect).toHaveBeenCalledTimes(1);
+    expect(conn2.client.disconnect).toHaveBeenCalledTimes(1);
     expect(conn2.subscriber.disconnect).toHaveBeenCalledTimes(1);
   });
 });

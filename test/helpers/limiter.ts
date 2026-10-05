@@ -6,9 +6,9 @@ import type { BottleneckOptions } from "../../src/types";
 import Bottleneck from "../bottleneck";
 import buildClientOptions from "../redis-client-options";
 
-function setRedisClientOptions(options: Record<string, any>) {
+function setRedisClientOptions(options: Record<string, unknown>) {
   if (options.clientOptions == null) {
-    options.clientOptions = buildClientOptions(options.datastore);
+    options.clientOptions = buildClientOptions(String(options.datastore));
   }
 }
 
@@ -20,10 +20,10 @@ function setRedisClientOptions(options: Record<string, any>) {
  * @returns {import("../../src/Bottleneck").default}
  */
 function makeLimiter(
-  options: Record<string, any> = {},
+  options: Record<string, unknown> = {},
   meta: { expectErrors?: boolean } = {},
 ): BottleneckBase {
-  const assigned = Object.assign({}, options) as Record<string, any>;
+  const assigned = Object.assign({}, options) as Record<string, unknown>;
   options = assigned;
 
   if (options.datastore == null) {

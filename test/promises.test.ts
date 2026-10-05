@@ -2,6 +2,7 @@ import { describe, expect } from "vitest";
 import Bottleneck from "./bottleneck";
 import { useFakeClock } from "./helpers/clock";
 import { test, waitForState, deferred } from "./helpers/test-api";
+import { wrongType } from "./helpers/wrong-type";
 
 useFakeClock();
 
@@ -59,13 +60,13 @@ describe("Promises", () => {
       dropped++;
     });
 
-    p1 = limiter.schedule({ id: 1 } as any, h.slowPromise, 50, null, 1);
-    p2 = limiter.schedule({ id: 2 } as any, h.slowPromise, 50, null, 2);
+    p1 = limiter.schedule({ id: wrongType<string>(1) }, h.slowPromise, 50, null, 1);
+    p2 = limiter.schedule({ id: wrongType<string>(2) }, h.slowPromise, 50, null, 2);
 
     try {
-      await limiter.schedule({ id: 3 } as any, h.slowPromise, 50, null, 3);
-    } catch (err: any) {
-      expect(err.message).toEqual("This job has been dropped by Bottleneck");
+      await limiter.schedule({ id: wrongType<string>(3) }, h.slowPromise, 50, null, 3);
+    } catch (err) {
+      expect(err).toHaveProperty("message", "This job has been dropped by Bottleneck");
       expect(err).toBeInstanceOf(Bottleneck.BottleneckError);
       caught++;
       await Promise.all([expect(p1).resolves.toEqual([1]), expect(p2).resolves.toEqual([2])]);
@@ -91,7 +92,7 @@ describe("Promises", () => {
   });
 
   describe("Wrap", () => {
-    let fn: any;
+    let fn: () => Promise<unknown>;
     test.override({ limiterOptions: { maxConcurrent: 1, minTime: 100 } });
 
     test("Should wrap", async ({ harness: h, limiter }) => {
@@ -153,7 +154,7 @@ describe("Promises", () => {
         }
       }
 
-      Animal.prototype.getName = limiter.wrap(Animal.prototype.getName) as any;
+      Animal.prototype.getName = wrongType(limiter.wrap(Animal.prototype.getName));
       let elephant = new Animal("Dumbo");
 
       const result = await elephant.getName();

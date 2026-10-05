@@ -20,7 +20,7 @@ export function deferred(): { signal: Promise<unknown>; release: () => void } {
  * Bottleneck task functions that record into `log.record(err, result)`.
  * Expects a `log` with a `record(err, result)` method.
  */
-export function createTaskFns(log: { record: (err: unknown, result: unknown) => void }) {
+export function createTaskFns(log: { record: (err: unknown, result: unknown[]) => void }) {
   async function promise(err: unknown, ...result: unknown[]) {
     log.record(err, result);
     if (err === null) {
