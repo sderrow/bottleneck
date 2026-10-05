@@ -3,7 +3,7 @@ import sleep from "../src/sleep";
 import Bottleneck from "./bottleneck";
 import { useFakeClock } from "./helpers/clock";
 import { defined } from "./helpers/defined";
-import { test, waitForState } from "./helpers/test-api";
+import { deferred, test, waitForState } from "./helpers/test-api";
 
 useFakeClock();
 
@@ -134,36 +134,93 @@ describe("Group", () => {
     });
     expect(Object.keys(group.limiters)).toStrictEqual([]);
 
-    const results: unknown[][] = [];
-
-    const job = async (...result: unknown[]) => {
-      results.push(result);
-      await sleep(50);
+    const ranA: unknown[][] = [];
+    const ranC: unknown[][] = [];
+    const runA = async (...result: unknown[]) => {
+      ranA.push(result);
+    };
+    const runC = async (...result: unknown[]) => {
+      ranC.push(result);
     };
 
-    group.key("A").schedule(job, 1, 2);
-    group.key("A").schedule(job, 3);
-    group.key("A").schedule(job, 4);
-    // Fire-and-forget: the rejection must be recorded concurrently with the
-    // other scheduled jobs; awaiting it inline would delay the schedules below
-    // and change the ordering under test.
-    group
-      .key("B")
-      .schedule(() => Promise.reject(new Error(failureMessage)))
-      .catch((err) => {
-        results.push(["CAUGHT", err.message]);
-      });
-    setTimeout(() => {
-      group.key("C").schedule(job, 6);
-      group.key("C").schedule(job, 7);
-    }, 40);
+    // Hold key A's first job open. Whatever runs on B and C meanwhile proves
+    // a Group's keys don't share capacity or failures. (Holding A's slot can't
+    // show minTime isolation: C would run under a shared minTime clock too,
+    // just later. The fake-clock test below covers that.)
+    const holdA = deferred();
+    const a1 = group.key("A").schedule(
+      async (...result: unknown[]) => {
+        ranA.push(result);
+        await holdA.signal;
+      },
+      1,
+      2,
+    );
+    const a3 = group.key("A").schedule(runA, 3);
+    const a4 = group.key("A").schedule(runA, 4);
+    await waitForState(() => expect(ranA).toStrictEqual([[1, 2]]));
 
-    // Scheduled last on key "A", so it runs once all other jobs are done and
-    // acts as the completion barrier; assertion failures reject the promise.
-    await group.key("A").schedule(async () => {
-      expect(results).toStrictEqual([[1, 2], ["CAUGHT", failureMessage], [6], [3], [7], [4]]);
-    });
+    // The failure reaches its caller...
+    await expect(
+      group.key("B").schedule(() => Promise.reject(new Error(failureMessage))),
+    ).rejects.toThrow(failureMessage);
+    // ...and doesn't disturb the other keys.
+    await Promise.all([group.key("C").schedule(runC, 6), group.key("C").schedule(runC, 7)]);
+    expect(ranC).toStrictEqual([[6], [7]]);
+    expect(ranA).toStrictEqual([[1, 2]]);
+
+    holdA.release();
+    await Promise.all([a1, a3, a4]);
+    expect(ranA).toStrictEqual([[1, 2], [3], [4]]);
   });
+
+  // Each key has its own minTime clock, so keys interleave in time: C[6] runs
+  // at 40 while A's next dispatch is gated until 100, then A[3] (100), C[7]
+  // (140), A[4] (200). The job sleeps 50 < minTime, so A[3] waits on minTime,
+  // not on concurrency. The exact interleaving needs virtual time; under real
+  // timers a stall reorders the keys. Gated on DATASTORE (the condition
+  // useFakeClock() checks), not isFakeClock(): timers are not installed yet at
+  // test-collection time.
+  test.runIf(process.env.DATASTORE == null)(
+    "Should interleave keys by their own minTime",
+    async ({ makeGroup }) => {
+      const failureMessage = "SOMETHING BLEW UP!!";
+      const group = makeGroup({
+        maxConcurrent: 1,
+        minTime: 100,
+      });
+
+      const results: unknown[][] = [];
+
+      const job = async (...result: unknown[]) => {
+        results.push(result);
+        await sleep(50);
+      };
+
+      group.key("A").schedule(job, 1, 2);
+      group.key("A").schedule(job, 3);
+      group.key("A").schedule(job, 4);
+      // Fire-and-forget: the rejection must be recorded concurrently with the
+      // other scheduled jobs; awaiting it inline would delay the schedules below
+      // and change the ordering under test.
+      group
+        .key("B")
+        .schedule(() => Promise.reject(new Error(failureMessage)))
+        .catch((err) => {
+          results.push(["CAUGHT", err.message]);
+        });
+      setTimeout(() => {
+        group.key("C").schedule(job, 6);
+        group.key("C").schedule(job, 7);
+      }, 40);
+
+      // Scheduled last on key "A", so it runs once all other jobs are done and
+      // acts as the completion barrier; assertion failures reject the promise.
+      await group.key("A").schedule(async () => {
+        expect(results).toStrictEqual([[1, 2], ["CAUGHT", failureMessage], [6], [3], [7], [4]]);
+      });
+    },
+  );
 
   test("Should update its timeout", async ({ makeGroup }) => {
     const group1 = makeGroup({
