@@ -3,11 +3,16 @@ import type Bottleneck from "./Bottleneck";
 import type Events from "./Events";
 import type States from "./States";
 import type { EventInfo, EventInfoRetryable, JobDefaults, ResolvedJobOptions } from "./types";
-import { bindTask, captureAsyncResource, runWithAsyncResource } from "./async-context";
+import { captureAsyncResource, runWithAsyncResource } from "./async-context";
 import BottleneckError from "./BottleneckError";
 import { load } from "./parser";
 import randomIndex from "./random-index";
-import { attachScheduleStack, forwardChain, type ScheduleStackCapture } from "./schedule-stack";
+import {
+  attachScheduleStack,
+  forwardChain,
+  runTask,
+  type ScheduleStackCapture,
+} from "./schedule-stack";
 
 const NUM_PRIORITIES = 10;
 const DEFAULT_PRIORITY = 5;
@@ -28,9 +33,10 @@ class Job {
    */
   scheduleStackCapture: ScheduleStackCapture | undefined;
   /**
-   * Async context active when schedule() was called, re-entered for the
-   * chained limiter's schedule() path in doExecute (which otherwise runs
-   * from this job's timer context). Undefined outside Node.
+   * Async context active when schedule() was called (e.g. AsyncLocalStorage
+   * state), re-entered in doExecute to run the task or forward it to the
+   * chained limiter, which otherwise run from this job's timer context.
+   * Undefined outside Node, where the task runs without it.
    * @internal
    */
   asyncResource: AsyncResource | undefined;
@@ -49,7 +55,7 @@ class Job {
     _states: States,
     scheduleStackCapture?: ScheduleStackCapture,
   ) {
-    this.task = bindTask(task);
+    this.task = task;
     this.args = args;
     this.rejectOnDrop = rejectOnDrop;
     this.Events = Events;
@@ -160,7 +166,9 @@ class Job {
               chained.schedule(this.options as never, this.task as never, ...(this.args ?? [])),
             ),
           )
-        : (this.task as (...args: never[]) => unknown)(...(this.args ?? [])));
+        : this.asyncResource != null
+          ? this.asyncResource.runInAsyncScope(runTask, this, this.task, this.args ?? [])
+          : this.task(...(this.args ?? [])));
 
       if (clearGlobalState()) {
         this.doDone(eventInfo);

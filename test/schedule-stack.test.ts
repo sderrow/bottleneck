@@ -26,6 +26,12 @@ function expectNoLibraryFrames(section: string | undefined): void {
   expect(section).not.toMatch(/src[/\\](Bottleneck|Job)\.ts/);
 }
 
+/** Frames that ran the task a job was scheduled from, cut at its marker. */
+function expectNoTaskRunnerFrames(section: string | undefined): void {
+  expect(section).toBeDefined();
+  expect(section).not.toMatch(/__bottleneckRunTask|runInAsyncScope|bound \[as task\]/);
+}
+
 describe("Schedule stacks", () => {
   test("rejection stack includes both the task and the schedule call site", async ({
     makeLimiter,
@@ -154,6 +160,8 @@ describe("Schedule stacks", () => {
     // Only the outermost section reaches the app's original call site.
     expect(sections[2]).toContain("startNestedSchedules");
     expect(sections[0]).not.toContain("startNestedSchedules");
+    expectNoTaskRunnerFrames(sections[0]);
+    expectNoTaskRunnerFrames(sections[1]);
   });
 
   test("wrap() and withOptions() capture the wrapped function's caller", async ({
@@ -276,12 +284,12 @@ describe("Schedule stacks", () => {
     const inner = makeLimiter({ id: "task-body-inner", datastore: "local" });
     const outer = makeLimiter({ id: "task-body-outer", datastore: "local" });
 
+    const outerTaskBody = () =>
+      inner.schedule(() => {
+        throw new Error("boom-task-body");
+      });
     function scheduleFromTaskBody(): Promise<never> {
-      return outer.schedule(() =>
-        inner.schedule(() => {
-          throw new Error("boom-task-body");
-        }),
-      ) as Promise<never>;
+      return outer.schedule(outerTaskBody) as Promise<never>;
     }
 
     const error = await scheduleFromTaskBody().catch((e: unknown) => e);
@@ -291,6 +299,27 @@ describe("Schedule stacks", () => {
     expect(stack).toContain("task-body-inner):");
     expect(stack).toContain("task-body-outer):");
     expect(stack).toContain("scheduleFromTaskBody");
+    const [innerSection] = scheduleSections(error);
+    expect(innerSection).toContain("outerTaskBody");
+    expectNoTaskRunnerFrames(innerSection);
+  });
+
+  test("a schedule after an await in a task body keeps the task frame", async ({ makeLimiter }) => {
+    const inner = makeLimiter({ id: "task-await-inner", datastore: "local" });
+    const outer = makeLimiter({ id: "task-await-outer", datastore: "local" });
+
+    const outerTaskAwait = async () => {
+      await Promise.resolve();
+      return inner.schedule(() => {
+        throw new Error("boom-task-await");
+      });
+    };
+    const error = await outer.schedule(outerTaskAwait).catch((e: unknown) => e);
+    const [innerSection] = scheduleSections(error);
+    expect(innerSection).toContain("outerTaskAwait");
+    // The marker isn't on the stack after the await; V8 leaves just one
+    // `at async Job.doExecute` frame below the task.
+    expectNoTaskRunnerFrames(innerSection);
   });
 
   test("an explicit scheduleStackLabel is used for the marker", async ({ makeLimiter }) => {
