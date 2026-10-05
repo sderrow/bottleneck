@@ -1,8 +1,8 @@
 import Redis from "ioredis";
 import ioredisPkg from "ioredis/package.json" with { type: "json" };
-import { describe, expect, vi } from "vitest";
-import { redisStore } from "./helpers/store";
-import { test, waitForState } from "./helpers/test-api";
+import { describe, expect, onTestFinished, vi } from "vitest";
+import { limiterKeys, redisStore } from "./helpers/store";
+import { test } from "./helpers/test-api";
 import buildClientOptions from "./redis-client-options";
 
 describe("ioredis-only", () => {
@@ -65,10 +65,7 @@ describe("ioredis-only", () => {
     makeLimiter,
     makeConnection,
   }) => {
-    const connection = makeConnection({
-      Redis,
-      clientOptions: buildClientOptions("ioredis"),
-    });
+    const connection = makeConnection();
     const limiter = makeLimiter({
       minTime: 50,
       connection,
@@ -94,6 +91,7 @@ describe("ioredis-only", () => {
     makeConnection,
   }) => {
     const client = new Redis(buildClientOptions("ioredis"));
+    onTestFinished(() => client.disconnect());
 
     const connection = makeConnection({ client });
     const limiter = makeLimiter({
@@ -118,15 +116,13 @@ describe("ioredis-only", () => {
 
   test("Should trigger error events on the shared connection", ({
     makeLimiter,
+    makeClient,
     makeConnection,
   }) => {
     expect.hasAssertions();
     return new Promise<void>((resolve, reject) => {
       const connection = makeConnection({
-        Redis,
-        clientOptions: {
-          port: 1,
-        },
+        client: makeClient({ port: 1 }, { expectErrors: true }),
       });
       let fired = false;
       const limiter = makeLimiter({ connection });
@@ -185,9 +181,10 @@ describeResp3("ioredis RESP3", () => {
   });
 
   test("Should normalize RESP3 hgetall and withscores replies in __runCommand__", async ({
+    makeClient,
     makeConnection,
   }) => {
-    const connection = makeConnection({ Redis, clientOptions: resp3ClientOptions() });
+    const connection = makeConnection({ client: makeClient(resp3ClientOptions()) });
     await connection.ready;
     // Guard against silently testing RESP2: if this ever fails on an ioredis
     // upgrade, the option name or default protocol changed and these tests
@@ -211,14 +208,14 @@ describeResp3("ioredis RESP3", () => {
   });
 
   test("Should normalize RESP2 replies in __runCommand__ when protocol 2 is forced", async ({
+    makeClient,
     makeConnection,
   }) => {
     // ioredis 5 (still a supported peer dep) is RESP2-only; force the same
     // wire protocol under ioredis 6 so the RESP2 branches of normalizeReply
     // (HGETALL flat array, WITHSCORES passthrough) run against a real server.
     const connection = makeConnection({
-      Redis,
-      clientOptions: { ...buildClientOptions("ioredis"), protocol: 2 },
+      client: makeClient({ ...buildClientOptions("ioredis"), protocol: 2 }),
     });
     await connection.ready;
     // ioredis 5 has no protocol option (RESP2-only); only assert under v6+.
@@ -265,36 +262,60 @@ describeResp3("ioredis RESP3", () => {
   });
 });
 
-// Pins what a connection does to a client passed in to it. v5 stops all of
-// this (the client belongs to the consumer); these tests change with it.
-describe("ioredis passed-in client side effects", () => {
-  test("Should install listeners and scripts on the client, then strip and close it", async ({
+// The client belongs to the consumer: the connection only sends commands on
+// it, never adding listeners or script methods, and never closing it.
+describe("ioredis passed-in client", () => {
+  test("Should only send commands on a passed-in client", async ({
+    makeLimiter,
     makeConnection,
   }) => {
     const client = new Redis(buildClientOptions("ioredis"));
+    onTestFinished(() => client.disconnect());
     const consumerListener = vi.fn<() => void>();
     client.on("error", consumerListener);
+    const maxListeners = client.getMaxListeners();
 
     const connection = makeConnection({ client });
-    await connection.ready;
-    expect(client.listenerCount("error")).toBe(2);
-    expect(client.getMaxListeners()).toBe(0);
-    // defineCommand installs each Lua script as a client method.
-    expect(client).toHaveProperty("submit", expect.any(Function));
+    const limiter = makeLimiter({ connection });
+    await expect(limiter.schedule(() => Promise.resolve("ran"))).resolves.toBe("ran");
+    expect(client.listeners("error")).toEqual([consumerListener]);
+    expect(client.getMaxListeners()).toBe(maxListeners);
+    // Scripts run through EVALSHA/EVAL, not methods defined on the client.
+    expect(client).not.toHaveProperty("submit");
 
+    await limiter.disconnect();
     await connection.disconnect(true);
-    expect(client.listeners("error")).not.toContain(consumerListener);
-    expect(client.listenerCount("error")).toBe(1);
-    await waitForState(() => expect(client.status).toBe("end"));
+    expect(client.listeners("error")).toEqual([consumerListener]);
+    expect(client.status).toBe("ready");
   });
 
-  test("Should disconnect a passed-in client on disconnect(false)", async ({ makeConnection }) => {
+  test("Should apply the client's keyPrefix to script keys", async ({
+    makeClient,
+    makeConnection,
+    makeLimiter,
+  }) => {
+    // Inside the per-fork prefix, so test cleanup still finds these keys.
+    const keyPrefix = `b_${process.env.BOTTLENECK_TEST_PREFIX}kp:`;
+    const connection = makeConnection({
+      client: makeClient({ ...buildClientOptions("ioredis"), keyPrefix }),
+    });
+    const limiter = makeLimiter({ id: "prefixed", connection });
+    await expect(limiter.schedule(() => Promise.resolve("ran"))).resolves.toBe("ran");
+
+    const [settingsKey] = limiterKeys(limiter);
+    const unprefixed = makeConnection();
+    expect(await unprefixed.__runCommand__(["exists", `${keyPrefix}${settingsKey}`])).toBe(1);
+    expect(await unprefixed.__runCommand__(["exists", settingsKey])).toBe(0);
+  });
+
+  test("Should leave a passed-in client open on disconnect(false)", async ({ makeConnection }) => {
     const client = new Redis(buildClientOptions("ioredis"));
+    onTestFinished(() => client.disconnect());
     const connection = makeConnection({ client });
     await connection.ready;
 
     await connection.disconnect(false);
 
-    await waitForState(() => expect(client.status).toBe("end"));
+    await expect(client.ping()).resolves.toBe("PONG");
   });
 });

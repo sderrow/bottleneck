@@ -1,21 +1,28 @@
 import type Bottleneck from "../Bottleneck";
 import type { IORedisConnectionOptions } from "../types";
-import type { IORedisClient, IORedisLib, RedisClients } from "./redis-types";
+import type { ConnectionInternals, IORedisClient, RedisClients } from "./redis-types";
+import { runDetached } from "../async-context";
 import BottleneckError from "../BottleneckError";
 import Events from "../Events";
-import { load } from "../parser";
 import { normalizeReply } from "./normalizeReply";
 import * as Scripts from "./Scripts";
 
-class IORedisConnection {
-  /** @internal */
-  Redis: IORedisLib | null;
-  /** @internal */
-  clientOptions: object;
-  /** @internal */
-  clusterNodes: unknown;
-  /** @internal */
-  client: IORedisClient;
+const noop = () => {};
+
+const whenReady = (c: IORedisClient) =>
+  new Promise<void>((resolve) => {
+    if (c.status === "ready") {
+      resolve();
+    } else {
+      c.once("ready", resolve);
+    }
+  });
+
+class IORedisConnection<C extends IORedisClient = IORedisClient> {
+  /** The client passed in. The connection only sends commands on it. */
+  readonly client: C;
+  /** The pub/sub client: `options.subscriber`, or a `client.duplicate()` the connection owns. */
+  readonly subscriber: C;
   /** @internal */
   Events: Events;
   /** @internal */
@@ -23,10 +30,10 @@ class IORedisConnection {
   /** @internal */
   terminated = false;
   /** @internal */
-  subscriber: IORedisClient;
-  /** @internal */
   limiters: Record<string, Bottleneck> = {};
-  ready: Promise<RedisClients<IORedisClient>>;
+  /** @internal Clients this connection listens to and closes. */
+  owned: C[];
+  ready: Promise<RedisClients<C>>;
 
   // Installed on the instance by Events (see Events constructor).
   declare on: {
@@ -39,96 +46,59 @@ class IORedisConnection {
   };
   declare removeAllListeners: (name?: string | null) => void;
 
+  constructor(options: IORedisConnectionOptions<C>) {
+    const {
+      client,
+      subscriber,
+      Events: events,
+      ownsClient = false,
+    }: Partial<IORedisConnectionOptions<C>> & ConnectionInternals = options ?? {};
+    if (client == null) {
+      throw new BottleneckError(
+        "IORedisConnection requires an ioredis `client`: `new IORedisConnection({ client })`.",
+        "MISSING_CLIENT",
+      );
+    }
+
+    this.Events = events ?? new Events(this);
+    this.client = client;
+    // Sockets the connection creates must not capture the constructing
+    // caller's async context: pub/sub-driven work would otherwise run (and
+    // trace) inside it for the connection's whole lifetime.
+    this.subscriber = subscriber ?? runDetached(() => client.duplicate() as C);
+    this.owned = [
+      ...(ownsClient ? [client] : []),
+      ...(subscriber == null ? [this.subscriber] : []),
+    ];
+
+    this.ready = runDetached(() => this._initReady());
+  }
+
   /** @internal */
-  defaults: {
-    Redis: IORedisLib | null;
-    clientOptions: object;
-    clusterNodes: unknown;
-    client: IORedisClient | null;
-    Events: Events | null;
-  } = {
-    Redis: null,
-    clientOptions: {},
-    clusterNodes: null,
-    client: null,
-    Events: null,
+  _onOwnedError = (e: unknown): void => {
+    if (!this.terminated) {
+      this.Events.trigger("error", e);
+    }
   };
 
-  constructor(options?: IORedisConnectionOptions) {
-    const opts = load(options ?? {}, this.defaults);
-    this.Redis = opts.Redis;
-    this.clientOptions = opts.clientOptions;
-    this.clusterNodes = opts.clusterNodes;
-
-    const requireRedis = (): IORedisLib => {
-      if (opts.Redis == null) {
-        throw new BottleneckError(
-          "Bottleneck cluster mode requires a `Redis` library reference or a pre-built `client`. " +
-            "Pass it explicitly: `new Bottleneck({ datastore: 'ioredis', Redis: require('ioredis'), clientOptions })`.",
-          "MISSING_CLIENT",
-        );
+  /** @internal */
+  _onMessage = (channel: string, message: string): void => {
+    (
+      this.limiters[channel]?._store as unknown as {
+        onMessage?: (channel: string, message: string) => Promise<unknown>;
       }
-      return opts.Redis;
-    };
-    if (opts.client == null) requireRedis();
+    )?.onMessage?.(channel, message);
+  };
 
-    this.Events = opts.Events ?? new Events(this);
-    this.terminated = false;
-
-    if (opts.clusterNodes != null) {
-      const { Cluster } = requireRedis();
-      this.client = new Cluster(opts.clusterNodes, opts.clientOptions);
-      this.subscriber = new Cluster(opts.clusterNodes, opts.clientOptions);
-    } else {
-      const client = opts.client ?? new (requireRedis())(opts.clientOptions);
-      this.client = client;
-      // ioredis Cluster clients have no duplicate(); build a sibling Cluster instead.
-      this.subscriber =
-        client.duplicate?.() ?? new (requireRedis().Cluster)(client.startupNodes, client.options);
+  /** @internal */
+  async _initReady(): Promise<RedisClients<C>> {
+    for (const c of this.owned) {
+      c.setMaxListeners(0);
+      c.on("error", this._onOwnedError);
     }
-    this.limiters = {};
-
-    this.ready = this._initReady();
-  }
-
-  /** @internal */
-  async _initReady() {
-    await Promise.all([this._setup(this.client, false), this._setup(this.subscriber, true)]);
-    this._loadScripts();
+    this.subscriber.on("message", this._onMessage);
+    await Promise.all(this.owned.map(whenReady));
     return { client: this.client, subscriber: this.subscriber };
-  }
-
-  /** @internal */
-  _setup(client: IORedisClient, sub: boolean): Promise<void> {
-    client.setMaxListeners(0);
-    return new Promise((resolve) => {
-      client.on("error", (e: unknown) => {
-        if (!this.terminated) {
-          this.Events.trigger("error", e);
-        }
-      });
-      if (sub) {
-        client.on("message", (channel: string, message: string) => {
-          (
-            this.limiters[channel]?._store as unknown as {
-              onMessage?: (channel: string, message: string) => Promise<unknown>;
-            }
-          )?.onMessage?.(channel, message);
-        });
-      }
-      if (client.status === "ready") {
-        resolve();
-      } else {
-        client.once("ready", resolve);
-      }
-    });
-  }
-
-  /** @internal */
-  _loadScripts(): void {
-    Scripts.names.forEach((name) =>
-      this.client.defineCommand(name, { lua: Scripts.payload(name) }),
-    );
   }
 
   /** @internal */
@@ -143,7 +113,12 @@ class IORedisConnection {
   /** @internal */
   __runScript__(name: Scripts.ScriptName, id: string, args: unknown[]): Promise<unknown> {
     const keys = Scripts.keys(name, id);
-    return this.client[name](keys.length, ...keys, ...args);
+    const all = [...keys, ...Scripts.stringifyArgs(args)];
+    return Scripts.run(
+      name,
+      (sha) => this.client.evalsha(sha, keys.length, ...all),
+      (script) => this.client.eval(script, keys.length, ...all),
+    );
   }
 
   /** @internal */
@@ -174,18 +149,19 @@ class IORedisConnection {
       clearInterval(v._store?.heartbeat);
     }
     this.limiters = {};
+    if (this.terminated) return;
     this.terminated = true;
 
-    this.client.removeAllListeners?.("error");
-    this.client.on?.("error", () => {});
-    this.subscriber.removeAllListeners?.("error");
-    this.subscriber.on?.("error", () => {});
-
+    this.subscriber.removeListener("message", this._onMessage);
+    for (const c of this.owned) {
+      // Absorb late socket errors from clients that are closing.
+      c.removeListener("error", this._onOwnedError);
+      c.on("error", noop);
+    }
     if (flush) {
-      await Promise.all([this.client.quit(), this.subscriber.quit()]);
+      await Promise.all(this.owned.map((c) => c.quit()));
     } else {
-      this.client.disconnect();
-      this.subscriber.disconnect();
+      for (const c of this.owned) c.disconnect();
     }
   }
 }

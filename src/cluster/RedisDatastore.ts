@@ -1,12 +1,13 @@
 import type Bottleneck from "../Bottleneck";
 import type { StoreOptions } from "../types";
+import type IORedisConnection from "./IORedisConnection";
 import type { IORedisLib, NodeRedisLib, RedisClients } from "./redis-types";
+import type RedisConnection from "./RedisConnection";
 import type { ScriptName } from "./Scripts";
 import { runDetached, setDetachedInterval, setDetachedTimeout } from "../async-context";
 import BottleneckError from "../BottleneckError";
 import { load, overwrite } from "../parser";
-import IORedisConnection from "./IORedisConnection";
-import RedisConnection from "./RedisConnection";
+import ownedConnection from "./ownedConnection";
 
 class RedisDatastore {
   /** @internal */
@@ -42,35 +43,18 @@ class RedisDatastore {
     this.sharedConnection = this.connection != null;
 
     if (!this.connection) {
-      if (this.instance.datastore === "redis") {
-        // Socket setup outlives the constructing caller: the subscriber
-        // socket keeps its creation context, so creating it inside a traced
-        // request would drain pub/sub jobs (and their EVALSHA calls) into
-        // that request's trace for the limiter's whole lifetime.
-        this.connection = runDetached(
-          () =>
-            new RedisConnection({
-              Redis: this.Redis,
-              clientOptions: this.clientOptions,
-              Events: this.instance.Events,
-            }),
-        );
-      } else if (this.instance.datastore === "ioredis") {
-        this.connection = runDetached(
-          () =>
-            new IORedisConnection({
-              Redis: this.Redis,
-              clientOptions: this.clientOptions,
-              clusterNodes: this.clusterNodes,
-              Events: this.instance.Events,
-            }),
-        );
-      } else {
-        throw new BottleneckError(
-          `Invalid datastore type: ${this.instance.datastore}`,
-          "INVALID_DATASTORE",
-        );
-      }
+      // Socket setup outlives the constructing caller: the subscriber
+      // socket keeps its creation context, so creating it inside a traced
+      // request would drain pub/sub jobs (and their EVALSHA calls) into
+      // that request's trace for the limiter's whole lifetime.
+      this.connection = runDetached(() =>
+        ownedConnection(this.instance.datastore, {
+          Redis: this.Redis,
+          clientOptions: this.clientOptions,
+          clusterNodes: this.clusterNodes,
+          Events: this.instance.Events,
+        }),
+      );
     }
 
     this.instance.connection = this.connection;

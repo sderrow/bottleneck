@@ -1,14 +1,9 @@
-import type {
-  BottleneckOptions,
-  GroupEvents,
-  GroupLimiterPair,
-  IORedisConnectionOptions,
-  RedisConnectionOptions,
-} from "./types";
+import type IORedisConnection from "./cluster/IORedisConnection";
+import type RedisConnection from "./cluster/RedisConnection";
+import type { BottleneckOptions, GroupEvents, GroupLimiterPair } from "./types";
 import { runDetached, setDetachedInterval } from "./async-context";
 import Bottleneck from "./Bottleneck";
-import IORedisConnection from "./cluster/IORedisConnection";
-import RedisConnection from "./cluster/RedisConnection";
+import ownedConnection from "./cluster/ownedConnection";
 import * as Scripts from "./cluster/Scripts";
 import Events from "./Events";
 import { load, overwrite } from "./parser";
@@ -61,28 +56,13 @@ class Group {
     this.sharedConnection = this.connection != null;
     this.Bottleneck = Bottleneck;
 
-    if (this.connection == null) {
-      if (this.limiterOptions.datastore === "redis") {
-        // Same detachment rationale as RedisDatastore: socket setup must not
-        // capture the constructing caller's async context.
-        this.connection = runDetached(
-          () =>
-            new RedisConnection(
-              Object.assign({}, this.limiterOptions, {
-                Events: this.Events,
-              }) as unknown as RedisConnectionOptions,
-            ),
-        );
-      } else if (this.limiterOptions.datastore === "ioredis") {
-        this.connection = runDetached(
-          () =>
-            new IORedisConnection(
-              Object.assign({}, this.limiterOptions, {
-                Events: this.Events,
-              }) as unknown as IORedisConnectionOptions,
-            ),
-        );
-      }
+    const { datastore } = this.limiterOptions;
+    if (this.connection == null && (datastore === "redis" || datastore === "ioredis")) {
+      // Same detachment rationale as RedisDatastore: socket setup must not
+      // capture the constructing caller's async context.
+      this.connection = runDetached(() =>
+        ownedConnection(datastore, { ...this.limiterOptions, Events: this.Events }),
+      );
     }
   }
 

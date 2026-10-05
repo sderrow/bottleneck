@@ -1,7 +1,9 @@
 import { describe, expect } from "vitest";
+import type { NodeRedisClient } from "../src/cluster/redis-types";
 import { BottleneckError } from "../src/index";
 import Bottleneck from "./bottleneck";
 import { deferred, enqueued, test } from "./helpers/test-api";
+import { wrongType } from "./helpers/wrong-type";
 
 /*
  * The `code` on BottleneckError is the stable programmatic signal (messages
@@ -111,5 +113,14 @@ describe("BottleneckError codes", () => {
       "clientless connection should have thrown",
     );
     expect(codeOf(noClient)).toEqual("MISSING_CLIENT");
+
+    const closedClient = await capture(
+      Promise.resolve().then(
+        () =>
+          new Bottleneck.RedisConnection({ client: wrongType<NodeRedisClient>({ isOpen: false }) }),
+      ),
+      "unconnected client should have thrown",
+    );
+    expect(codeOf(closedClient)).toEqual("CLIENT_NOT_OPEN");
   });
 });

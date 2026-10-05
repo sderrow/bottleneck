@@ -25,3 +25,4 @@ export type {
   Strategy,
 } from "./types";
 export type { BottleneckErrorCode } from "./BottleneckError";
+export type { IORedisClient, NodeRedisClient } from "./cluster/redis-types";

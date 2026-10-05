@@ -1,5 +1,5 @@
 import * as Redis from "redis";
-import { describe, expect, vi } from "vitest";
+import { describe, expect, onTestFinished, vi } from "vitest";
 import { test } from "./helpers/test-api";
 import buildClientOptions from "./redis-client-options";
 
@@ -18,10 +18,7 @@ describe("node_redis-only", () => {
     makeLimiter,
     makeConnection,
   }) => {
-    const connection = makeConnection({
-      Redis,
-      clientOptions: buildClientOptions("redis"),
-    });
+    const connection = makeConnection();
     const limiter = makeLimiter({
       minTime: 50,
       connection,
@@ -47,6 +44,7 @@ describe("node_redis-only", () => {
     makeConnection,
   }) => {
     const client = Redis.createClient(buildClientOptions("redis"));
+    onTestFinished(() => client.disconnect());
     await client.connect();
 
     const connection = makeConnection({ client });
@@ -72,18 +70,16 @@ describe("node_redis-only", () => {
 
   test("Should trigger error events on the shared connection", ({
     makeLimiter,
+    makeClient,
     makeConnection,
   }) => {
     expect.hasAssertions();
     return new Promise<void>((resolve, reject) => {
       const connection = makeConnection({
-        Redis,
-        clientOptions: {
-          socket: {
-            port: 1,
-            reconnectStrategy: () => false,
-          },
-        },
+        client: makeClient(
+          { socket: { port: 1, reconnectStrategy: () => false } },
+          { expectErrors: true },
+        ),
       });
       connection.ready.catch(() => {});
       let fired = false;
@@ -104,37 +100,42 @@ describe("node_redis-only", () => {
   });
 });
 
-// Pins what a connection does to a client passed in to it. v5 stops all of
-// this (the client belongs to the consumer); these tests change with it.
-describe("node_redis passed-in client side effects", () => {
-  test("Should connect the client and install listeners, then strip and close it", async ({
+// The client belongs to the consumer: the connection only sends commands on
+// it, never connecting it, adding listeners, or closing it.
+describe("node_redis passed-in client", () => {
+  test("Should require a connected client and only send commands on it", async ({
+    makeLimiter,
     makeConnection,
   }) => {
     const client = Redis.createClient(buildClientOptions("redis"));
+    onTestFinished(() => (client.isOpen ? client.disconnect() : undefined));
     const consumerListener = vi.fn<() => void>();
     client.on("error", consumerListener);
-    expect(client.isOpen).toBe(false);
+    expect(() => makeConnection({ client })).toThrow(/call `client.connect\(\)` first/);
 
+    await client.connect();
+    const maxListeners = client.getMaxListeners();
     const connection = makeConnection({ client });
-    await connection.ready;
-    expect(client.isOpen).toBe(true);
-    expect(client.listenerCount("error")).toBe(2);
-    expect(client.getMaxListeners()).toBe(0);
+    const limiter = makeLimiter({ connection });
+    await expect(limiter.schedule(() => Promise.resolve("ran"))).resolves.toBe("ran");
+    expect(client.listeners("error")).toEqual([consumerListener]);
+    expect(client.getMaxListeners()).toBe(maxListeners);
 
+    await limiter.disconnect();
     await connection.disconnect(true);
-    expect(client.listeners("error")).not.toContain(consumerListener);
-    expect(client.listenerCount("error")).toBe(1);
-    expect(client.isOpen).toBe(false);
+    expect(client.listeners("error")).toEqual([consumerListener]);
+    expect(client.isOpen).toBe(true);
   });
 
-  test("Should destroy a passed-in client on disconnect(false)", async ({ makeConnection }) => {
+  test("Should leave a passed-in client open on disconnect(false)", async ({ makeConnection }) => {
     const client = Redis.createClient(buildClientOptions("redis"));
+    onTestFinished(() => (client.isOpen ? client.disconnect() : undefined));
     await client.connect();
     const connection = makeConnection({ client });
     await connection.ready;
 
     await connection.disconnect(false);
 
-    expect(client.isOpen).toBe(false);
+    await expect(client.ping()).resolves.toBe("PONG");
   });
 });

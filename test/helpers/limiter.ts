@@ -2,9 +2,21 @@ import IORedis from "ioredis";
 import { ConnectionTimeoutError, SocketClosedUnexpectedlyError } from "redis";
 import RedisClient from "redis";
 import type BottleneckBase from "../../src/Bottleneck";
+import type { IORedisClient, NodeRedisClient } from "../../src/cluster/redis-types";
 import type { BottleneckOptions } from "../../src/types";
 import Bottleneck from "../bottleneck";
 import buildClientOptions from "../redis-client-options";
+
+/** Log an error event unless it's a known transient connection error. */
+function logUnexpectedError(source: string, err: unknown): void {
+  const e = err as { code?: string; syscall?: string };
+  const isIoredisConnectTimeout = e?.code === "ETIMEDOUT" && e?.syscall === "connect";
+  const isTransientNodeRedisError =
+    err instanceof ConnectionTimeoutError || err instanceof SocketClosedUnexpectedlyError;
+  if (isIoredisConnectTimeout || isTransientNodeRedisError) return;
+
+  console.log(`(${source}) ERROR EVENT`, err);
+}
 
 function setRedisClientOptions(options: Record<string, unknown>) {
   if (options.clientOptions == null) {
@@ -45,15 +57,7 @@ function makeLimiter(
   const limiter = new Bottleneck(options as BottleneckOptions);
 
   if (!meta.expectErrors) {
-    limiter.on("error", (err) => {
-      const e = err as { code?: string; syscall?: string };
-      const isIoredisConnectTimeout = e?.code === "ETIMEDOUT" && e?.syscall === "connect";
-      const isTransientNodeRedisError =
-        err instanceof ConnectionTimeoutError || err instanceof SocketClosedUnexpectedlyError;
-      if (isIoredisConnectTimeout || isTransientNodeRedisError) return;
-
-      console.log("(makeLimiter) ERROR EVENT", err);
-    });
+    limiter.on("error", (err) => logUnexpectedError("makeLimiter", err));
   }
 
   // makeLimiter is synchronous; suppress the unhandled-rejection from ready()
@@ -68,11 +72,34 @@ export default makeLimiter;
 export { makeLimiter, buildClientOptions };
 
 /**
- * Options for a connection to the test Redis for the current datastore, so
- * tests can build one without caring how connections are constructed.
+ * A client for the test Redis of the current datastore (connection started,
+ * error listener attached), which the caller owns and must close with
+ * closeTestClient. Unexpected errors are logged unless `expectErrors`.
  */
-export function defaultConnectionOptions(): Record<string, unknown> {
-  return process.env.DATASTORE === "ioredis"
-    ? { Redis: IORedis, clientOptions: buildClientOptions("ioredis") }
-    : { Redis: RedisClient, clientOptions: buildClientOptions("redis") };
+export function makeTestClient(
+  clientOptions?: Record<string, unknown>,
+  meta: { expectErrors?: boolean } = {},
+): NodeRedisClient | IORedisClient {
+  const onError = (err: unknown) => {
+    if (!meta.expectErrors) logUnexpectedError("makeTestClient", err);
+  };
+  if (process.env.DATASTORE === "ioredis") {
+    const client = new IORedis(clientOptions ?? buildClientOptions("ioredis"));
+    client.on("error", onError);
+    return client;
+  }
+  const client = RedisClient.createClient(clientOptions ?? buildClientOptions("redis"));
+  client.on("error", onError);
+  // isOpen turns true synchronously, which is all RedisConnection needs.
+  client.connect().catch(onError);
+  return client;
+}
+
+/** Close a client from makeTestClient. */
+export async function closeTestClient(client: NodeRedisClient | IORedisClient): Promise<void> {
+  if ("status" in client) {
+    client.disconnect();
+  } else if (client.isOpen) {
+    await (typeof client.destroy === "function" ? client.destroy() : client.disconnect());
+  }
 }

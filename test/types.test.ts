@@ -1,3 +1,5 @@
+import type { Cluster, Redis as IORedis } from "ioredis";
+import type { createClient } from "redis";
 import { describe, expect, expectTypeOf, it } from "vitest";
 import type {
   BatcherOptions,
@@ -18,18 +20,18 @@ import Bottleneck, {
   RedisConnection,
 } from "../src/index";
 
+type NodeRedis = ReturnType<typeof createClient>;
+
+// Never called: the connection type assertions below are compile-time.
+const connectIORedis = (client: IORedis) => new IORedisConnection({ client });
+const connectCluster = (client: Cluster) => new IORedisConnection({ client });
+const connectNodeRedis = (client: NodeRedis) => new RedisConnection({ client });
+
 /*
  * Type-level contract test for the published surface. The generated dts
  * (dist/index.d.mts) is produced from these same source types, so asserting
  * on them here guards the published type contract.
  */
-
-const makeFakeRedisClient = () => ({
-  setMaxListeners() {},
-  on() {},
-  once() {},
-  duplicate: () => makeFakeRedisClient(),
-});
 
 describe("Bottleneck type contract", () => {
   it("exposes the strategy constants as literal types", () => {
@@ -151,35 +153,16 @@ describe("Bottleneck type contract", () => {
     expectTypeOf(limiter.channel()).toEqualTypeOf<string>();
   });
 
-  it("rejects connection options with both Redis and client", () => {
-    // Minimal stand-ins: the constructor runs for real (ready() stays pending
-    // because these fakes never emit "ready"), the assertions here are
-    // compile-time. They must satisfy _setup's synchronous calls.
-    const nodeRedisFake = {
-      createClient: makeFakeRedisClient,
-    };
-    const clientFake = makeFakeRedisClient();
-    class IORedisFake {
-      setMaxListeners() {}
-      on() {}
-      once() {}
-      duplicate() {
-        return makeFakeRedisClient();
-      }
-    }
+  it("infers a connection's client type from the client passed in", () => {
+    expectTypeOf<ReturnType<typeof connectIORedis>["client"]>().toEqualTypeOf<IORedis>();
+    expectTypeOf<ReturnType<typeof connectIORedis>["subscriber"]>().toEqualTypeOf<IORedis>();
+    expectTypeOf<ReturnType<typeof connectCluster>["client"]>().toEqualTypeOf<Cluster>();
+    expectTypeOf<ReturnType<typeof connectNodeRedis>["client"]>().toEqualTypeOf<NodeRedis>();
 
-    // Valid: either branch alone constructs.
-    void new Bottleneck.RedisConnection({ Redis: nodeRedisFake });
-    void new Bottleneck.RedisConnection({ client: clientFake });
-    void new Bottleneck.IORedisConnection({ Redis: IORedisFake });
-
-    // @ts-expect-error Redis and client are mutually exclusive
-    void new Bottleneck.RedisConnection({ Redis: nodeRedisFake, client: clientFake });
-    // @ts-expect-error ditto for ioredis
-    void new Bottleneck.IORedisConnection({ Redis: IORedisFake, client: clientFake });
-
-    expect(typeof Bottleneck.RedisConnection).toBe("function");
-    expect(typeof Bottleneck.IORedisConnection).toBe("function");
+    // @ts-expect-error a node-redis client isn't an ioredis client
+    void ((client: NodeRedis) => new IORedisConnection({ client }));
+    // @ts-expect-error connections take a client, not the library
+    void ((Redis: unknown) => new RedisConnection({ Redis }));
   });
 
   it("keeps option types structural", () => {
