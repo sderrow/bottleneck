@@ -3,6 +3,7 @@ import type BottleneckBase from "../src/Bottleneck";
 import * as Scripts from "../src/cluster/Scripts";
 import sleep from "../src/sleep";
 import Bottleneck from "./bottleneck";
+import { defined } from "./helpers/defined";
 import { test, waitForState, deferred, enqueued } from "./helpers/test-api";
 
 // Causality policy (Workstream B): observe product-timer effects via waitForState
@@ -506,17 +507,18 @@ describe("Cluster coordination", () => {
     // minTime assertions live in the simpler priority/general-traffic
     // tests where we control the event loop directly.
     expect(Object.keys(results).length).toEqual(6);
-    expect(results.a!).toBeLessThanOrEqual(results.b!);
-    expect(results.b!).toBeLessThanOrEqual(results.c!);
-    expect(results.d!).toBeLessThanOrEqual(results.e!);
+    const at = (key: string) => defined(results[key], `results.${key}`);
+    expect(at("a")).toBeLessThanOrEqual(at("b"));
+    expect(at("b")).toBeLessThanOrEqual(at("c"));
+    expect(at("d")).toBeLessThanOrEqual(at("e"));
 
     // Different limiters in the same group should dispatch in parallel
     // (no shared minTime/maxConcurrent). Tolerate dispatch jitter —
     // simultaneous dispatches across separate limiters drift slightly
     // under load even though the intended behavior is "fire together".
-    expect(Math.abs(results.a! - results.d!)).toBeLessThanOrEqual(100);
-    expect(Math.abs(results.d! - results.f!)).toBeLessThanOrEqual(100);
-    expect(Math.abs(results.b! - results.e!)).toBeLessThanOrEqual(100);
+    expect(Math.abs(at("a") - at("d"))).toBeLessThanOrEqual(100);
+    expect(Math.abs(at("d") - at("f"))).toBeLessThanOrEqual(100);
+    expect(Math.abs(at("b") - at("e"))).toBeLessThanOrEqual(100);
 
     // Poll for autocleanup AND the underlying disconnect to settle.
     // group.deleteKey removes from instances synchronously but awaits

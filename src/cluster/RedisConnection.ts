@@ -1,15 +1,15 @@
 import type Bottleneck from "../Bottleneck";
 import type { RedisConnectionOptions } from "../types";
-import type { RedisLib, RedisLikeClient } from "./redis-types";
+import type { NodeRedisClient, NodeRedisLib, RedisClients } from "./redis-types";
 import BottleneckError from "../BottleneckError";
 import Events from "../Events";
 import { load } from "../parser";
 import { normalizeReply } from "./normalizeReply";
 import * as Scripts from "./Scripts";
 
-const closeClient = (c: RedisLikeClient) => (typeof c.close === "function" ? c.close() : c.quit!());
-const destroyClient = (c: RedisLikeClient) =>
-  typeof c.destroy === "function" ? c.destroy() : c.disconnect!();
+const closeClient = (c: NodeRedisClient) => (typeof c.close === "function" ? c.close() : c.quit());
+const destroyClient = (c: NodeRedisClient) =>
+  typeof c.destroy === "function" ? c.destroy() : c.disconnect();
 const safe = async (run: () => unknown): Promise<undefined> => {
   try {
     await run();
@@ -19,8 +19,8 @@ const safe = async (run: () => unknown): Promise<undefined> => {
   }
 };
 
-const connectIfNeeded = async (c: RedisLikeClient) => {
-  if (typeof c.connect === "function" && c.isOpen === false) {
+const connectIfNeeded = async (c: NodeRedisClient) => {
+  if (c.isOpen === false) {
     await c.connect();
   }
 };
@@ -30,24 +30,24 @@ const stringifyArgs = (args: unknown[]): string[] =>
 
 class RedisConnection {
   /** @internal */
-  Redis: RedisLib | null = null;
+  Redis: NodeRedisLib | null;
   /** @internal */
-  clientOptions: object = {};
+  clientOptions: object;
   /** @internal */
-  client: RedisLikeClient | null = null;
+  client: NodeRedisClient;
   /** @internal */
-  Events: Events | null = null;
+  Events: Events;
   /** @internal */
   datastore = "redis";
   /** @internal */
   terminated = false;
   /** @internal */
-  shas: Record<string, string> = {};
+  shas: Partial<Record<Scripts.ScriptName, string>> = {};
   /** @internal */
-  subscriber: RedisLikeClient;
+  subscriber: NodeRedisClient;
   /** @internal */
   limiters: Record<string, Bottleneck> = {};
-  ready: Promise<{ client: RedisLikeClient; subscriber: RedisLikeClient }>;
+  ready: Promise<RedisClients<NodeRedisClient>>;
 
   // Installed on the instance by Events (see Events constructor).
   declare on: {
@@ -61,9 +61,12 @@ class RedisConnection {
   declare removeAllListeners: (name?: string | null) => void;
 
   constructor(options?: RedisConnectionOptions) {
-    load(options ?? {}, this.defaults, this);
+    const opts = load(options ?? {}, this.defaults);
+    this.Redis = opts.Redis;
+    this.clientOptions = opts.clientOptions;
 
-    if (this.Redis == null && this.client == null) {
+    const client = opts.client ?? opts.Redis?.createClient(opts.clientOptions);
+    if (client == null) {
       throw new BottleneckError(
         "Bottleneck cluster mode requires a `Redis` library reference or a pre-built `client`. " +
           "Pass it explicitly: `new Bottleneck({ datastore: 'redis', Redis: require('redis'), clientOptions })`.",
@@ -71,11 +74,11 @@ class RedisConnection {
       );
     }
 
-    this.Events ??= new Events(this);
+    this.Events = opts.Events ?? new Events(this);
     this.terminated = false;
 
-    this.client ??= this.Redis!.createClient!(this.clientOptions);
-    this.subscriber = this.client.duplicate!();
+    this.client = client;
+    this.subscriber = this.client.duplicate();
     this.limiters = {};
 
     this.ready = this._initReady();
@@ -85,7 +88,12 @@ class RedisConnection {
   }
 
   /** @internal */
-  defaults = {
+  defaults: {
+    Redis: NodeRedisLib | null;
+    clientOptions: object;
+    client: NodeRedisClient | null;
+    Events: Events | null;
+  } = {
     Redis: null,
     clientOptions: {},
     client: null,
@@ -94,26 +102,27 @@ class RedisConnection {
 
   /** @internal */
   async _initReady() {
-    await Promise.all([this._setup(this.client!, false), this._setup(this.subscriber, true)]);
+    await Promise.all([this._setup(this.client, false), this._setup(this.subscriber, true)]);
     await this._loadScripts();
-    return { client: this.client!, subscriber: this.subscriber };
+    return { client: this.client, subscriber: this.subscriber };
   }
 
   /** @internal */
-  async _setup(client: RedisLikeClient, _sub: boolean): Promise<void> {
+  async _setup(client: NodeRedisClient, _sub: boolean): Promise<void> {
     client.setMaxListeners?.(0);
-    client.on!("error", (e: unknown) => {
+    client.on("error", (e: unknown) => {
       if (!this.terminated) {
-        this.Events!.trigger("error", e);
+        this.Events.trigger("error", e);
       }
     });
     await connectIfNeeded(client);
   }
 
   /** @internal */
-  async _loadScript(name: string): Promise<string> {
-    this.shas[name] = await this.client!.scriptLoad!(Scripts.payload(name));
-    return this.shas[name]!;
+  async _loadScript(name: Scripts.ScriptName): Promise<string> {
+    const sha = await this.client.scriptLoad(Scripts.payload(name));
+    this.shas[name] = sha;
+    return sha;
   }
 
   /** @internal */
@@ -132,23 +141,24 @@ class RedisConnection {
   /** @internal */
   async __runCommand__(cmd: unknown[]): Promise<unknown> {
     await this.ready;
-    const reply = await this.client!.sendCommand!(stringifyArgs(cmd));
+    const reply = await this.client.sendCommand(stringifyArgs(cmd));
     return normalizeReply(cmd, reply);
   }
 
   /** @internal */
-  async __runScript__(name: string, id: string, args: unknown[]): Promise<unknown> {
+  async __runScript__(name: Scripts.ScriptName, id: string, args: unknown[]): Promise<unknown> {
     const keys = Scripts.keys(name, id);
     const stringArgs = stringifyArgs(args);
     try {
-      return await this.client!.evalSha!(this.shas[name]!, { keys, arguments: stringArgs });
+      const sha = this.shas[name] ?? (await this._loadScript(name));
+      return await this.client.evalSha(sha, { keys, arguments: stringArgs });
     } catch (e) {
       if (
         typeof (e as Error)?.message === "string" &&
         (e as Error).message.startsWith("NOSCRIPT")
       ) {
-        await this._loadScript(name);
-        return await this.client!.evalSha!(this.shas[name]!, { keys, arguments: stringArgs });
+        const sha = await this._loadScript(name);
+        return await this.client.evalSha(sha, { keys, arguments: stringArgs });
       }
       throw e;
     }
@@ -158,7 +168,7 @@ class RedisConnection {
   async __addLimiter__(instance: Bottleneck): Promise<void> {
     await Promise.all(
       [instance.channel(), instance.channel_client()].map(async (channel) => {
-        await this.subscriber.subscribe!(channel, (message: string) => {
+        await this.subscriber.subscribe(channel, (message: string) => {
           (
             this.limiters[channel]?._store as unknown as {
               onMessage?: (channel: string, message: string) => Promise<unknown>;
@@ -175,7 +185,7 @@ class RedisConnection {
     await Promise.all(
       [instance.channel(), instance.channel_client()].map(async (channel) => {
         if (!this.terminated) {
-          await this.subscriber.unsubscribe!(channel);
+          await this.subscriber.unsubscribe(channel);
         }
         delete this.limiters[channel];
       }),
@@ -190,19 +200,19 @@ class RedisConnection {
     if (this.terminated) return;
     this.terminated = true;
 
-    this.client!.removeAllListeners?.("error");
-    this.client!.on?.("error", () => {});
+    this.client.removeAllListeners?.("error");
+    this.client.on?.("error", () => {});
     this.subscriber.removeAllListeners?.("error");
     this.subscriber.on?.("error", () => {});
 
     if (flush) {
       await Promise.all([
-        safe(() => closeClient(this.client!)),
+        safe(() => closeClient(this.client)),
         safe(() => closeClient(this.subscriber)),
       ]);
     } else {
       await Promise.all([
-        safe(() => destroyClient(this.client!)),
+        safe(() => destroyClient(this.client)),
         safe(() => destroyClient(this.subscriber)),
       ]);
     }

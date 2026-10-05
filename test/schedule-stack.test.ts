@@ -1,6 +1,7 @@
 import { describe, expect } from "vitest";
 import Bottleneck from "../src/Bottleneck";
 import { useFakeClock } from "./helpers/clock";
+import { defined } from "./helpers/defined";
 import { test } from "./helpers/test-api";
 
 useFakeClock();
@@ -89,19 +90,18 @@ describe("Schedule stacks", () => {
 
   test("a chain renders as one section listing every chained limiter", async ({ makeLimiter }) => {
     // The head limiter uses the project's datastore; the chained ones are local.
-    const limiters = Array.from(
-      { length: 5 },
-      (_, i) =>
-        makeLimiter(
-          i === 0 ? { id: "chain-0" } : { id: `chain-${i}`, datastore: "local" },
-        ) as Bottleneck,
+    const head = makeLimiter({ id: "chain-0" }) as Bottleneck;
+    const tail = Array.from(
+      { length: 4 },
+      (_, i) => makeLimiter({ id: `chain-${i + 1}`, datastore: "local" }) as Bottleneck,
     );
-    for (let i = 0; i < limiters.length - 1; i++) {
-      limiters[i]!.chain(limiters[i + 1]!);
-    }
+    tail.reduce((limiter, next) => {
+      limiter.chain(next);
+      return next;
+    }, head);
 
     function scheduleOnChain(): Promise<unknown> {
-      return limiters[0]!.schedule(() => {
+      return head.schedule(() => {
         throw new Error("boom-chain");
       });
     }
@@ -129,7 +129,7 @@ describe("Schedule stacks", () => {
     );
 
     function scheduleAt(i: number): Promise<unknown> {
-      return limiters[i]!.schedule(() => {
+      return defined(limiters[i]).schedule(() => {
         if (i === limiters.length - 1) {
           throw new Error("boom-deep-nest");
         }

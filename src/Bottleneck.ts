@@ -179,9 +179,7 @@ class Bottleneck {
     load(options, this.instanceDefaults, this);
     this._queues = new Queues(NUM_PRIORITIES);
     this._scheduled = {};
-    this._states = new States(
-      ["RECEIVED", "QUEUED", "RUNNING", "EXECUTING"].concat(this.trackDoneStatus ? ["DONE"] : []),
-    );
+    this._states = new States(this.trackDoneStatus);
     this._limiter = null;
     this.Events = new Events(this);
     this._submitLock = new Sync("submit");
@@ -263,7 +261,7 @@ class Bottleneck {
   }
 
   jobStatus(id: string): Status | null {
-    return this._states.jobStatus(id) as Status | null;
+    return this._states.jobStatus(id);
   }
 
   jobs(status?: Status): string[] {
@@ -271,7 +269,7 @@ class Bottleneck {
   }
 
   counts(): Counts {
-    return this._states.statusCounts() as Counts;
+    return this._states.statusCounts();
   }
 
   /** @internal */
@@ -410,8 +408,8 @@ class Bottleneck {
 
     const waitForExecuting = (at: number): Promise<void> => {
       const finished = (): boolean => {
-        const { counts } = this._states;
-        const total = counts[0]! + counts[1]! + counts[2]! + counts[3]!;
+        const [received, queued, running, executing] = this._states.counts;
+        const total = received + queued + running + executing;
         return total === at;
       };
       return new Promise((resolve) => {

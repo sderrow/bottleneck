@@ -2,6 +2,7 @@ import { describe, expect } from "vitest";
 import type BottleneckBase from "../src/Bottleneck";
 import Bottleneck from "./bottleneck";
 import { useFakeClock } from "./helpers/clock";
+import { defined } from "./helpers/defined";
 import { test, waitForState, deferred, enqueued } from "./helpers/test-api";
 
 useFakeClock();
@@ -455,9 +456,8 @@ describe("General", () => {
       // QUEUED→RUNNING transition had already happened. Job 1 may also
       // still be RUNNING here (its doExecute is a 0ms timer that can lose
       // to this synchronous observation), so assert membership only.
-      const job2Snapshot = scheduledRunning.find((s) => s.id === 2);
-      expect(job2Snapshot).toBeDefined();
-      expect(job2Snapshot!.running).toContain("2");
+      const job2Snapshot = defined(scheduledRunning.find((s) => s.id === 2));
+      expect(job2Snapshot.running).toContain("2");
 
       hold1.release();
 
@@ -866,8 +866,7 @@ describe("General", () => {
       };
 
       await limiter._drainAll(1);
-      expect(errors.length).toBe(1);
-      expect(errors[0]!.message).toBe("drain exploded");
+      expect(errors).toMatchObject([{ message: "drain exploded" }]);
     });
   });
 

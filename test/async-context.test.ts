@@ -100,12 +100,13 @@ describe("Async context", () => {
     const direct = als.run("caller-store", () => runDetached(() => als.getStore()));
     expect(direct).toBeUndefined();
 
-    let pending: Promise<unknown>;
-    als.run("caller-store", () => {
-      pending = new Promise((resolve) => {
-        setDetachedTimeout(() => resolve(als.getStore()), 10);
-      });
-    });
+    const pending = als.run(
+      "caller-store",
+      () =>
+        new Promise((resolve) => {
+          setDetachedTimeout(() => resolve(als.getStore()), 10);
+        }),
+    );
     // Fake timers (local project) or real timers (redis projects): both work
     // because setTimeout is looked up when setDetachedTimeout is called.
     // Advance outside the ALS scope: fake-timer callbacks execute in the
@@ -114,6 +115,6 @@ describe("Async context", () => {
     if (vi.isFakeTimers()) {
       await vi.advanceTimersByTime(10);
     }
-    expect(await pending!).toBeUndefined();
+    expect(await pending).toBeUndefined();
   });
 });

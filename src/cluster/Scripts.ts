@@ -50,7 +50,7 @@ type Template = {
   code: string;
 };
 
-const templates: Record<string, Template> = {
+const templates = {
   init: {
     keys: allKeys,
     headers: ["process_tick"],
@@ -141,14 +141,16 @@ const templates: Record<string, Template> = {
     refresh_expiration: true,
     code: lua["increment_reservoir.lua"] as string,
   },
-};
+} satisfies Record<string, Template>;
 
-export const names = Object.keys(templates);
+export type ScriptName = keyof typeof templates;
 
-export const keys = (name: string, id: string): string[] => templates[name]!.keys(id);
+export const names = Object.keys(templates) as ScriptName[];
 
-export const payload = (name: string): string => {
-  const template = templates[name]!;
+export const keys = (name: ScriptName, id: string): string[] => templates[name].keys(id);
+
+export const payload = (name: ScriptName): string => {
+  const template: Template = templates[name];
   return Array.prototype
     .concat(
       headers.refs,

@@ -44,7 +44,7 @@ describe("Events", () => {
     expect(await events.trigger("boom", 1, 2)).toBe("ok");
     expect(good).toHaveBeenCalledWith(1, 2);
     expect(onError).toHaveBeenCalledTimes(1);
-    expect(onError.mock.calls[0]![0]).toBeInstanceOf(Error);
+    expect(onError).toHaveBeenCalledWith(expect.any(Error));
   });
 
   test("A throwing error-event listener does not recurse", async () => {

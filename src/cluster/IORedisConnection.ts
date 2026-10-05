@@ -1,6 +1,6 @@
 import type Bottleneck from "../Bottleneck";
 import type { IORedisConnectionOptions } from "../types";
-import type { RedisLib, RedisLikeClient } from "./redis-types";
+import type { IORedisClient, IORedisLib, RedisClients } from "./redis-types";
 import BottleneckError from "../BottleneckError";
 import Events from "../Events";
 import { load } from "../parser";
@@ -9,24 +9,24 @@ import * as Scripts from "./Scripts";
 
 class IORedisConnection {
   /** @internal */
-  Redis: RedisLib | null = null;
+  Redis: IORedisLib | null;
   /** @internal */
-  clientOptions: object = {};
+  clientOptions: object;
   /** @internal */
-  clusterNodes: unknown = null;
+  clusterNodes: unknown;
   /** @internal */
-  client: RedisLikeClient | null = null;
+  client: IORedisClient;
   /** @internal */
-  Events: Events | null = null;
+  Events: Events;
   /** @internal */
   datastore = "ioredis";
   /** @internal */
   terminated = false;
   /** @internal */
-  subscriber: RedisLikeClient;
+  subscriber: IORedisClient;
   /** @internal */
   limiters: Record<string, Bottleneck> = {};
-  ready: Promise<{ client: RedisLikeClient; subscriber: RedisLikeClient }>;
+  ready: Promise<RedisClients<IORedisClient>>;
 
   // Installed on the instance by Events (see Events constructor).
   declare on: {
@@ -40,7 +40,13 @@ class IORedisConnection {
   declare removeAllListeners: (name?: string | null) => void;
 
   /** @internal */
-  defaults = {
+  defaults: {
+    Redis: IORedisLib | null;
+    clientOptions: object;
+    clusterNodes: unknown;
+    client: IORedisClient | null;
+    Events: Events | null;
+  } = {
     Redis: null,
     clientOptions: {},
     clusterNodes: null,
@@ -49,27 +55,36 @@ class IORedisConnection {
   };
 
   constructor(options?: IORedisConnectionOptions) {
-    load(options ?? {}, this.defaults, this);
+    const opts = load(options ?? {}, this.defaults);
+    this.Redis = opts.Redis;
+    this.clientOptions = opts.clientOptions;
+    this.clusterNodes = opts.clusterNodes;
 
-    if (this.Redis == null && this.client == null) {
-      throw new BottleneckError(
-        "Bottleneck cluster mode requires a `Redis` library reference or a pre-built `client`. " +
-          "Pass it explicitly: `new Bottleneck({ datastore: 'ioredis', Redis: require('ioredis'), clientOptions })`.",
-        "MISSING_CLIENT",
-      );
-    }
+    const requireRedis = (): IORedisLib => {
+      if (opts.Redis == null) {
+        throw new BottleneckError(
+          "Bottleneck cluster mode requires a `Redis` library reference or a pre-built `client`. " +
+            "Pass it explicitly: `new Bottleneck({ datastore: 'ioredis', Redis: require('ioredis'), clientOptions })`.",
+          "MISSING_CLIENT",
+        );
+      }
+      return opts.Redis;
+    };
+    if (opts.client == null) requireRedis();
 
-    this.Events ??= new Events(this);
+    this.Events = opts.Events ?? new Events(this);
     this.terminated = false;
 
-    if (this.clusterNodes != null) {
-      this.client = new this.Redis!.Cluster!(this.clusterNodes, this.clientOptions);
-      this.subscriber = new this.Redis!.Cluster!(this.clusterNodes, this.clientOptions);
-    } else if (this.client != null && this.client.duplicate == null) {
-      this.subscriber = new this.Redis!.Cluster!(this.client.startupNodes, this.client.options);
+    if (opts.clusterNodes != null) {
+      const { Cluster } = requireRedis();
+      this.client = new Cluster(opts.clusterNodes, opts.clientOptions);
+      this.subscriber = new Cluster(opts.clusterNodes, opts.clientOptions);
     } else {
-      this.client ??= new this.Redis!(this.clientOptions);
-      this.subscriber = this.client.duplicate!();
+      const client = opts.client ?? new (requireRedis())(opts.clientOptions);
+      this.client = client;
+      // ioredis Cluster clients have no duplicate(); build a sibling Cluster instead.
+      this.subscriber =
+        client.duplicate?.() ?? new (requireRedis().Cluster)(client.startupNodes, client.options);
     }
     this.limiters = {};
 
@@ -78,22 +93,22 @@ class IORedisConnection {
 
   /** @internal */
   async _initReady() {
-    await Promise.all([this._setup(this.client!, false), this._setup(this.subscriber, true)]);
+    await Promise.all([this._setup(this.client, false), this._setup(this.subscriber, true)]);
     this._loadScripts();
-    return { client: this.client!, subscriber: this.subscriber };
+    return { client: this.client, subscriber: this.subscriber };
   }
 
   /** @internal */
-  _setup(client: RedisLikeClient, sub: boolean): Promise<void> {
-    client.setMaxListeners!(0);
+  _setup(client: IORedisClient, sub: boolean): Promise<void> {
+    client.setMaxListeners(0);
     return new Promise((resolve) => {
-      client.on!("error", (e: unknown) => {
+      client.on("error", (e: unknown) => {
         if (!this.terminated) {
-          this.Events!.trigger("error", e);
+          this.Events.trigger("error", e);
         }
       });
       if (sub) {
-        client.on!("message", (channel: string, message: string) => {
+        client.on("message", (channel: string, message: string) => {
           (
             this.limiters[channel]?._store as unknown as {
               onMessage?: (channel: string, message: string) => Promise<unknown>;
@@ -104,7 +119,7 @@ class IORedisConnection {
       if (client.status === "ready") {
         resolve();
       } else {
-        client.once!("ready", resolve);
+        client.once("ready", resolve);
       }
     });
   }
@@ -112,24 +127,23 @@ class IORedisConnection {
   /** @internal */
   _loadScripts(): void {
     Scripts.names.forEach((name) =>
-      this.client!.defineCommand!(name, { lua: Scripts.payload(name) }),
+      this.client.defineCommand(name, { lua: Scripts.payload(name) }),
     );
   }
 
   /** @internal */
   async __runCommand__(cmd: unknown[]): Promise<unknown> {
     await this.ready;
-    const [[, value]] = (await this.client!.pipeline!([cmd]).exec()) as [[unknown, unknown]];
+    const [[, value]] = (await this.client.pipeline([cmd]).exec()) as [[unknown, unknown]];
     // ioredis v6 can negotiate RESP3 (opt-in), where reply shapes such as
     // HGETALL and WITHSCORES differ from the RESP2 forms assumed below.
     return normalizeReply(cmd, value);
   }
 
   /** @internal */
-  __runScript__(name: string, id: string, args: unknown[]): Promise<unknown> {
+  __runScript__(name: Scripts.ScriptName, id: string, args: unknown[]): Promise<unknown> {
     const keys = Scripts.keys(name, id);
-    const client = this.client as unknown as Record<string, (...a: unknown[]) => unknown>;
-    return client[name]!(keys.length, ...keys, ...args) as Promise<unknown>;
+    return this.client[name](keys.length, ...keys, ...args);
   }
 
   /** @internal */
@@ -137,7 +151,7 @@ class IORedisConnection {
     await Promise.all(
       [instance.channel(), instance.channel_client()].map(async (channel) => {
         // ioredis returns a promise when subscribe is called without a callback.
-        await this.subscriber.subscribe!(channel);
+        await this.subscriber.subscribe(channel);
         this.limiters[channel] = instance;
       }),
     );
@@ -148,7 +162,7 @@ class IORedisConnection {
     await Promise.all(
       [instance.channel(), instance.channel_client()].map(async (channel) => {
         if (!this.terminated) {
-          await this.subscriber.unsubscribe!(channel);
+          await this.subscriber.unsubscribe(channel);
         }
         delete this.limiters[channel];
       }),
@@ -162,16 +176,16 @@ class IORedisConnection {
     this.limiters = {};
     this.terminated = true;
 
-    this.client!.removeAllListeners?.("error");
-    this.client!.on?.("error", () => {});
+    this.client.removeAllListeners?.("error");
+    this.client.on?.("error", () => {});
     this.subscriber.removeAllListeners?.("error");
     this.subscriber.on?.("error", () => {});
 
     if (flush) {
-      await Promise.all([this.client!.quit!(), this.subscriber.quit!()]);
+      await Promise.all([this.client.quit(), this.subscriber.quit()]);
     } else {
-      this.client!.disconnect!();
-      this.subscriber.disconnect!();
+      this.client.disconnect();
+      this.subscriber.disconnect();
     }
   }
 }

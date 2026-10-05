@@ -1,4 +1,5 @@
 import type Job from "./Job";
+import BottleneckError from "./BottleneckError";
 import DLList from "./DLList";
 import Events from "./Events";
 
@@ -41,7 +42,11 @@ class Queues<J extends JobLike = Job> {
   }
 
   push(job: J): void {
-    this._lists[job.options.priority]!.push(job);
+    const list = this._lists[job.options.priority];
+    if (list == null) {
+      throw new BottleneckError(`No queue for priority ${job.options.priority}`);
+    }
+    list.push(job);
   }
 
   queued(priority?: number): number {

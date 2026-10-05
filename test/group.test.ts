@@ -43,8 +43,7 @@ describe("Group", () => {
       expect(results.length).toStrictEqual(6);
 
       const byGroup: Record<string, number[]> = {};
-      for (let i = 0; i < results.length; i++) {
-        const v = results[i]![0];
+      for (const [v] of results) {
         const key = v === 1 || v === 3 || v === 4 ? "A" : v === 5 ? "B" : "C";
         byGroup[key] = byGroup[key] || [];
         byGroup[key].push(v);
