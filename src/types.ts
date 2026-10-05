@@ -6,7 +6,9 @@
  * opaquely through parser.load/overwrite.
  */
 import type Bottleneck from "./Bottleneck";
+import type IORedisConnection from "./cluster/IORedisConnection";
 import type { IORedisClient, NodeRedisClient } from "./cluster/redis-types";
+import type RedisConnection from "./cluster/RedisConnection";
 
 /** Queue-shedding strategy when the queue length reaches `highWater`. */
 export type Strategy = 1 | 2 | 3 | 4;
@@ -56,20 +58,14 @@ export type BottleneckOptions = {
   readonly scheduleStackLabel?: string | null;
   /** Set to true to track done jobs with counts() and jobStatus(). Uses more memory. */
   readonly trackDoneStatus?: boolean | null;
-  /** Where the limiter stores its internal state: `local` (default) or `redis`/`ioredis` for Clustering. */
-  readonly datastore?: string | null;
   /** Override the Promise library used by Bottleneck. */
   readonly Promise?: unknown;
-  /** Passed directly to the redis client library you've selected. */
-  readonly clientOptions?: unknown;
-  /** **ioredis only.** When set, the client is created via `new Redis.Cluster(clusterNodes, clientOptions)`. */
-  readonly clusterNodes?: unknown;
-  /** The imported client library (`redis` or `ioredis`), required for clustering unless `client`/`connection` is provided. */
-  readonly Redis?: unknown;
-  /** A pre-built client to use instead of creating one from `clientOptions`. */
-  readonly client?: unknown;
-  /** A connection object from `new Bottleneck.RedisConnection` / `new Bottleneck.IORedisConnection`. */
-  readonly connection?: unknown;
+  /**
+   * Store the limiter's state in Redis (Clustering) through this connection,
+   * built from your own client: `new IORedisConnection({ client })` or
+   * `new RedisConnection({ client })`. Without one, the limiter is local.
+   */
+  readonly connection?: RedisConnection | IORedisConnection | null;
   /** When true, the limiter wipes existing Bottleneck state on the Redis db at startup. */
   readonly clearDatastore?: boolean | null;
   /** Redis TTL in ms for the limiter's keys (state removed after this much inactivity). Defaults to 300000 under a Group. */
@@ -137,9 +133,6 @@ export type IORedisConnectionOptions<C extends IORedisClient = IORedisClient> = 
    */
   readonly subscriber?: C;
 };
-
-/** Datastore-specific map of raw redis clients. */
-export type ClientsList = { client?: unknown; subscriber?: unknown };
 
 export type GroupLimiterPair = { key: string; limiter: Bottleneck };
 

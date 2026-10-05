@@ -1,6 +1,6 @@
 import type Bottleneck from "../Bottleneck";
 import type { IORedisConnectionOptions } from "../types";
-import type { ConnectionInternals, IORedisClient, RedisClients } from "./redis-types";
+import type { IORedisClient, RedisClients } from "./redis-types";
 import { runDetached } from "../async-context";
 import BottleneckError from "../BottleneckError";
 import Events from "../Events";
@@ -31,8 +31,10 @@ class IORedisConnection<C extends IORedisClient = IORedisClient> {
   terminated = false;
   /** @internal */
   limiters: Record<string, Bottleneck> = {};
-  /** @internal Clients this connection listens to and closes. */
-  owned: C[];
+  /** @internal Limiters using this connection, which receive its subscriber's errors. */
+  instances = new Set<Bottleneck>();
+  /** @internal Whether the connection duplicated (and so closes) its subscriber. */
+  ownsSubscriber: boolean;
   ready: Promise<RedisClients<C>>;
 
   // Installed on the instance by Events (see Events constructor).
@@ -47,12 +49,7 @@ class IORedisConnection<C extends IORedisClient = IORedisClient> {
   declare removeAllListeners: (name?: string | null) => void;
 
   constructor(options: IORedisConnectionOptions<C>) {
-    const {
-      client,
-      subscriber,
-      Events: events,
-      ownsClient = false,
-    }: Partial<IORedisConnectionOptions<C>> & ConnectionInternals = options ?? {};
+    const { client, subscriber }: Partial<IORedisConnectionOptions<C>> = options ?? {};
     if (client == null) {
       throw new BottleneckError(
         "IORedisConnection requires an ioredis `client`: `new IORedisConnection({ client })`.",
@@ -60,24 +57,23 @@ class IORedisConnection<C extends IORedisClient = IORedisClient> {
       );
     }
 
-    this.Events = events ?? new Events(this);
+    this.Events = new Events(this);
     this.client = client;
+    this.ownsSubscriber = subscriber == null;
     // Sockets the connection creates must not capture the constructing
     // caller's async context: pub/sub-driven work would otherwise run (and
     // trace) inside it for the connection's whole lifetime.
     this.subscriber = subscriber ?? runDetached(() => client.duplicate() as C);
-    this.owned = [
-      ...(ownsClient ? [client] : []),
-      ...(subscriber == null ? [this.subscriber] : []),
-    ];
 
     this.ready = runDetached(() => this._initReady());
   }
 
   /** @internal */
-  _onOwnedError = (e: unknown): void => {
-    if (!this.terminated) {
-      this.Events.trigger("error", e);
+  _onSubscriberError = (e: unknown): void => {
+    if (this.terminated) return;
+    this.Events.trigger("error", e);
+    for (const instance of this.instances) {
+      instance.Events.trigger("error", e);
     }
   };
 
@@ -92,12 +88,12 @@ class IORedisConnection<C extends IORedisClient = IORedisClient> {
 
   /** @internal */
   async _initReady(): Promise<RedisClients<C>> {
-    for (const c of this.owned) {
-      c.setMaxListeners(0);
-      c.on("error", this._onOwnedError);
-    }
     this.subscriber.on("message", this._onMessage);
-    await Promise.all(this.owned.map(whenReady));
+    if (this.ownsSubscriber) {
+      this.subscriber.setMaxListeners(0);
+      this.subscriber.on("error", this._onSubscriberError);
+      await whenReady(this.subscriber);
+    }
     return { client: this.client, subscriber: this.subscriber };
   }
 
@@ -136,32 +132,45 @@ class IORedisConnection<C extends IORedisClient = IORedisClient> {
   async __removeLimiter__(instance: Bottleneck): Promise<void> {
     await Promise.all(
       [instance.channel(), instance.channel_client()].map(async (channel) => {
-        if (!this.terminated) {
-          await this.subscriber.unsubscribe(channel);
-        }
+        // Only release channels this limiter holds: one whose setup failed
+        // never subscribed (unsubscribing on its dead subscriber would never
+        // settle), and a later limiter with the same id may own `channel()`.
+        if (this.limiters[channel] !== instance) return;
         delete this.limiters[channel];
+        if (this.terminated) return;
+        try {
+          await this.subscriber.unsubscribe(channel);
+        } catch (e) {
+          // Closing the connection mid-UNSUBSCRIBE releases the channel anyway.
+          if (!this.terminated) throw e;
+        }
       }),
     );
   }
 
+  /**
+   * Stop the connection's limiters and close the subscriber it duplicated.
+   * The client (and a subscriber passed in) stay open: close them yourself.
+   */
   async disconnect(flush = true): Promise<void> {
     for (const v of Object.values(this.limiters)) {
       clearInterval(v._store?.heartbeat);
     }
     this.limiters = {};
+    this.instances.clear();
     if (this.terminated) return;
     this.terminated = true;
 
     this.subscriber.removeListener("message", this._onMessage);
-    for (const c of this.owned) {
-      // Absorb late socket errors from clients that are closing.
-      c.removeListener("error", this._onOwnedError);
-      c.on("error", noop);
-    }
-    if (flush) {
-      await Promise.all(this.owned.map((c) => c.quit()));
-    } else {
-      for (const c of this.owned) c.disconnect();
+    if (this.ownsSubscriber) {
+      // Absorb late socket errors from the closing subscriber.
+      this.subscriber.removeListener("error", this._onSubscriberError);
+      this.subscriber.on("error", noop);
+      if (flush) {
+        await this.subscriber.quit();
+      } else {
+        this.subscriber.disconnect();
+      }
     }
   }
 }

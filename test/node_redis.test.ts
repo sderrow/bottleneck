@@ -4,15 +4,6 @@ import { test } from "./helpers/test-api";
 import buildClientOptions from "./redis-client-options";
 
 describe("node_redis-only", () => {
-  test("Should accept node_redis lib override", ({ makeLimiter }) => {
-    const limiter = makeLimiter({
-      maxConcurrent: 2,
-      Redis,
-    });
-
-    expect(limiter.datastore).toStrictEqual("redis");
-  });
-
   test("Should accept existing connections", async ({
     harness: h,
     makeLimiter,
@@ -34,7 +25,7 @@ describe("node_redis-only", () => {
     expect(limiter.datastore).toStrictEqual("redis");
 
     await limiter.disconnect();
-    expect(limiter.clients().client).toHaveProperty("isReady", true);
+    expect(connection.client).toHaveProperty("isReady", true);
     await Promise.all([expect(p1).resolves.toEqual([1]), expect(p2).resolves.toEqual([2])]);
   });
 
@@ -59,12 +50,12 @@ describe("node_redis-only", () => {
     await h.flushLimiter(limiter);
     expect(h.log).toHaveCallOrder([[1], [2]]);
     expect(h).toHaveFinalCallAt(50);
-    expect(limiter.clients().client).toBe(client);
+    expect(connection.client).toBe(client);
     expect(limiter.connection).toBe(connection);
     expect(limiter.datastore).toStrictEqual("redis");
 
     await limiter.disconnect();
-    expect(limiter.clients().client).toHaveProperty("isReady", true);
+    expect(connection.client).toHaveProperty("isReady", true);
     await Promise.all([expect(p1).resolves.toEqual([1]), expect(p2).resolves.toEqual([2])]);
   });
 

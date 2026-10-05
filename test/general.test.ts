@@ -830,7 +830,7 @@ describe("General", () => {
 
   describe("Datastore errors", () => {
     test("Should refuse an unknown datastore type", () => {
-      expect(() => new Bottleneck({ datastore: "carrier-pigeon" })).toThrow(
+      expect(() => new Bottleneck(wrongType({ datastore: "carrier-pigeon" }))).toThrow(
         "Invalid datastore type: carrier-pigeon",
       );
     });

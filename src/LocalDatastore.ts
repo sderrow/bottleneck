@@ -34,7 +34,6 @@ class LocalDatastore {
   /** @internal */
   _unblockTime = 0;
   ready: Promise<unknown> = Promise.resolve();
-  clients: Record<string, unknown> = {};
 
   constructor(
     instance: Bottleneck,
@@ -50,7 +49,6 @@ class LocalDatastore {
     this._done = 0;
     this._unblockTime = 0;
     this.ready = Promise.resolve();
-    this.clients = {};
     this._startHeartbeat();
   }
 

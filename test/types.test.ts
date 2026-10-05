@@ -3,7 +3,7 @@ import type { createClient } from "redis";
 import { describe, expect, expectTypeOf, it } from "vitest";
 import type {
   BatcherOptions,
-  ClientsList,
+  BottleneckOptions,
   Counts,
   EventInfoDropped,
   EventInfoQueued,
@@ -147,10 +147,25 @@ describe("Bottleneck type contract", () => {
     batcher.on("batch", (batch) => expectTypeOf(batch).toEqualTypeOf<number[]>());
   });
 
-  it("exposes connection clients and channels", () => {
+  it("exposes the connection, readiness, and channels", () => {
     const limiter = new Bottleneck();
-    expectTypeOf(limiter.clients()).toEqualTypeOf<ClientsList>();
+    expectTypeOf(limiter.ready()).toEqualTypeOf<Promise<void>>();
+    expectTypeOf(limiter.connection).toEqualTypeOf<RedisConnection | IORedisConnection | null>();
     expectTypeOf(limiter.channel()).toEqualTypeOf<string>();
+  });
+
+  it("takes Redis only as a connection", () => {
+    expectTypeOf<BottleneckOptions["connection"]>().toEqualTypeOf<
+      RedisConnection | IORedisConnection | null | undefined
+    >();
+    // Never called: the assertions are compile-time.
+    void ((client: IORedis) => new Bottleneck({ connection: connectIORedis(client) }));
+    void ((client: NodeRedis) => new Bottleneck.Group({ connection: connectNodeRedis(client) }));
+
+    // @ts-expect-error the pre-v5 library options are gone
+    void ((Redis: unknown) => new Bottleneck({ Redis, clientOptions: {} }));
+    // @ts-expect-error so is the datastore switch
+    void (() => new Bottleneck({ datastore: "ioredis" }));
   });
 
   it("infers a connection's client type from the client passed in", () => {

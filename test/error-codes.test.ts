@@ -1,6 +1,6 @@
 import { describe, expect } from "vitest";
 import type { NodeRedisClient } from "../src/cluster/redis-types";
-import { BottleneckError } from "../src/index";
+import SourceBottleneck, { BottleneckError, Group as SourceGroup } from "../src/index";
 import Bottleneck from "./bottleneck";
 import { deferred, enqueued, test } from "./helpers/test-api";
 import { wrongType } from "./helpers/wrong-type";
@@ -103,10 +103,32 @@ describe("BottleneckError codes", () => {
     expect(codeOf(invalidArgs)).toEqual("INVALID_ARGUMENTS");
 
     const badStore = await capture(
-      Promise.resolve().then(() => new Bottleneck({ datastore: "bogus" })),
+      Promise.resolve().then(() => new Bottleneck(wrongType({ datastore: "bogus" }))),
       "bad datastore should have thrown",
     );
     expect(codeOf(badStore)).toEqual("INVALID_DATASTORE");
+
+    // The product class, not the test wrapper: under the redis projects the
+    // wrapper treats `datastore: "redis"` as its own flag for a test connection.
+    for (const legacy of [
+      { datastore: "redis" },
+      { datastore: "ioredis" },
+      { Redis: {} },
+      { client: {} },
+      { clientOptions: {} },
+      { clusterNodes: [] },
+    ]) {
+      const removed = await capture(
+        Promise.resolve().then(() => new SourceBottleneck(wrongType(legacy))),
+        `${JSON.stringify(legacy)} should have thrown`,
+      );
+      expect(codeOf(removed)).toEqual("LEGACY_REDIS_OPTIONS");
+      const removedFromGroup = await capture(
+        Promise.resolve().then(() => new SourceGroup(wrongType(legacy))),
+        `Group ${JSON.stringify(legacy)} should have thrown`,
+      );
+      expect(codeOf(removedFromGroup)).toEqual("LEGACY_REDIS_OPTIONS");
+    }
 
     const noClient = await capture(
       Promise.resolve().then(() => new Bottleneck.RedisConnection({} as never)),

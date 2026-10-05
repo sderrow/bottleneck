@@ -9,7 +9,7 @@ describe("Limiter memory", () => {
     await iterateAsync(
       async () => {
         calls++;
-        const limiter = new Bottleneck({ datastore: "local" });
+        const limiter = new Bottleneck();
         await limiter.ready();
         return limiter.disconnect(false);
       },
@@ -19,7 +19,7 @@ describe("Limiter memory", () => {
   });
 
   it("Should not leak memory running jobs", { timeout: 12000 }, async () => {
-    const limiter = new Bottleneck({ datastore: "local", maxConcurrent: 1, minTime: 10 });
+    const limiter = new Bottleneck({ maxConcurrent: 1, minTime: 10 });
     await limiter.ready();
 
     let i = 0;

@@ -1,43 +1,11 @@
 import Redis from "ioredis";
 import ioredisPkg from "ioredis/package.json" with { type: "json" };
 import { describe, expect, onTestFinished, vi } from "vitest";
-import { limiterKeys, redisStore } from "./helpers/store";
+import { limiterKeys } from "./helpers/store";
 import { test } from "./helpers/test-api";
 import buildClientOptions from "./redis-client-options";
 
 describe("ioredis-only", () => {
-  test("Should accept ioredis lib override", ({ makeLimiter }) => {
-    const limiter = makeLimiter({
-      maxConcurrent: 2,
-      Redis,
-      clientOptions: {},
-      clusterNodes: [
-        {
-          host: process.env.REDIS_HOST,
-          port: process.env.REDIS_PORT,
-        },
-      ],
-    });
-
-    expect(limiter.datastore).toStrictEqual("ioredis");
-  });
-
-  test("Should connect in Redis Cluster mode", ({ makeLimiter }) => {
-    const limiter = makeLimiter({
-      maxConcurrent: 2,
-      clientOptions: {},
-      clusterNodes: [
-        {
-          host: process.env.REDIS_HOST,
-          port: process.env.REDIS_PORT,
-        },
-      ],
-    });
-
-    expect(limiter.datastore).toStrictEqual("ioredis");
-    expect(redisStore(limiter).connection.client).toBeInstanceOf(Redis.Cluster);
-  });
-
   test("Should connect in Redis Cluster mode with premade client", ({
     makeLimiter,
     makeConnection,
@@ -81,7 +49,7 @@ describe("ioredis-only", () => {
     expect(limiter.datastore).toStrictEqual("ioredis");
 
     await limiter.disconnect();
-    expect(limiter.clients().client).toHaveProperty("status", "ready");
+    expect(connection.client).toHaveProperty("status", "ready");
     await Promise.all([expect(p1).resolves.toEqual([1]), expect(p2).resolves.toEqual([2])]);
   });
 
@@ -105,12 +73,12 @@ describe("ioredis-only", () => {
     await h.flushLimiter(limiter);
     expect(h.log).toHaveCallOrder([[1], [2]]);
     expect(h).toHaveFinalCallAt(50);
-    expect(limiter.clients().client).toBe(client);
+    expect(connection.client).toBe(client);
     expect(limiter.connection).toBe(connection);
     expect(limiter.datastore).toStrictEqual("ioredis");
 
     await limiter.disconnect();
-    expect(limiter.clients().client).toHaveProperty("status", "ready");
+    expect(connection.client).toHaveProperty("status", "ready");
     await Promise.all([expect(p1).resolves.toEqual([1]), expect(p2).resolves.toEqual([2])]);
   });
 

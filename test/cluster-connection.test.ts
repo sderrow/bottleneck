@@ -1,5 +1,4 @@
 import { describe, expect } from "vitest";
-import { defined } from "./helpers/defined";
 import { runCommand } from "./helpers/store";
 import { test, waitForState } from "./helpers/test-api";
 
@@ -13,6 +12,12 @@ const failingClientOptions = () =>
   process.env.DATASTORE === "redis"
     ? { socket: { port: 1, reconnectStrategy: () => false } }
     : { port: 1, retryStrategy: () => null };
+
+/** Resolves with the first "error" event the emitter triggers. */
+const firstError = (emitter: { on(event: "error", cb: (e: unknown) => void): unknown }) =>
+  new Promise((resolve) => {
+    emitter.on("error", resolve);
+  });
 
 /** Whether a raw ioredis / node-redis client still has an open socket. */
 function isOpen(client: unknown): boolean {
@@ -63,32 +68,34 @@ describe("Cluster connection", () => {
   });
 
   describe("Ownership", () => {
-    test("Should close a connection the limiter built when it disconnects", async ({
+    test("Should leave its connection open when a limiter disconnects", async ({
       makeLimiter,
+      makeConnection,
     }) => {
-      const limiter = makeLimiter();
+      const connection = makeConnection();
+      const limiter = makeLimiter({ connection });
       await limiter.ready();
-      const { client, subscriber } = defined(limiter.connection);
-      expect([isOpen(client), isOpen(subscriber)]).toEqual([true, true]);
 
       await limiter.disconnect();
 
-      await waitForState(() =>
-        expect([isOpen(client), isOpen(subscriber)]).toEqual([false, false]),
-      );
+      expect([isOpen(connection.client), isOpen(connection.subscriber)]).toEqual([true, true]);
+      const next = makeLimiter({ connection });
+      await expect(next.schedule(() => Promise.resolve("ok"))).resolves.toBe("ok");
     });
 
-    test("Should close a connection the Group built when it disconnects", async ({ makeGroup }) => {
-      const group = makeGroup({ datastore: process.env.DATASTORE });
-      const connection = defined(group.connection);
-      await connection.ready;
-      const { client, subscriber } = connection;
+    test("Should disconnect a Group's limiters but leave its connection open", async ({
+      makeGroup,
+      makeConnection,
+    }) => {
+      const connection = makeConnection();
+      const group = makeGroup({ connection });
+      await Promise.all([group.key("a").ready(), group.key("b").ready()]);
+      expect(Object.keys(connection.limiters)).toHaveLength(4);
 
       await group.disconnect();
 
-      await waitForState(() =>
-        expect([isOpen(client), isOpen(subscriber)]).toEqual([false, false]),
-      );
+      expect(connection.limiters).toEqual({});
+      expect([isOpen(connection.client), isOpen(connection.subscriber)]).toEqual([true, true]);
     });
 
     test("Should leave a shared connection open when a Group disconnects", async ({
@@ -107,20 +114,19 @@ describe("Cluster connection", () => {
       await expect(sibling.schedule(() => Promise.resolve("ok"))).resolves.toBe("ok");
     });
 
-    test("Should send errors from a connection the Group built to the Group", async ({
-      makeGroup,
+    test("Should send its subscriber's errors to the connection and every limiter on it", async ({
+      makeClient,
+      makeConnection,
+      makeLimiter,
     }) => {
-      const group = makeGroup({
-        datastore: process.env.DATASTORE,
-        clientOptions: failingClientOptions(),
+      const connection = makeConnection({
+        client: makeClient(failingClientOptions(), { expectErrors: true }),
       });
-      defined(group.connection).ready.catch(() => {});
+      const limiters = [1, 2].map(() => makeLimiter({ connection }, { expectErrors: true }));
 
       await expect(
-        new Promise((resolve) => {
-          group.on("error", resolve);
-        }),
-      ).resolves.toBeTruthy();
+        Promise.all([connection, ...limiters].map((emitter) => firstError(emitter))),
+      ).resolves.toHaveLength(3);
     });
   });
 });

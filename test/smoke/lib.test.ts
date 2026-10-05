@@ -12,15 +12,18 @@
 // Redis-backed limiter actually evaluates a script.
 //
 // Loaded via `test/bottleneck.mjs` with `BOTTLENECK_ENTRY=lib` and
-// `DATASTORE=redis` so the wrapper injects the test heartbeat override,
-// the per-fork id prefix, and node-redis client options pointing at the
+// `DATASTORE=redis` so the wrapper injects the test heartbeat override and
+// the per-fork id prefix. The connections are built the way consumers do:
+// the bundle's RedisConnection around a node-redis client pointed at the
 // shared testcontainer Redis (started by the root globalSetup). The
 // `lib-smoke` project's globalSetup builds the lib bundle before any
 // test file is collected.
 
 import { createRequire } from "node:module";
+import { createClient } from "redis";
 import { describe, it, expect } from "vitest";
 import Bottleneck from "../bottleneck";
+import buildClientOptions from "../redis-client-options";
 
 describe("dist/index full smoke", () => {
   it("exposes .default/.Bottleneck on the CJS build for non-interop consumers", () => {
@@ -56,20 +59,23 @@ describe("dist/index full smoke", () => {
     // lua files were missing from the inlined bundle, ioredis/node-redis
     // would surface a "ERR Error compiling script" or the body would silently
     // contain `undefined` and Redis would reply with a runtime lua error.
+    const client = createClient(buildClientOptions("redis"));
+    await client.connect();
+    const connection = new Bottleneck.RedisConnection({ client });
     const limiter = new Bottleneck({
       id: "lib-smoke",
-      datastore: "redis",
+      connection,
       maxConcurrent: 1,
       clearDatastore: true,
     });
     try {
-      const clients = await limiter.ready();
-      expect(Object.keys(clients as Record<string, unknown>)).toEqual(["client", "subscriber"]);
-
+      await limiter.ready();
       const result = await limiter.schedule(() => "ok");
       expect(result).toBe("ok");
     } finally {
       await limiter.disconnect(false);
+      await connection.disconnect(false);
+      await client.disconnect();
     }
   });
 
@@ -79,9 +85,12 @@ describe("dist/index full smoke", () => {
     // wiring path (Scripts loaded through the Group's RedisDatastore) and
     // catches regressions where the inlined lua map is reachable from one
     // entry point but not another.
+    const client = createClient(buildClientOptions("redis"));
+    await client.connect();
+    const connection = new Bottleneck.RedisConnection({ client });
     const group = new Bottleneck.Group({
       id: "lib-smoke-group",
-      datastore: "redis",
+      connection,
       maxConcurrent: 1,
       clearDatastore: true,
     });
@@ -93,6 +102,8 @@ describe("dist/index full smoke", () => {
       expect(rb).toBe("b");
     } finally {
       await group.disconnect(false);
+      await connection.disconnect(false);
+      await client.disconnect();
     }
   });
 });

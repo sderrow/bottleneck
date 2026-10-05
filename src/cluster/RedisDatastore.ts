@@ -1,13 +1,11 @@
 import type Bottleneck from "../Bottleneck";
 import type { StoreOptions } from "../types";
 import type IORedisConnection from "./IORedisConnection";
-import type { IORedisLib, NodeRedisLib, RedisClients } from "./redis-types";
 import type RedisConnection from "./RedisConnection";
 import type { ScriptName } from "./Scripts";
-import { runDetached, setDetachedInterval, setDetachedTimeout } from "../async-context";
+import { setDetachedInterval, setDetachedTimeout } from "../async-context";
 import BottleneckError from "../BottleneckError";
 import { load, overwrite } from "../parser";
-import ownedConnection from "./ownedConnection";
 
 class RedisDatastore {
   /** @internal */
@@ -15,9 +13,6 @@ class RedisDatastore {
   _orphaned = 0;
   instance: Bottleneck;
   storeOptions: StoreOptions;
-  Redis: NodeRedisLib | IORedisLib | null = null;
-  clientOptions: object = {};
-  clusterNodes: unknown = null;
   Promise: PromiseConstructor = Promise;
   timeout: number | null = null;
   heartbeatInterval = 5000;
@@ -26,11 +21,9 @@ class RedisDatastore {
   connection!: RedisConnection | IORedisConnection;
   originalId: string;
   clientId: string;
-  sharedConnection: boolean;
-  clients: Partial<RedisClients> = {};
   capacityPriorityCounters: Record<string, ReturnType<typeof setTimeout>> = {};
   heartbeat: ReturnType<typeof setInterval> | undefined;
-  ready: Promise<RedisClients>;
+  ready: Promise<void>;
 
   constructor(instance: Bottleneck, storeOptions: StoreOptions, storeInstanceOptions: object) {
     this.instance = instance;
@@ -38,24 +31,9 @@ class RedisDatastore {
     this.originalId = this.instance.id;
     this.clientId = this.instance._randomIndex();
     load(storeInstanceOptions, storeInstanceOptions, this);
-    this.clients = {};
     this.capacityPriorityCounters = {};
-    this.sharedConnection = this.connection != null;
-
-    if (!this.connection) {
-      // Socket setup outlives the constructing caller: the subscriber
-      // socket keeps its creation context, so creating it inside a traced
-      // request would drain pub/sub jobs (and their EVALSHA calls) into
-      // that request's trace for the limiter's whole lifetime.
-      this.connection = runDetached(() =>
-        ownedConnection(this.instance.datastore, {
-          Redis: this.Redis,
-          clientOptions: this.clientOptions,
-          clusterNodes: this.clusterNodes,
-          Events: this.instance.Events,
-        }),
-      );
-    }
+    // Errors from the connection's own sockets reach every limiter on it.
+    this.connection.instances.add(this.instance);
 
     this.instance.connection = this.connection;
     this.instance.datastore = this.connection.datastore;
@@ -67,9 +45,8 @@ class RedisDatastore {
   }
 
   /** @internal */
-  async _initReady(): Promise<RedisClients> {
-    const clients: RedisClients = await this.connection.ready;
-    this.clients = clients;
+  async _initReady(): Promise<void> {
+    await this.connection.ready;
     await this.runScript("init", this.prepareInitSettings(this.clearDatastore));
     await this.connection.__addLimiter__(this.instance);
     await this.runScript("register_client", [this.instance.queued()]);
@@ -88,13 +65,12 @@ class RedisDatastore {
         }
       }, this.heartbeatInterval).unref?.();
     }
-    return clients;
   }
 
   /** @internal */
   async __publish__(message: string): Promise<unknown> {
-    const { client } = await this.ready;
-    return client.publish(this.instance.channel(), `message:${message.toString()}`);
+    await this.ready;
+    return this.connection.client.publish(this.instance.channel(), `message:${message.toString()}`);
   }
 
   async onMessage(_channel: string, message: string): Promise<unknown> {
@@ -110,11 +86,7 @@ class RedisDatastore {
           this.instance.Events.trigger("capacity-priority", capacity);
           const drained = await this.instance._drainAll(capacity);
           const newCapacity = capacity != null ? capacity - (drained || 0) : "";
-          const { client } = this.clients;
-          if (client == null) {
-            throw new BottleneckError("Received a Redis message before the client was ready");
-          }
-          return await client.publish(
+          return await this.connection.client.publish(
             this.instance.channel(),
             `capacity-priority:${newCapacity}::${counter}`,
           );
@@ -149,14 +121,11 @@ class RedisDatastore {
   }
 
   /** @internal */
-  async __disconnect__(flush?: boolean): Promise<unknown> {
+  async __disconnect__(_flush?: boolean): Promise<void> {
     this._disconnecting = true;
     clearInterval(this.heartbeat);
-    if (this.sharedConnection) {
-      await this.connection.__removeLimiter__(this.instance);
-    } else {
-      return this.connection.disconnect(flush);
-    }
+    this.connection.instances.delete(this.instance);
+    await this.connection.__removeLimiter__(this.instance);
   }
 
   async runScript(name: ScriptName, args: unknown[]): Promise<unknown> {

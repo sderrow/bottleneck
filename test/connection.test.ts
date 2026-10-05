@@ -108,6 +108,39 @@ const makeLimiterInstance = () => {
 const noscript = () => new Error("NOSCRIPT No matching script. Please use EVAL.");
 
 describe("RedisConnection (node-redis)", () => {
+  test("Should not fail a limiter's removal when the connection closes mid-unsubscribe", async () => {
+    const conn = new RedisConnection({ client: makeNodeClient() });
+    await conn.ready;
+    const { limiter } = makeLimiterInstance();
+    await conn.__addLimiter__(limiter);
+    conn.subscriber.unsubscribe.mockImplementation(async () => {
+      await conn.disconnect(false);
+      throw new Error("Disconnects client");
+    });
+
+    await expect(conn.__removeLimiter__(limiter)).resolves.toBeUndefined();
+  });
+
+  test("Should only unsubscribe channels a limiter holds", async () => {
+    const conn = new RedisConnection({ client: makeNodeClient() });
+    await conn.ready;
+
+    // A limiter whose setup failed never subscribed: there's nothing to release
+    // (and its dead subscriber would never answer an UNSUBSCRIBE).
+    const { limiter: neverAdded } = makeLimiterInstance();
+    await conn.__removeLimiter__(neverAdded);
+    expect(conn.subscriber.unsubscribe).not.toHaveBeenCalled();
+
+    // A later limiter with the same channels takes them over.
+    const { limiter: first } = makeLimiterInstance();
+    const { limiter: second } = makeLimiterInstance();
+    await conn.__addLimiter__(first);
+    await conn.__addLimiter__(second);
+    await conn.__removeLimiter__(first);
+    expect(conn.subscriber.unsubscribe).not.toHaveBeenCalled();
+    expect(conn.limiters["ch-one"]).toBe(second);
+  });
+
   test("Should refuse to build without a client", () => {
     // {} is not a valid RedisConnectionOptions; the runtime rejection is the contract
     expect(() => new RedisConnection({} as unknown as RedisConnectionOptions)).toThrow(
@@ -240,6 +273,39 @@ describe("RedisConnection (node-redis)", () => {
 });
 
 describe("IORedisConnection", () => {
+  test("Should not fail a limiter's removal when the connection closes mid-unsubscribe", async () => {
+    const conn = new IORedisConnection({ client: makeIOClient() });
+    await conn.ready;
+    const { limiter } = makeLimiterInstance();
+    await conn.__addLimiter__(limiter);
+    conn.subscriber.unsubscribe.mockImplementation(async () => {
+      await conn.disconnect(false);
+      throw new Error("Disconnects client");
+    });
+
+    await expect(conn.__removeLimiter__(limiter)).resolves.toBeUndefined();
+  });
+
+  test("Should only unsubscribe channels a limiter holds", async () => {
+    const conn = new IORedisConnection({ client: makeIOClient() });
+    await conn.ready;
+
+    // A limiter whose setup failed never subscribed: there's nothing to release
+    // (and its dead subscriber would never answer an UNSUBSCRIBE).
+    const { limiter: neverAdded } = makeLimiterInstance();
+    await conn.__removeLimiter__(neverAdded);
+    expect(conn.subscriber.unsubscribe).not.toHaveBeenCalled();
+
+    // A later limiter with the same channels takes them over.
+    const { limiter: first } = makeLimiterInstance();
+    const { limiter: second } = makeLimiterInstance();
+    await conn.__addLimiter__(first);
+    await conn.__addLimiter__(second);
+    await conn.__removeLimiter__(first);
+    expect(conn.subscriber.unsubscribe).not.toHaveBeenCalled();
+    expect(conn.limiters["ch-one"]).toBe(second);
+  });
+
   test("Should refuse to build without a client", () => {
     expect(() => new IORedisConnection({} as unknown as IORedisConnectionOptions)).toThrow(
       /requires an ioredis `client`/,

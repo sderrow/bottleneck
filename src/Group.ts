@@ -1,10 +1,10 @@
 import type IORedisConnection from "./cluster/IORedisConnection";
 import type RedisConnection from "./cluster/RedisConnection";
 import type { BottleneckOptions, GroupEvents, GroupLimiterPair } from "./types";
-import { runDetached, setDetachedInterval } from "./async-context";
+import { setDetachedInterval } from "./async-context";
 import Bottleneck from "./Bottleneck";
-import ownedConnection from "./cluster/ownedConnection";
 import * as Scripts from "./cluster/Scripts";
+import { validateDatastoreOptions } from "./datastore-options";
 import Events from "./Events";
 import { load, overwrite } from "./parser";
 
@@ -42,28 +42,17 @@ class Group {
   /** @internal */
   interval: ReturnType<typeof setInterval> | undefined;
   /** @internal */
-  sharedConnection: boolean;
-  /** @internal */
   Bottleneck: typeof Bottleneck;
 
   constructor(limiterOptions: BottleneckOptions = {}) {
+    validateDatastoreOptions(limiterOptions);
     this.deleteKey = this.deleteKey.bind(this);
     this.limiterOptions = { ...limiterOptions } as Record<string, unknown>;
     load(this.limiterOptions, this.defaults, this);
     this.Events = new Events(this);
     this.instances = {};
     this._startAutoCleanup();
-    this.sharedConnection = this.connection != null;
     this.Bottleneck = Bottleneck;
-
-    const { datastore } = this.limiterOptions;
-    if (this.connection == null && (datastore === "redis" || datastore === "ioredis")) {
-      // Same detachment rationale as RedisDatastore: socket setup must not
-      // capture the constructing caller's async context.
-      this.connection = runDetached(() =>
-        ownedConnection(datastore, { ...this.limiterOptions, Events: this.Events }),
-      );
-    }
   }
 
   key(key = ""): Bottleneck {
@@ -162,10 +151,14 @@ class Group {
     }
   }
 
-  disconnect(flush = true): Promise<void> | undefined {
+  /**
+   * Stop the Group's auto-cleanup and disconnect its Redis-backed limiters.
+   * The connection stays open: close it (and its client) yourself.
+   */
+  async disconnect(flush = true): Promise<void> {
     clearInterval(this.interval);
-    if (!this.sharedConnection) {
-      return this.connection?.disconnect(flush);
+    if (this.connection != null) {
+      await Promise.all(Object.values(this.instances).map((limiter) => limiter.disconnect(flush)));
     }
   }
 }

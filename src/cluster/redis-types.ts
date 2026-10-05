@@ -1,5 +1,3 @@
-import type Events from "../Events";
-
 /**
  * Minimal structural types for the optional Redis peer clients. Bottleneck
  * supports node-redis v4/v5/v6 and ioredis v5/v6, which are peer dependencies
@@ -57,21 +55,3 @@ export type RedisClients<C extends BaseClient = NodeRedisClient | IORedisClient>
   client: C;
   subscriber: C;
 };
-
-/** The `redis` module statics Bottleneck touches. */
-export type NodeRedisLib = {
-  createClient(options: unknown): NodeRedisClient;
-};
-
-/** The `ioredis` constructor (`new Redis(...)`) plus its `Cluster` static. */
-export type IORedisLib = {
-  new (options: unknown): IORedisClient;
-  Cluster: new (nodes: unknown, options: unknown) => IORedisClient;
-};
-
-/**
- * @internal Options only Bottleneck itself passes to a connection: the event
- * sink of the limiter/Group that built it, and whether the connection owns
- * (connects, listens to, and closes) `client` as well as its subscriber.
- */
-export type ConnectionInternals = { Events?: Events; ownsClient?: boolean };

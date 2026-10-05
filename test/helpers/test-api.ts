@@ -8,9 +8,10 @@ import type {
   RedisConnectionOptions,
 } from "../../src/types";
 import Bottleneck from "../bottleneck";
+import { closeTestClient, makeTestClient } from "./clients";
 import { isFakeClock } from "./clock";
 import { createTaskFns } from "./job-tasks";
-import makeLimiterHelper, { closeTestClient, makeTestClient } from "./limiter";
+import makeLimiterHelper from "./limiter";
 import { wrongType } from "./wrong-type";
 
 export { waitForState } from "./wait-for-state";

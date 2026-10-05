@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
+import type { IORedisConnectionOptions, RedisConnectionOptions } from "../../src/types";
 import Bottleneck from "../bottleneck";
+import { wrongType } from "../helpers/wrong-type";
 
 describe("dist/light smoke", () => {
   it("loads", () => {
@@ -14,9 +16,12 @@ describe("dist/light smoke", () => {
     await limiter.disconnect(false);
   });
 
-  it("throws when clustering datastore is requested", () => {
-    expect(() => {
-      void new Bottleneck({ datastore: "redis" });
-    }).toThrow(/full version of Bottleneck/i);
+  it("throws when a clustering connection is requested", () => {
+    expect(() => new Bottleneck.RedisConnection(wrongType<RedisConnectionOptions>({}))).toThrow(
+      /full version of Bottleneck/i,
+    );
+    expect(() => new Bottleneck.IORedisConnection(wrongType<IORedisConnectionOptions>({}))).toThrow(
+      /full version of Bottleneck/i,
+    );
   });
 });

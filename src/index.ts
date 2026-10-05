@@ -8,7 +8,6 @@ export type {
   BatcherOptions,
   BottleneckEvents,
   BottleneckOptions,
-  ClientsList,
   Counts,
   EventInfo,
   EventInfoDropped,
