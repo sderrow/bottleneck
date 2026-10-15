@@ -1,9 +1,9 @@
 import type Job from "./Job";
 import BottleneckError from "./BottleneckError";
-import DLList from "./DLList";
+import DLList, { type Node } from "./DLList";
 import Events from "./Events";
 
-type JobLike = { options: { priority: number } };
+type JobLike = { options: { priority: number }; _queueNode?: Node<unknown> | undefined };
 
 class Queues<J extends JobLike = Job> {
   Events: Events;
@@ -46,7 +46,13 @@ class Queues<J extends JobLike = Job> {
     if (list == null) {
       throw new BottleneckError(`No queue for priority ${job.options.priority}`);
     }
-    list.push(job);
+    job._queueNode = list.push(job) as Node<unknown>;
+  }
+
+  /** Take `job` out of its priority list in O(1). */
+  remove(job: J): boolean {
+    const node = job._queueNode as Node<J> | undefined;
+    return node != null && (this._lists[job.options.priority]?.remove(node) ?? false);
   }
 
   queued(priority?: number): number {

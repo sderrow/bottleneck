@@ -14,6 +14,25 @@ describe("dist/light smoke", () => {
     await limiter.disconnect(false);
   });
 
+  it("aborts a queued job", async () => {
+    const limiter = new Bottleneck({ maxConcurrent: 1 });
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const blocker = limiter.schedule(() => gate);
+    const controller = new AbortController();
+    const victim = limiter.schedule({ signal: controller.signal }, () => "ran");
+    await limiter._submitLock.schedule(() => Promise.resolve());
+    expect(limiter.queued()).toBe(1);
+    controller.abort();
+    await expect(victim).rejects.toBe(controller.signal.reason);
+    expect(limiter.queued()).toBe(0);
+    release?.();
+    await blocker;
+    await limiter.disconnect(false);
+  });
+
   it("throws when clustering datastore is requested", () => {
     expect(() => {
       void new Bottleneck({ datastore: "redis" });

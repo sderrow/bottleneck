@@ -152,4 +152,45 @@ describe("DLList", () => {
     expect(list.shift()).toStrictEqual(undefined);
     expect(list.first()).toStrictEqual(undefined);
   });
+
+  it("Should remove nodes from anywhere in O(1)", () => {
+    const queues = new FakeQueues();
+    const list = new DLList(...queues.fns);
+    const [a, b, c, d] = [1, 2, 3, 4].map((v) => list.push(v));
+
+    expect(list.remove(b as never)).toBe(true);
+    expect(list.getArray()).toStrictEqual([1, 3, 4]);
+    expect(list.remove(a as never)).toBe(true);
+    expect(list.getArray()).toStrictEqual([3, 4]);
+    expect(list.first()).toStrictEqual(3);
+    expect(list.remove(d as never)).toBe(true);
+    expect(list.getArray()).toStrictEqual([3]);
+    expect(list.length).toStrictEqual(1);
+    expect(queues._length).toStrictEqual(1);
+
+    expect(list.remove(c as never)).toBe(true);
+    expect(list.getArray()).toStrictEqual([]);
+    expect(list.first()).toStrictEqual(undefined);
+    expect(list.length).toStrictEqual(0);
+    expect(queues._length).toStrictEqual(0);
+
+    list.push(5);
+    expect(list.getArray()).toStrictEqual([5]);
+  });
+
+  it("Should not remove a node that is no longer in the list", () => {
+    const queues = new FakeQueues();
+    const list = new DLList(...queues.fns);
+    const a = list.push(1);
+    const b = list.push(2);
+    list.push(3);
+
+    expect(list.shift()).toStrictEqual(1);
+    expect(list.remove(a)).toBe(false);
+    expect(list.remove(b)).toBe(true);
+    expect(list.remove(b)).toBe(false);
+    expect(list.getArray()).toStrictEqual([3]);
+    expect(list.length).toStrictEqual(1);
+    expect(queues._length).toStrictEqual(1);
+  });
 });

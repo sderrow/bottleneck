@@ -6,6 +6,7 @@
 export type BottleneckErrorCode =
   | "DROPPED"
   | "EXPIRED"
+  | "ABORTED"
   | "STOPPED"
   | "DUPLICATE_JOB_ID"
   | "OVERWEIGHT"

@@ -360,6 +360,22 @@ wrapped.withOptions({/* options */}, arg1, arg2);
 | `weight`     | `1`                | Must be an integer equal to or higher than `0`. The `weight` is what increases the number of running jobs (up to `maxConcurrent`) and decreases the `reservoir` value.                                                                                                                |
 | `expiration` | `null` (unlimited) | The number of milliseconds a job is given to complete. Jobs that execute for longer than `expiration` ms will be failed with a `BottleneckError`.                                                                                                                                     |
 | `id`         | `<no-id>`          | You should give an ID to your jobs, it helps with [debugging](#debugging-your-application).                                                                                                                                                                                           |
+| `signal`     | `null`             | An `AbortSignal` that cancels the job if it hasn't started yet. See [Cancelling jobs](#cancelling-jobs).                                                                                                                                                                              |
+
+#### Cancelling jobs
+
+Pass an `AbortSignal` as `signal` to cancel a job that is still waiting. If the signal aborts before the job starts, it is removed from the queue, its task never runs, and its promise rejects with `signal.reason`. This applies even when `rejectOnDrop` is `false`. A signal that is already aborted rejects right away.
+
+```js
+const controller = new AbortController();
+const result = limiter.schedule({ signal: controller.signal }, fetchUser, id);
+controller.abort(); // rejects with an AbortError if the job hasn't started
+
+// Give up on jobs that wait too long: rejects with a TimeoutError
+limiter.schedule({ signal: AbortSignal.timeout(5000) }, fetchUser, id);
+```
+
+Aborting a job that has already started does nothing; to cancel in-flight work, pass the same signal into the task (e.g. to `fetch`). A failure that is the job's own `signal.reason` is treated as a cancellation: the `"failed"` event doesn't fire and the job isn't retried. This covers chained limiters, where an abort in the chained limiter's queue rejects the outer job.
 
 ### Strategies
 
@@ -1061,6 +1077,7 @@ try {
 | ------------------- | ------------------------------------------------------------------- |
 | `DROPPED`           | The job was shed by the queue strategy, or dropped by `stop()`.     |
 | `EXPIRED`           | The job ran longer than its `expiration`.                           |
+| `ABORTED`           | The job's `signal` aborted without a `reason` (Node < 16.14).       |
 | `STOPPED`           | The job was submitted after `stop()`, or `stop()` was called twice. |
 | `DUPLICATE_JOB_ID`  | A job with the same `id` already exists.                            |
 | `OVERWEIGHT`        | The job's `weight` exceeds the limiter's `maxConcurrent`.           |

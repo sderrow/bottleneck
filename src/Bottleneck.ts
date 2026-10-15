@@ -13,6 +13,7 @@ import type {
   StrategyConstants,
 } from "./types";
 import pkg from "../package.json" with { type: "json" };
+import { abortReason } from "./abort";
 import Batcher from "./Batcher";
 import BottleneckError from "./BottleneckError";
 import IORedisConnection from "./cluster/IORedisConnection";
@@ -75,6 +76,7 @@ class Bottleneck {
     weight: 1,
     expiration: null,
     id: "<no-id>",
+    signal: null,
   };
   /** @internal */
   storeDefaults: StoreOptions = {
@@ -174,6 +176,7 @@ class Bottleneck {
 
   constructor(options?: BottleneckOptions, ...invalid: unknown[]) {
     this._addToQueue = this._addToQueueImpl.bind(this);
+    this._abortJob = this._abortJob.bind(this);
     options ??= {};
     this._validateOptions(options, invalid);
     load(options, this.instanceDefaults, this);
@@ -361,7 +364,12 @@ class Bottleneck {
 
       this.Events.trigger("debug", `Drained ${options.id}`, { success, args, options });
 
-      if (success) {
+      if (success && next.options.signal?.aborted) {
+        // Aborted during the register: it already left the queue, but the
+        // slot (and any reservoir/minTime it consumed) was taken for it.
+        await this._store.__free__(index, options.weight);
+        return 0;
+      } else if (success) {
         queue.shift();
         const empty = this.empty();
         if (empty) {
@@ -466,6 +474,10 @@ class Bottleneck {
   async _addToQueueImpl(job: Job): Promise<boolean> {
     let blocked: boolean, reachedHWM: boolean, strategy: unknown;
     const { args, options } = job;
+    // Aborted while RECEIVED: it already rejected and left States.
+    if (options.signal?.aborted) {
+      return false;
+    }
     try {
       ({ reachedHWM, blocked, strategy } = await this._store.__submit__(
         this.queued(),
@@ -474,6 +486,9 @@ class Bottleneck {
     } catch (error) {
       this.Events.trigger("debug", `Could not queue ${options.id}`, { args, options, error });
       job.doDrop({ error });
+      return false;
+    }
+    if (options.signal?.aborted) {
       return false;
     }
 
@@ -504,6 +519,20 @@ class Bottleneck {
     this._queues.push(job);
     await this._drainAll();
     return reachedHWM;
+  }
+
+  /** @internal Only reached while the job is RECEIVED or QUEUED. */
+  _abortJob(job: Job): void {
+    const status = this._states.jobStatus(job.options.id);
+    if (status === "QUEUED") {
+      this._queues.remove(job);
+      job.doAbort();
+      if (this.empty()) {
+        this.Events.trigger("empty");
+      }
+    } else if (status === "RECEIVED") {
+      job.doAbort();
+    }
   }
 
   /** @internal */
@@ -555,7 +584,13 @@ class Bottleneck {
         Bottleneck.prototype.schedule,
         this.schedule,
       ),
+      this._abortJob,
     );
+    const { signal } = job.options;
+    if (signal?.aborted) {
+      job._reject(abortReason(signal));
+      return job.promise;
+    }
     this._receive(job);
     return job.promise;
   }
