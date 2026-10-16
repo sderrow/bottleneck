@@ -1,8 +1,10 @@
 import type { AsyncResource } from "node:async_hooks";
 import type Bottleneck from "./Bottleneck";
+import type { Node } from "./DLList";
 import type Events from "./Events";
 import type States from "./States";
 import type { EventInfo, EventInfoRetryable, JobDefaults, ResolvedJobOptions } from "./types";
+import { abortReason, unwatchAbort, watchAbort } from "./abort";
 import { captureAsyncResource, runWithAsyncResource } from "./async-context";
 import BottleneckError from "./BottleneckError";
 import { load } from "./parser";
@@ -44,6 +46,15 @@ class Job {
   _resolve: (value: unknown) => void = null as never;
   /** @internal */
   _reject: (reason?: unknown) => void = null as never;
+  /**
+   * Called when `options.signal` aborts while the job is RECEIVED or QUEUED.
+   * @internal
+   */
+  _onAbort: ((job: Job) => void) | undefined;
+  /** @internal */
+  _watchingSignal = false;
+  /** This job's node in its priority queue, for O(1) removal. @internal */
+  _queueNode: Node<unknown> | undefined;
 
   constructor(
     task: (...args: never[]) => unknown,
@@ -54,6 +65,7 @@ class Job {
     Events: Events,
     _states: States,
     scheduleStackCapture?: ScheduleStackCapture,
+    onAbort?: (job: Job) => void,
   ) {
     this.task = task;
     this.args = args;
@@ -62,6 +74,7 @@ class Job {
     this._states = _states;
     this.asyncResource = captureAsyncResource();
     this.scheduleStackCapture = scheduleStackCapture;
+    this._onAbort = onAbort;
     this.options = load(options ?? {}, jobDefaults) as ResolvedJobOptions;
     this.options.priority = this._sanitizePriority(this.options.priority);
     if (this.options.id === jobDefaults.id) {
@@ -88,6 +101,7 @@ class Job {
 
   doDrop(params?: { error?: unknown; message?: string }): boolean {
     const { error, message = "This job has been dropped by Bottleneck" } = params || {};
+    this._detachSignal();
     if (this._states.remove(this.options.id)) {
       if (this.rejectOnDrop) {
         this._reject(error ?? new BottleneckError(message, "DROPPED"));
@@ -114,8 +128,15 @@ class Job {
     }
   }
 
+  // Watch only while the job holds its id in States, so an abort can never
+  // land on another job that reuses the id.
   doReceive(): Promise<unknown> | undefined {
     this._states.start(this.options.id);
+    const { signal } = this.options;
+    if (signal != null && this._onAbort != null) {
+      watchAbort(signal, this);
+      this._watchingSignal = true;
+    }
     return this.Events.trigger("received", { args: this.args, options: this.options });
   }
 
@@ -133,11 +154,44 @@ class Job {
   doRun(): Promise<unknown> | undefined {
     if (this.retryCount === 0) {
       this._assertStatus("QUEUED");
+      this._detachSignal();
       this._states.next(this.options.id);
     } else {
       this._assertStatus("EXECUTING");
     }
     return this.Events.trigger("scheduled", { args: this.args, options: this.options });
+  }
+
+  /** @internal */
+  _detachSignal(): void {
+    if (this._watchingSignal) {
+      this._watchingSignal = false;
+      unwatchAbort(this.options.signal as AbortSignal, this);
+    }
+  }
+
+  /** The signal aborted while this job was watching it. @internal */
+  _abort(): void {
+    this._detachSignal();
+    this._onAbort?.(this);
+  }
+
+  /**
+   * Reject with the signal's reason. No "dropped" event, and no schedule
+   * stack: the reason belongs to the caller and may be shared by many jobs.
+   */
+  doAbort(): boolean {
+    this._detachSignal();
+    if (this._states.remove(this.options.id)) {
+      this._reject(abortReason(this.options.signal as AbortSignal));
+      this.Events.trigger("debug", `Aborted ${this.options.id}`, {
+        args: this.args,
+        options: this.options,
+      });
+      return true;
+    } else {
+      return false;
+    }
   }
 
   async doExecute(
@@ -157,6 +211,11 @@ class Job {
       options: this.options as unknown as EventInfo["options"],
       retryCount: this.retryCount,
     };
+    // A retry is an attempt that hasn't started: skip it once the signal aborted.
+    const { signal } = this.options;
+    if (this.retryCount > 0 && signal?.aborted) {
+      return this._onFailure(abortReason(signal), eventInfo, clearGlobalState, run, free);
+    }
     this.Events.trigger("executing", eventInfo);
 
     try {
@@ -210,9 +269,14 @@ class Job {
     run: (retryAfter: number) => unknown,
     free: (options: ResolvedJobOptions, eventInfo: EventInfo) => Promise<unknown>,
   ): Promise<unknown> {
-    error = attachScheduleStack(error, this.scheduleStackCapture);
+    // Once the signal aborts, a failure (whatever its cause: the reason from a
+    // chained limiter or a task that honored the signal, or an unrelated error)
+    // ends the job as a cancellation: no annotation, no "failed", no retry.
+    const { signal } = this.options;
+    const aborted = signal?.aborted === true;
+    error = aborted ? abortReason(signal) : attachScheduleStack(error, this.scheduleStackCapture);
     if (clearGlobalState()) {
-      const retry = await this.Events.trigger("failed", error, eventInfo);
+      const retry = aborted ? null : await this.Events.trigger("failed", error, eventInfo);
       if (retry != null) {
         const retryAfter = ~~(retry as number);
         this.Events.trigger(
@@ -233,6 +297,7 @@ class Job {
 
   doDone(eventInfo: EventInfo): Promise<unknown> | undefined {
     this._assertStatus("EXECUTING");
+    this._detachSignal();
     this._states.next(this.options.id);
     return this.Events.trigger("done", eventInfo);
   }

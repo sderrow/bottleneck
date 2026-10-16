@@ -93,6 +93,24 @@ describe("BottleneckError codes", () => {
     expect(codeOf(err)).toEqual("STOPPED");
   });
 
+  test("aborts without a signal reason carry code ABORTED", async ({ makeLimiter }) => {
+    const limiter = makeLimiter({ maxConcurrent: 1 });
+    // Node < 16.14 aborts without setting `signal.reason`.
+    const signal = {
+      aborted: true,
+      reason: undefined,
+      addEventListener() {},
+      removeEventListener() {},
+    } as unknown as AbortSignal;
+    const err = await capture(
+      limiter.schedule({ signal }, () => "never"),
+      "aborted job should have been rejected",
+    );
+    expect(err).toBeInstanceOf(BottleneckError);
+    expect(codeOf(err)).toEqual("ABORTED");
+    expect((err as Error).message).toEqual("This job was aborted");
+  });
+
   test("constructor misuse carries codes", async () => {
     const invalidArgs = await capture(
       Promise.resolve().then(() => new Bottleneck("nope" as never)),

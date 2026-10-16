@@ -89,6 +89,13 @@ export type JobOptions = {
   readonly expiration?: number | null;
   /** Optional identifier, helps with debug output. */
   readonly id?: string | null;
+  /**
+   * Cancels the job if it hasn't started yet: it rejects with `signal.reason`
+   * (even when `rejectOnDrop` is false) and the task never runs. Aborting a
+   * job that has started does nothing; pass the same signal into the task to
+   * cancel in-flight work.
+   */
+  readonly signal?: AbortSignal | null;
 };
 
 /** Options accepted by `stop()`. */
@@ -256,6 +263,7 @@ export type ResolvedJobOptions = {
   weight: number;
   expiration: number | null;
   id: string;
+  signal?: AbortSignal | null;
   [key: string]: unknown;
 };
 
