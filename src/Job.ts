@@ -211,6 +211,11 @@ class Job {
       options: this.options as unknown as EventInfo["options"],
       retryCount: this.retryCount,
     };
+    // A retry is an attempt that hasn't started: skip it once the signal aborted.
+    const { signal } = this.options;
+    if (this.retryCount > 0 && signal?.aborted) {
+      return this._onFailure(abortReason(signal), eventInfo, clearGlobalState, run, free);
+    }
     this.Events.trigger("executing", eventInfo);
 
     try {
@@ -264,13 +269,12 @@ class Job {
     run: (retryAfter: number) => unknown,
     free: (options: ResolvedJobOptions, eventInfo: EventInfo) => Promise<unknown>,
   ): Promise<unknown> {
-    // The job's own abort reason (a chained limiter's abort, or a task that
-    // honored the signal) is a cancellation: no annotation, no retry.
+    // Once the signal aborts, a failure (whatever its cause: the reason from a
+    // chained limiter or a task that honored the signal, or an unrelated error)
+    // ends the job as a cancellation: no annotation, no "failed", no retry.
     const { signal } = this.options;
-    const aborted = signal?.aborted === true && error === abortReason(signal);
-    if (!aborted) {
-      error = attachScheduleStack(error, this.scheduleStackCapture);
-    }
+    const aborted = signal?.aborted === true;
+    error = aborted ? abortReason(signal) : attachScheduleStack(error, this.scheduleStackCapture);
     if (clearGlobalState()) {
       const retry = aborted ? null : await this.Events.trigger("failed", error, eventInfo);
       if (retry != null) {

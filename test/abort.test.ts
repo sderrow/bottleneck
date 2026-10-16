@@ -245,4 +245,39 @@ describe("Abort signal", () => {
     expect(failed).not.toHaveBeenCalled();
     expect(reason.stack).toBe(stack);
   });
+
+  test("aborting during a retry delay skips the retry", async ({ makeLimiter }) => {
+    const limiter = makeLimiter({ maxConcurrent: 1 });
+    const controller = new AbortController();
+    const reason = new Error("cancelled");
+    const failed = vi.fn<() => number>(() => 10);
+    limiter.on("failed", failed);
+    // "retry" fires just before the delay starts: the job is between attempts.
+    limiter.on("retry", () => controller.abort(reason));
+    const task = vi.fn<() => never>(() => {
+      throw new Error("ignores the signal");
+    });
+
+    await expect(limiter.schedule({ signal: controller.signal }, task)).rejects.toBe(reason);
+    expect(task).toHaveBeenCalledTimes(1);
+    expect(failed).toHaveBeenCalledTimes(1);
+    expect(await limiter.running()).toEqual(0);
+    await expect(limiter.schedule(() => "next")).resolves.toEqual("next");
+  });
+
+  test("a failure after the signal aborted is not retried", async ({ makeLimiter }) => {
+    const limiter = makeLimiter({ maxConcurrent: 1 });
+    const controller = new AbortController();
+    const reason = new Error("cancelled");
+    const failed = vi.fn<() => number>(() => 0);
+    limiter.on("failed", failed);
+    const task = vi.fn<() => never>(() => {
+      controller.abort(reason);
+      throw new Error("unrelated failure");
+    });
+
+    await expect(limiter.schedule({ signal: controller.signal }, task)).rejects.toBe(reason);
+    expect(task).toHaveBeenCalledTimes(1);
+    expect(failed).not.toHaveBeenCalled();
+  });
 });

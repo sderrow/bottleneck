@@ -375,7 +375,7 @@ controller.abort(); // rejects with an AbortError if the job hasn't started
 limiter.schedule({ signal: AbortSignal.timeout(5000) }, fetchUser, id);
 ```
 
-Aborting a job that has already started does nothing; to cancel in-flight work, pass the same signal into the task (e.g. to `fetch`). A failure that is the job's own `signal.reason` is treated as a cancellation: the `"failed"` event doesn't fire and the job isn't retried. This covers chained limiters, where an abort in the chained limiter's queue rejects the outer job.
+Aborting a job that has already started doesn't interrupt it; to cancel in-flight work, pass the same signal into the task (e.g. to `fetch`). Once the signal has aborted, the job won't start another attempt: if the running attempt fails, or the abort lands during a retry delay, the job rejects with `signal.reason` without firing the `"failed"` event or retrying. This also covers chained limiters, where an abort in the chained limiter's queue rejects the outer job.
 
 ### Strategies
 
