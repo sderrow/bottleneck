@@ -92,7 +92,9 @@ class RedisDatastore {
     if (!this._disconnecting) {
       this.heartbeat = setDetachedInterval(async () => {
         try {
-          const running = Number((await this.runScript("heartbeat", [])) ?? 0);
+          const counts = this.instance.counts();
+          const pending = counts.RECEIVED + counts.QUEUED + counts.RUNNING + counts.EXECUTING;
+          const running = Number((await this.runScript("heartbeat", [pending])) ?? 0);
           if (running > 0 || this._orphaned > 0) {
             this._orphaned = running;
             this.instance.Events.trigger("orphaned-jobs", { running });
