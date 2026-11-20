@@ -883,6 +883,8 @@ const limiter = new Bottleneck({
 
 **Note: When using Groups**, the `timeout` option has a default of `300000` milliseconds and the generated limiters automatically receive an `id` with the pattern `${group.id}-${KEY}`.
 
+**Note: `timeout` and active jobs.** The limiter's state counts as inactive once no limiter in the Cluster has received, queued, running or executing jobs. A limiter with jobs renews the TTL on every heartbeat, so `heartbeatInterval` (default `5000`) must be shorter than `timeout`. A job that never settles therefore keeps the state, and the capacity it holds, until it reaches its `expiration`. A crashed client's job with no `expiration` holds its capacity for as long as any other limiter has jobs on that key.
+
 ### Important considerations when Clustering
 
 The first limiter connecting to Redis will store its [constructor options](#constructor) on Redis and all subsequent limiters will be using those settings. You can alter the constructor options used by all the connected limiters by calling `updateSettings()`. The `clearDatastore` option instructs a new limiter to wipe any previous Bottleneck data (for that `id`), including previously stored settings.

@@ -15,6 +15,11 @@ import { load, overwrite } from "./parser";
 
 type Connection = RedisConnection | IORedisConnection;
 
+function hasPendingJobs(limiter: Bottleneck): boolean {
+  const counts = limiter.counts();
+  return counts.RECEIVED + counts.QUEUED + counts.RUNNING + counts.EXECUTING > 0;
+}
+
 class Group {
   /** @internal */
   defaults = {
@@ -155,22 +160,38 @@ class Group {
   _startAutoCleanup(): void {
     clearInterval(this.interval);
 
-    this.interval = setDetachedInterval(async () => {
-      const time = Date.now();
-      for (const [k, v] of Object.entries(this.instances)) {
-        try {
-          if (
-            await (
-              v._store as unknown as { __groupCheck__: (t: number) => Promise<boolean> }
-            ).__groupCheck__(time)
-          ) {
-            await this.deleteKey(k);
-          }
-        } catch (e) {
-          v.Events.trigger("error", e);
+    this.interval = setDetachedInterval(() => this._deleteInactive(), this.timeout / 2).unref?.();
+  }
+
+  /** @internal */
+  async _deleteInactive(time = Date.now()): Promise<void> {
+    // With Redis, a limiter's keys can expire while it still holds jobs,
+    // e.g. behind a job that outlives the Group timeout. Disconnecting it
+    // would leave its queued jobs pending forever. Local limiters are still
+    // deleted: there, the replacement frees a key whose job never settles.
+    const connection = this.connection;
+    for (const [k, v] of Object.entries(this.instances)) {
+      try {
+        if (connection != null && hasPendingJobs(v)) continue;
+        const inactive = await (
+          v._store as unknown as { __groupCheck__: (t: number) => Promise<boolean> }
+        ).__groupCheck__(time);
+        if (!inactive || this.instances[k] !== v) continue;
+        if (connection == null) {
+          await this.deleteKey(k);
+          continue;
         }
+        // key() can hand the limiter jobs during each round trip: check again
+        // after each one, with no await between the last check and removal.
+        if (hasPendingJobs(v)) continue;
+        await connection.__runCommand__(["del", ...Scripts.allKeys(`${this.id}-${k}`)]);
+        if (this.instances[k] !== v || hasPendingJobs(v)) continue;
+        delete this.instances[k];
+        await v.disconnect();
+      } catch (e) {
+        v.Events.trigger("error", e);
       }
-    }, this.timeout / 2).unref?.();
+    }
   }
 
   updateSettings(options: BottleneckOptions = {}): void {

@@ -57,6 +57,40 @@ function captureCapacityPriorityTargets(...limiters: Limiter[]) {
   });
   return targeted;
 }
+/**
+ * Count the limiter's heartbeat scripts. `next()` resolves once a heartbeat
+ * started after the call has completed: scripts on one connection run in the
+ * order they are sent, so the next completion past the current start count is
+ * one that started later.
+ */
+function watchHeartbeats(limiter: Limiter) {
+  const connection = redisStore(limiter).connection;
+  const original = connection.__runScript__.bind(connection);
+  const id = redisStore(limiter).originalId;
+  let started = 0;
+  let completed = 0;
+  connection.__runScript__ = async (name: ScriptName, scriptId: string, args: unknown[]) => {
+    const isHeartbeat = name === "heartbeat" && scriptId === id;
+    if (isHeartbeat) started += 1;
+    try {
+      return await original(name, scriptId, args);
+    } finally {
+      if (isHeartbeat) completed += 1;
+    }
+  };
+  return {
+    async next() {
+      const after = started;
+      await waitForState(() => {
+        expect(completed).toBeGreaterThan(after);
+      });
+    },
+    restore() {
+      connection.__runScript__ = original;
+    },
+  };
+}
+
 describe("Cluster coordination", () => {
   if (process.env.DATASTORE !== "redis" && process.env.DATASTORE !== "ioredis") {
     throw new Error("DATASTORE must be redis or ioredis");
@@ -554,6 +588,211 @@ describe("Cluster coordination", () => {
     await sleep(400);
     const count = await countKeys(limiter);
     expect(count).toEqual(0);
+  });
+
+  test("Should keep a Group limiter that holds jobs when its Redis keys are gone", async ({
+    harness: h,
+    makeGroup,
+  }) => {
+    const group = makeGroup({
+      datastore: process.env.DATASTORE,
+      clearDatastore: true,
+      maxConcurrent: 1,
+      timeout: 10000,
+      heartbeatInterval: 50,
+    });
+    clearInterval(group.interval); // cleanup passes are run by the test
+    const limiter = group.key("busy");
+    const hold = deferred();
+    const first = limiter.schedule(h.deferredPromise, hold.signal, null, 1);
+    const second = limiter.schedule(h.promise, null, 2);
+    await waitForState(() => {
+      expect(limiter.counts()).toMatchObject({ QUEUED: 1, EXECUTING: 1 });
+    });
+
+    // Stands for keys that expired or were evicted while the jobs are held
+    const heartbeats = watchHeartbeats(limiter);
+    try {
+      await deleteKeys(limiter);
+      await group._deleteInactive();
+      expect(group.instances["busy"]).toBe(limiter);
+      await heartbeats.next();
+    } finally {
+      heartbeats.restore();
+    }
+    expect(limiter.counts()).toMatchObject({ QUEUED: 1, EXECUTING: 1 });
+
+    hold.release();
+    await expect(first).resolves.toEqual([1]);
+    await expect(second).resolves.toEqual([2]);
+    expect(h.log).toHaveCallOrder([[1], [2]]);
+  });
+
+  test("Should renew a busy Group limiter's Redis keys on each heartbeat", async ({
+    harness: h,
+    makeGroup,
+  }) => {
+    const timeout = 10000;
+    const group = makeGroup({
+      datastore: process.env.DATASTORE,
+      clearDatastore: true,
+      maxConcurrent: 1,
+      timeout,
+      heartbeatInterval: 50,
+    });
+    clearInterval(group.interval);
+    const limiter = group.key("renewed");
+    const [settingsKey] = limiterKeys(limiter);
+    const hold = deferred();
+    const first = limiter.schedule(h.deferredPromise, hold.signal, null, 1);
+    const second = limiter.schedule(h.promise, null, 2);
+    await waitForState(() => {
+      expect(limiter.counts()).toMatchObject({ QUEUED: 1, EXECUTING: 1 });
+    });
+
+    // A TTL far above the timeout: only a renewal brings it back under it
+    const heartbeats = watchHeartbeats(limiter);
+    try {
+      await runCommand(limiter, "pexpire", [settingsKey, String(60 * timeout)]);
+      await heartbeats.next();
+    } finally {
+      heartbeats.restore();
+    }
+    const ttl = await runCommand(limiter, "pttl", [settingsKey]);
+    expect(ttl).toBeGreaterThan(0);
+    expect(ttl).toBeLessThanOrEqual(timeout);
+    expect(limiter.counts()).toMatchObject({ QUEUED: 1, EXECUTING: 1 });
+
+    hold.release();
+    await expect(first).resolves.toEqual([1]);
+    await expect(second).resolves.toEqual([2]);
+  });
+
+  test("Should not shorten a busy Group limiter's Redis keys below minTime", async ({
+    harness: h,
+    makeGroup,
+  }) => {
+    const timeout = 1000;
+    const group = makeGroup({
+      datastore: process.env.DATASTORE,
+      clearDatastore: true,
+      maxConcurrent: 1,
+      minTime: 60 * timeout,
+      timeout,
+      heartbeatInterval: 50,
+    });
+    clearInterval(group.interval);
+    const limiter = group.key("spaced");
+    const [settingsKey] = limiterKeys(limiter);
+    const hold = deferred();
+    const first = limiter.schedule(h.deferredPromise, hold.signal, null, 1);
+    await waitForState(() => {
+      expect(limiter.counts()).toMatchObject({ EXECUTING: 1 });
+    });
+
+    // register set the TTL to outlive the minTime gap; renewals must keep it
+    const heartbeats = watchHeartbeats(limiter);
+    try {
+      await heartbeats.next();
+    } finally {
+      heartbeats.restore();
+    }
+    expect(await runCommand(limiter, "pttl", [settingsKey])).toBeGreaterThan(timeout);
+
+    hold.release();
+    await expect(first).resolves.toEqual([1]);
+  });
+
+  test("Should not renew an idle Group limiter's Redis keys", async ({ harness: h, makeGroup }) => {
+    const timeout = 10000;
+    const group = makeGroup({
+      datastore: process.env.DATASTORE,
+      clearDatastore: true,
+      timeout,
+      heartbeatInterval: 50,
+    });
+    clearInterval(group.interval);
+    const limiter = group.key("idle");
+    const [settingsKey] = limiterKeys(limiter);
+    await expect(limiter.schedule(h.promise, null, 1)).resolves.toEqual([1]);
+
+    const heartbeats = watchHeartbeats(limiter);
+    try {
+      await runCommand(limiter, "pexpire", [settingsKey, String(60 * timeout)]);
+      await heartbeats.next();
+    } finally {
+      heartbeats.restore();
+    }
+    expect(await runCommand(limiter, "pttl", [settingsKey])).toBeGreaterThan(timeout);
+  });
+
+  test("Should keep a Group limiter that receives jobs during the group check", async ({
+    harness: h,
+    makeGroup,
+  }) => {
+    const group = makeGroup({
+      datastore: process.env.DATASTORE,
+      clearDatastore: true,
+      maxConcurrent: 1,
+      timeout: 300,
+      heartbeatInterval: 50,
+    });
+    clearInterval(group.interval);
+    const limiter = group.key("late");
+    await expect(limiter.schedule(h.promise, null, 1)).resolves.toEqual([1]);
+    await waitForState(async () => {
+      expect(await countKeys(limiter)).toBe(0);
+    });
+
+    const store = limiter._store as unknown as { __groupCheck__: (t: number) => Promise<boolean> };
+    const groupCheck = store.__groupCheck__.bind(store);
+    let late: Promise<unknown>[] = [];
+    store.__groupCheck__ = async (time) => {
+      const inactive = await groupCheck(time);
+      late = [2, 3].map((n) => group.key("late").schedule(h.promise, null, n));
+      return inactive;
+    };
+    await group._deleteInactive();
+    expect(group.instances["late"]).toBe(limiter);
+    await expect(Promise.all(late)).resolves.toEqual([[2], [3]]);
+  });
+
+  test("Should keep a Group limiter that receives jobs while its Redis keys are deleted", async ({
+    harness: h,
+    makeGroup,
+  }) => {
+    const group = makeGroup({
+      datastore: process.env.DATASTORE,
+      clearDatastore: true,
+      maxConcurrent: 1,
+      timeout: 300,
+      heartbeatInterval: 50,
+    });
+    clearInterval(group.interval);
+    const limiter = group.key("deleting");
+    await expect(limiter.schedule(h.promise, null, 1)).resolves.toEqual([1]);
+    await waitForState(async () => {
+      expect(await countKeys(limiter)).toBe(0);
+    });
+
+    const connection = defined(group.connection);
+    const originalRunCommand = connection.__runCommand__.bind(connection);
+    let late: Promise<unknown>[] = [];
+    connection.__runCommand__ = async (cmd) => {
+      const reply = await originalRunCommand(cmd);
+      if (cmd[0] === "del" && late.length === 0) {
+        late = [2, 3].map((n) => group.key("deleting").schedule(h.promise, null, n));
+      }
+      return reply;
+    };
+    try {
+      await group._deleteInactive();
+    } finally {
+      connection.__runCommand__ = originalRunCommand;
+    }
+    expect(late.length).toBe(2);
+    expect(group.instances["deleting"]).toBe(limiter);
+    await expect(Promise.all(late)).resolves.toEqual([[2], [3]]);
   });
 
   test("Should delete Redis key when manually deleting a group key", async ({
